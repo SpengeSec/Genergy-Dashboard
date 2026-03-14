@@ -144,7 +144,7 @@ Open HACS → Frontend, and install all 5 required plugins listed above. Restart
 4. Restart Home Assistant
 5. Hard-refresh your browser: **Ctrl+Shift+R** (Windows/Linux) or **Cmd+Shift+R** (Mac)
 
-> **Note**: HACS automatically registers the main JS file as a Lovelace resource. The dashboard JS auto-imports the house card, so only one resource entry is needed. The resource URL will be something like `/hacsfiles/sigenergy-dashboard/dist/sigenergy-dashboard.js` — this is correct and expected.
+> **Note**: HACS automatically registers the main JS file as a Lovelace resource. The dashboard JS auto-imports the house card, so only one resource entry is needed. The resource URL will be something like `/hacsfiles/Genergy-Dashboard/dist/genergy-dashboard.js` — this is correct and expected.
 
 #### Manual Installation
 
