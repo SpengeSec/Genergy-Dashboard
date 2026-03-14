@@ -1,4 +1,4 @@
-# Sigenergy Dashboard
+# Genergy  Dashboard — A Sigenergy Themed Energy Dashboard
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
