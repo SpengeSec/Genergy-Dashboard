@@ -145,6 +145,8 @@ Open HACS → Frontend, and install all 5 required plugins listed above. Restart
 5. Hard-refresh your browser: **Ctrl+Shift+R** (Windows/Linux) or **Cmd+Shift+R** (Mac)
 
 > **Note**: HACS automatically registers the main JS file as a Lovelace resource. The dashboard JS auto-imports the house card, so only one resource entry is needed. The resource URL will be something like `/hacsfiles/Genergy-Dashboard/dist/genergy-dashboard.js` — this is correct and expected.
+>
+> **Important**: HACS installs the JS resource but **cannot create a dashboard automatically** — this is a HACS limitation, not a bug. You must create the dashboard manually using the bootstrap YAML provided below (see [Step 5](#step-5-create-the-dashboard)).
 
 #### Manual Installation
 
@@ -185,15 +187,20 @@ The package includes 13 images used by the dashboard:
 
 ### Step 5: Create the Dashboard
 
-1. Go to **Settings** → **Dashboards** → **Add Dashboard**
-2. Name: `Sigenergy`
-3. URL path: `dashboard-sigenergy` (**important**: URL must be exactly `dashboard-sigenergy` for config persistence to work)
-4. Set type to **Panel (single card)** mode
-5. Edit the dashboard and add a `custom:sigenergy-settings-card`:
-   ```yaml
-   type: custom:sigenergy-settings-card
-   ```
-6. The settings card will guide you through the rest of the setup
+1. In Home Assistant go to **Settings → Dashboards → Add Dashboard**
+2. Set:
+   - **Title**: `Sigenergy`
+   - **URL path**: `dashboard-sigenergy` — exact spelling, case-sensitive
+   - **Icon**: `mdi:solar-power` (optional)
+3. Click **Create**
+4. Open the new dashboard
+5. Click the **three-dot menu (⋮) → Edit → Raw configuration editor**
+6. Select all existing content and delete it
+7. Paste the entire contents of [`dashboards/sigenergy.yaml`](dashboards/sigenergy.yaml)
+8. Click **Save**
+9. The Sigenergy Settings card will appear — use it to configure your entities, features, and preferences. The full dashboard builds automatically after saving your first configuration.
+
+> **Warning**: The URL path **must** be exactly `dashboard-sigenergy` — the settings card uses this path to persist your configuration. A different path means settings will not save correctly.
 
 ---
 
@@ -486,6 +493,8 @@ sigenergy-dashboard/
 ├── hacs.json                          # HACS plugin metadata
 ├── LICENSE                            # CC BY-NC-SA 4.0 license
 ├── README.md                          # This file
+├── dashboards/
+│   └── sigenergy.yaml                 # Bootstrap dashboard YAML (paste into Raw Editor)
 ├── dist/
 │   ├── sigenergy-dashboard.js         # Bundle: settings card + device card + dashboard builder
 │   ├── sigenergy-house-card.js        # Animated house card (Lit Element)
