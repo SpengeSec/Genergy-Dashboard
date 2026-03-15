@@ -1,0 +1,19 @@
+# Sigenergy Dashboard — Bootstrap Configuration
+#
+# Paste this into your dashboard's Raw Configuration Editor to get started.
+# The Settings card will guide you through the rest of the setup.
+#
+# How to use:
+# 1. Settings → Dashboards → Add Dashboard
+# 2. Title: Sigenergy  |  URL path: dashboard-sigenergy  (exact, case-sensitive)
+# 3. Open the new dashboard → three-dot menu → Edit → Raw configuration editor
+# 4. Replace all content with this file, click Save
+# 5. The Settings card loads — configure your entities and you're done.
+
+title: Sigenergy
+views:
+  - title: Overview
+    path: overview
+    panel: true
+    cards:
+      - type: custom:sigenergy-settings-card
