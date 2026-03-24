@@ -1,0 +1,1257 @@
+{
+  "views": [
+    {
+      "title": "Overview",
+      "path": "overview",
+      "icon": "mdi:home",
+      "panel": true,
+      "theme": "sigenergy_dark",
+      "cards": [
+        {
+          "type": "custom:layout-card",
+          "layout_type": "custom:grid-layout",
+          "layout": {
+            "grid-template-columns": "1fr",
+            "grid-template-rows": "repeat(10, auto)",
+            "gap": "4px 8px",
+            "padding": "4px 8px",
+            "mediaquery": {
+              "(min-width: 1201px)": {
+                "grid-template-columns": "minmax(0, 4fr) minmax(0, 3.5fr) minmax(420px, 4.5fr)",
+                "grid-template-rows": "auto auto auto"
+              },
+              "(min-width: 801px) and (max-width: 1200px)": {
+                "grid-template-columns": "1fr 1fr",
+                "grid-template-rows": "repeat(6, auto)"
+              }
+            },
+            "grid-gap": "4px 8px"
+          },
+          "cards": [
+            {
+              "type": "vertical-stack",
+              "cards": [
+                {
+                  "type": "custom:sigenergy-house-card",
+                  "entities": {
+                    "solar_power": "__solar_power__",
+                    "load_power": "__load_power__",
+                    "battery_power": "__battery_power__",
+                    "battery_soc": "__battery_soc__",
+                    "grid_import": "__grid_power__",
+                    "grid_export": "__grid_power__",
+                    "grid_active": "__grid_power__",
+                    "grid_power": "__grid_power__",
+                    "sun": "sun.sun",
+                    "ev_charger_power": "",
+                    "ev_charger_state": "",
+                    "weather": "__weather__",
+                    "heat_pump_power": "__heat_pump_power__"
+                  },
+                  "features": {
+                    "ev_charger": true,
+                    "ev_vehicle": true,
+                    "heat_pump": true,
+                    "grid": true,
+                    "hide_cables": false
+                  },
+                  "image_path": "/local/Sigenergy",
+                  "edit_paths": false,
+                  "paths": {
+                    "solar": "M 450 135 L 610 175 L 500 320 L 505 555",
+                    "home": "M 510 555 L 505 320 L 505 320 L 655 120",
+                    "battery": "M 570 595 L 480 565 L 480 785 L 570 820 L 570 600",
+                    "grid": "M 600 645 L 740 695 L 790 695 L 820 690 L 815 855",
+                    "ev": "M 75 485 L 75 455 L 290 535 L 290 585 L 350 565 L 475 600",
+                    "heat_pump": "M 515 555 L 510 325 L 835 420 L 895 475"
+                  },
+                  "soc_ring_cx": 540,
+                  "soc_ring_cy": 620,
+                  "soc_ring_r": 15,
+                  "soc_ring_skew_x": -7,
+                  "soc_ring_skew_y": 26.5,
+                  "card_mod": {
+                    "style": "ha-card { overflow: hidden !important; }\n.house-container { width: 100% !important; overflow: hidden !important; }\n.house-container img { width: 100% !important; height: auto !important; }\n.house-container svg { width: 100% !important; height: auto !important; }"
+                  }
+                },
+                {
+                  "type": "conditional",
+                  "conditions": [
+                    {
+                      "entity": "__emhass_mode__",
+                      "state_not": "unavailable"
+                    }
+                  ],
+                  "card": {
+                    "type": "custom:mushroom-template-card",
+                    "entity": "__emhass_mode__",
+                    "primary": "{{ states('__emhass_mode__') }}",
+                    "secondary": "{{ states('__emhass_reason__')[:60] }}",
+                    "icon": "{% if states('__emhass_mode__') == 'CHARGE' %}mdi:battery-charging{% elif states('__emhass_mode__') == 'DISCHARGE' %}mdi:battery-arrow-down{% else %}mdi:battery-clock{% endif %}",
+                    "icon_color": "{% if states('__emhass_mode__') == 'CHARGE' %}green{% elif states('__emhass_mode__') == 'DISCHARGE' %}orange{% else %}grey{% endif %}",
+                    "fill_container": true,
+                    "multiline_secondary": true,
+                    "card_mod": {
+                      "style": "ha-card { background: linear-gradient(135deg, rgba(0,180,120,0.15), rgba(0,120,80,0.08)) !important; border: 1px solid rgba(0,180,120,0.25) !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 15px; --card-secondary-font-size: 11px; overflow: visible !important; white-space: normal !important; }"
+                    }
+                  }
+                },
+                {
+                  "type": "custom:mushroom-chips-card",
+                  "alignment": "center",
+                  "chips": [
+                    {
+                      "type": "entity",
+                      "entity": "__solcast_today__",
+                      "icon": "mdi:weather-sunny",
+                      "name": "Today"
+                    },
+                    {
+                      "type": "entity",
+                      "entity": "__solcast_tomorrow__",
+                      "icon": "mdi:weather-sunny-alert",
+                      "name": "Tomorrow"
+                    },
+                    {
+                      "type": "entity",
+                      "entity": "__solcast_remaining__",
+                      "icon": "mdi:timelapse",
+                      "name": "Remaining"
+                    }
+                  ],
+                  "card_mod": {
+                    "style": "ha-card { background: transparent !important; box-shadow: none !important; }"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "vertical-stack",
+              "cards": [
+                {
+                  "type": "custom:mushroom-template-card",
+                  "primary": "Energy Flow Today",
+                  "icon": "mdi:chart-sankey-variant",
+                  "icon_color": "teal",
+                  "card_mod": {
+                    "style": {
+                      "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: white !important; letter-spacing: 0.5px; }",
+                      ".": "ha-card { background-color: transparent !important; border: none !important; }"
+                    }
+                  }
+                },
+                {
+                  "type": "custom:sankey-chart",
+                  "show_names": true,
+                  "show_states": true,
+                  "show_units": true,
+                  "show_icons": false,
+                  "round": 2,
+                  "height": 480,
+                  "wide": true,
+                  "min_box_size": 50,
+                  "min_box_distance": 8,
+                  "unit_prefix": "k",
+                  "energy_date_selection": false,
+                  "sections": [
+                    {
+                      "entities": [
+                        {
+                          "entity_id": "__battery_discharge_today__",
+                          "name": "Battery",
+                          "color": "#00d4b8",
+                          "children": [
+                            "__grid_export_today__",
+                            "__load_energy_today__"
+                          ]
+                        },
+                        {
+                          "entity_id": "__solar_energy_today__",
+                          "name": "Solar",
+                          "color": "#c8b84a",
+                          "children": [
+                            "__battery_charge_today__",
+                            "__grid_export_today__",
+                            "__load_energy_today__"
+                          ]
+                        },
+                        {
+                          "entity_id": "__grid_import_today__",
+                          "name": "Grid",
+                          "color": "#6b7fd4",
+                          "children": [
+                            "__load_energy_today__"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "entities": [
+                        {
+                          "entity_id": "__load_energy_today__",
+                          "name": "Load",
+                          "color": "#e8337f"
+                        },
+                        {
+                          "entity_id": "__battery_charge_today__",
+                          "name": "Battery",
+                          "color": "#00d4b8"
+                        },
+                        {
+                          "entity_id": "__grid_export_today__",
+                          "name": "Grid",
+                          "color": "#7c5cbf"
+                        }
+                      ]
+                    }
+                  ],
+                  "card_mod": {
+                    "style": {
+                      "sankey-chart-base$": "{% set pv = states('__solar_energy_today__') | float(0) %}\n{% set bat_d = states('__battery_discharge_today__') | float(0) %}\n{% set grid_i = states('__grid_import_today__') | float(0) %}\n{% set bat_c = states('__battery_charge_today__') | float(0) %}\n{% set load = states('__load_energy_today__') | float(0) %}\n{% set grid_e = states('__grid_export_today__') | float(0) %}\n{% set src = pv + bat_d + grid_i %}\n{% set dst = bat_c + load + grid_e %}\n:host {\n  --pct-src-solar: \"{{ '%0.2f' | format((pv/src*100) if src > 0 else 0) }}%\";\n  --pct-src-bat: \"{{ '%0.2f' | format((bat_d/src*100) if src > 0 else 0) }}%\";\n  --pct-src-grid: \"{{ '%0.2f' | format((grid_i/src*100) if src > 0 else 0) }}%\";\n  --pct-dst-bat: \"{{ '%0.2f' | format((bat_c/dst*100) if dst > 0 else 0) }}%\";\n  --pct-dst-load: \"{{ '%0.2f' | format((load/dst*100) if dst > 0 else 0) }}%\";\n  --pct-dst-grid: \"{{ '%0.2f' | format((grid_e/dst*100) if dst > 0 else 0) }}%\";\n}\nha-card {\n  background: #1a1f2e !important;\n  border: none !important;\n  border-radius: 4px !important;\n  overflow: hidden !important;\n  padding: 2px !important;\n  max-width: 100% !important;\n}\npath[fill-opacity] {\n  fill-opacity: 0.55 !important;\n}\n.container, .section {\n  overflow: visible !important;\n}\n\n.box {\n  overflow: hidden !important;\n  position: relative !important;\n}\n/* Source side: wide bars */\n.section:first-of-type .box > div:first-child {\n  min-width: 90px !important;\n  border-radius: 8px 0 0 8px !important;\n}\n/* Destination side: reverse flex, bar at right edge */\n\n.section:last-of-type .box > div:first-child {\n  min-width: 90px !important;\n  border-radius: 0 8px 8px 0 !important;\n}\n/* Labels: positioned top-to-bottom inside bar */\n.box .label {\n  position: absolute !important;\n  top: 2px !important;\n  bottom: 2px !important;\n  transform: none !important;\n  display: flex !important;\n  flex-direction: column !important;\n  justify-content: flex-start !important;\n  gap: 0px !important;\n  line-height: normal !important;\n  z-index: 2 !important;\n  width: auto !important;\n  max-width: 160px !important;\n  overflow: visible !important;\n  padding: 0 6px !important;\n  background: transparent !important;\n  margin: 0 !important;\n}\n/* Source labels: left-aligned */\n.section:first-of-type .box .label {\n  left: 6px !important;\n  align-items: flex-start !important;\n  text-align: left !important;\n}\n/* Destination labels: right-aligned */\n.section:last-of-type .box .label {\n  right: 6px !important;\n  align-items: flex-end !important;\n  text-align: right !important;\n}\n/* Name pill badge */\n.box .label .name {\n  order: -2 !important;\n  background: rgba(0,0,0,0.45) !important;\n  border: 1.5px solid rgba(255,255,255,0.3) !important;\n  border-radius: 10px !important;\n  padding: 1px 8px !important;\n  font-size: 7.5px !important;\n  font-weight: 700 !important;\n  letter-spacing: 1px !important;\n  text-transform: uppercase !important;\n  margin-bottom: 2px !important;\n  white-space: nowrap !important;\n  color: #fff !important;\n  width: fit-content !important;\n}\n/* Color-coded pill borders */\n.box > div[title*=\"Solar\"] ~ .label .name { border-color: #c8b84a !important; }\n.box > div[title*=\"Battery\"] ~ .label .name { border-color: #00d4b8 !important; }\n.section:first-of-type .box > div[title*=\"Grid\"] ~ .label .name { border-color: #6b7fd4 !important; }\n.section:last-of-type .box > div[title*=\"Grid\"] ~ .label .name { border-color: #7c5cbf !important; }\n.box > div[title*=\"Load\"] ~ .label .name { border-color: #e8337f !important; }\n/* State value container */\n.box .label > span:first-child {\n  order: -1 !important;\n  display: flex !important;\n  flex-direction: column !important;\n}\n.box {\n  min-height: 30px !important;\n}\n.box .label .state {\n  font-size: 22px !important;\n  font-weight: 800 !important;\n  color: #fff !important;\n  line-height: 1.1 !important;\n  text-shadow: 0 1px 4px rgba(0,0,0,0.7) !important;\n}\n.box .label .unit {\n  font-size: 10px !important;\n  font-weight: 500 !important;\n  color: rgba(255,255,255,0.65) !important;\n  text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;\n}\n/* Percentage labels - pushed to bottom */\n.box .label::after {\n  font-size: 9px !important;\n  font-weight: 600 !important;\n  color: rgba(255,255,255,0.55) !important;\n  margin-top: auto !important;\n  text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;\n  white-space: nowrap !important;\n}\n/* Source percentages */\n.section:first-of-type .box > div[title*=\"Solar\"] ~ .label::after { content: var(--pct-src-solar); }\n.section:first-of-type .box > div[title*=\"Battery\"] ~ .label::after { content: var(--pct-src-bat); }\n.section:first-of-type .box > div[title*=\"Grid\"] ~ .label::after { content: var(--pct-src-grid); }\n/* Destination percentages */\n.section:last-of-type .box > div[title*=\"Battery\"] ~ .label::after { content: var(--pct-dst-bat); }\n.section:last-of-type .box > div[title*=\"Load\"] ~ .label::after { content: var(--pct-dst-load); }\n.section:last-of-type .box > div[title*=\"Grid\"] ~ .label::after { content: var(--pct-dst-grid); }\n/* Mobile-responsive sankey */\n@media (max-width: 800px) {\n  .section:first-of-type .box > div:first-child { min-width: 65px !important; }\n  .section:last-of-type .box > div:first-child { min-width: 65px !important; }\n  \n  .box .label .state { font-size: 16px !important; }\n  .box .label .name { font-size: 6px !important; padding: 0 4px !important; }\n  .box .label .unit { font-size: 8px !important; }\n  .box .label::after { font-size: 7px !important; }\n}\n\n@media (max-width: 800px) {\n  }\n\n@media (max-width: 800px) {  }\n\n/* Sankey layout fix */\n.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n.section:last-of-type .box { flex-direction: row-reverse !important; }\n.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } }\n"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "vertical-stack",
+              "cards": [
+                {
+                  "type": "custom:mushroom-template-card",
+                  "primary": "Battery System",
+                  "icon": "mdi:battery-charging-wireless",
+                  "icon_color": "teal",
+                  "card_mod": {
+                    "style": {
+                      "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: white !important; letter-spacing: 0.5px; }",
+                      ".": "ha-card { background-color: transparent !important; border: none !important; }"
+                    }
+                  }
+                },
+                {
+                  "type": "custom:sigenergy-device-card",
+                  "battery_packs": 4
+                }
+              ]
+            },
+            {
+              "type": "custom:layout-card",
+              "layout_type": "custom:grid-layout",
+              "layout": {
+                "grid-template-columns": "1fr 1fr",
+                "grid-gap": "4px"
+              },
+              "cards": [
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__solar_power__",
+                  "primary": "Solar",
+                  "icon": "mdi:solar-power",
+                  "icon_color": "orange",
+                  "secondary": "{{ states('__solar_power__') | round(0) }} W",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__load_power__",
+                  "primary": "Home",
+                  "icon": "mdi:home-lightning-bolt",
+                  "icon_color": "deep-purple",
+                  "secondary": "{{ states('__load_power__') | round(0) }} W",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__battery_soc__",
+                  "primary": "Battery",
+                  "icon": "mdi:battery",
+                  "icon_color": "green",
+                  "secondary": "{{ states('__battery_soc__') | round(0) }}%",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__grid_power__",
+                  "primary": "Grid",
+                  "icon": "mdi:transmission-tower",
+                  "icon_color": "red",
+                  "secondary": "{{ states('__grid_power__') | round(0) }} W",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "custom:layout-card",
+              "layout_type": "custom:grid-layout",
+              "layout": {
+                "grid-template-columns": "1fr 1fr 1fr",
+                "grid-gap": "4px"
+              },
+              "cards": [
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__solar_energy_today__",
+                  "primary": "Solar",
+                  "icon": "mdi:solar-power",
+                  "icon_color": "orange",
+                  "secondary": "{{ states('__solar_energy_today__') | round(1) }} kWh",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__load_energy_today__",
+                  "primary": "Load",
+                  "icon": "mdi:power-plug",
+                  "icon_color": "purple",
+                  "secondary": "{{ states('__load_energy_today__') | round(1) }} kWh",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__battery_charge_today__",
+                  "primary": "Charged",
+                  "icon": "mdi:battery-arrow-up",
+                  "icon_color": "green",
+                  "secondary": "{{ states('__battery_charge_today__') | round(1) }} kWh",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__battery_discharge_today__",
+                  "primary": "Discharged",
+                  "icon": "mdi:battery-arrow-down",
+                  "icon_color": "teal",
+                  "secondary": "{{ states('__battery_discharge_today__') | round(1) }} kWh",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__grid_import_today__",
+                  "primary": "Imported",
+                  "icon": "mdi:transmission-tower-import",
+                  "icon_color": "red",
+                  "secondary": "{{ states('__grid_import_today__') | round(1) }} kWh",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__grid_export_today__",
+                  "primary": "Exported",
+                  "icon": "mdi:transmission-tower-export",
+                  "icon_color": "blue",
+                  "secondary": "{{ states('__grid_export_today__') | round(1) }} kWh",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "vertical-stack",
+              "cards": [
+                {
+                  "type": "custom:apexcharts-card",
+                  "card_mod": {
+                    "style": "ha-card { background: var(--ha-card-background, linear-gradient(135deg, rgba(30,33,40,0.95) 0%, rgba(40,44,52,0.98) 100%)) !important; border: 1px solid var(--divider-color, rgba(92,156,230,0.12)) !important; border-radius: var(--ha-card-border-radius, 16px) !important; color: var(--primary-text-color, #fff); }"
+                  },
+                  "header": {
+                    "show": true,
+                    "show_states": true,
+                    "colorize_states": true,
+                    "title": "Energy + EMHASS Forecast"
+                  },
+                  "graph_span": "48h",
+                  "update_interval": "60s",
+                  "apex_config": {
+                    "chart": {
+                      "height": "500px",
+                      "animations": {
+                        "enabled": false
+                      },
+                      "stacked": false,
+                      "zoom": {
+                        "enabled": true,
+                        "type": "x"
+                      },
+                      "toolbar": {
+                        "show": true,
+                        "tools": {
+                          "download": false,
+                          "selection": true,
+                          "zoom": true,
+                          "zoomin": true,
+                          "zoomout": true,
+                          "pan": true,
+                          "reset": true
+                        }
+                      }
+                    },
+                    "xaxis": {
+                      "type": "datetime",
+                      "labels": {
+                        "datetimeFormatter": {
+                          "minute": "HH:mm",
+                          "hour": "HH:00",
+                          "day": "dd MMM"
+                        },
+                        "style": {
+                          "fontSize": "10px"
+                        },
+                        "rotateAlways": false,
+                        "hideOverlappingLabels": true
+                      },
+                      "tickAmount": 24
+                    },
+                    "tooltip": {
+                      "x": {
+                        "format": "HH:mm"
+                      },
+                      "shared": true,
+                      "intersect": false
+                    },
+                    "legend": {
+                      "show": true,
+                      "position": "top",
+                      "horizontalAlign": "center",
+                      "fontSize": "10px",
+                      "itemMargin": {
+                        "horizontal": 4,
+                        "vertical": 1
+                      },
+                      "labels": {
+                        "colors": "rgba(255,255,255,0.7)"
+                      }
+                    },
+                    "stroke": {
+                      "curve": "smooth"
+                    },
+                    "grid": {
+                      "borderColor": "rgba(255,255,255,0.06)",
+                      "strokeDashArray": 3
+                    },
+                    "annotations": {
+                      "yaxis": [
+                        {
+                          "y": 0,
+                          "yAxisIndex": 0,
+                          "borderColor": "rgba(255,255,255,0.35)",
+                          "strokeDashArray": 0
+                        }
+                      ]
+                    }
+                  },
+                  "now": {
+                    "show": true,
+                    "label": "Now"
+                  },
+                  "span": {
+                    "start": "hour",
+                    "offset": "-6h"
+                  },
+                  "all_series_config": {
+                    "stroke_width": 2
+                  },
+                  "yaxis": [
+                    {
+                      "id": "power",
+                      "min": "auto",
+                      "max": "auto",
+                      "decimals": 1,
+                      "apex_config": {
+                        "title": {
+                          "text": "Power (kW)",
+                          "style": {
+                            "fontSize": "12px"
+                          }
+                        },
+                        "forceNiceScale": true,
+                        "tickAmount": 6
+                      }
+                    },
+                    {
+                      "id": "soc",
+                      "min": 0,
+                      "max": 100,
+                      "decimals": 0,
+                      "show": false,
+                      "apex_config": {
+                        "title": {
+                          "text": "SOC (%)"
+                        },
+                        "opposite": true
+                      }
+                    },
+                    {
+                      "id": "price",
+                      "min": "auto",
+                      "max": "auto",
+                      "decimals": 2,
+                      "show": false,
+                      "opposite": true,
+                      "apex_config": {
+                        "title": {
+                          "text": "Price (EUR/kWh)",
+                          "style": {
+                            "fontSize": "12px"
+                          }
+                        },
+                        "forceNiceScale": true,
+                        "tickAmount": 4
+                      }
+                    }
+                  ],
+                  "series": [
+                    {
+                      "entity": "__solar_power__",
+                      "name": "Solar",
+                      "color": "#FF8F00",
+                      "type": "area",
+                      "opacity": 0.35,
+                      "stroke_width": 2.5,
+                      "extend_to": false,
+                      "unit": " kW",
+                      "transform": "return x / 1000;",
+                      "group_by": {
+                        "func": "avg",
+                        "duration": "5min"
+                      },
+                      "show": {
+                        "in_header": true,
+                        "legend_value": true
+                      },
+                      "yaxis_id": "power",
+                      "float_precision": 1
+                    },
+                    {
+                      "entity": "__battery_power__",
+                      "name": "Battery",
+                      "color": "#00C853",
+                      "type": "line",
+                      "stroke_width": 2.5,
+                      "extend_to": false,
+                      "unit": " kW",
+                      "transform": "return x / 1000;",
+                      "group_by": {
+                        "func": "avg",
+                        "duration": "5min"
+                      },
+                      "show": {
+                        "in_header": true,
+                        "legend_value": true
+                      },
+                      "yaxis_id": "power",
+                      "float_precision": 1
+                    },
+                    {
+                      "entity": "__grid_power__",
+                      "name": "Grid",
+                      "color": "#D32F2F",
+                      "type": "line",
+                      "stroke_width": 2.5,
+                      "extend_to": false,
+                      "unit": " kW",
+                      "transform": "return x / 1000;",
+                      "group_by": {
+                        "func": "avg",
+                        "duration": "5min"
+                      },
+                      "show": {
+                        "in_header": true,
+                        "legend_value": true
+                      },
+                      "yaxis_id": "power",
+                      "float_precision": 1
+                    },
+                    {
+                      "entity": "__load_power__",
+                      "name": "Consumption",
+                      "color": "#8E24AA",
+                      "type": "area",
+                      "opacity": 0.08,
+                      "stroke_width": 1.5,
+                      "extend_to": false,
+                      "unit": " kW",
+                      "transform": "return x / 1000;",
+                      "group_by": {
+                        "func": "avg",
+                        "duration": "5min"
+                      },
+                      "show": {
+                        "in_header": "raw",
+                        "legend_value": true
+                      },
+                      "yaxis_id": "power",
+                      "invert": true,
+                      "float_precision": 1
+                    },
+                    {
+                      "entity": "__mpc_pv__",
+                      "name": "Solar (plan)",
+                      "color": "#FFF59D",
+                      "type": "area",
+                      "opacity": 0.06,
+                      "curve": "smooth",
+                      "extend_to": false,
+                      "unit": " kW",
+                      "float_precision": 1,
+                      "stroke_width": 1,
+                      "stroke_dash": 5,
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false
+                      },
+                      "data_generator": "const data = entity.attributes.forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_pv_power) / 1000]);",
+                      "yaxis_id": "power",
+                      "transform": "return x / 1000;"
+                    },
+                    {
+                      "entity": "__mpc_battery__",
+                      "name": "Battery (plan)",
+                      "color": "#A5D6A7",
+                      "type": "area",
+                      "opacity": 0.06,
+                      "curve": "stepline",
+                      "extend_to": false,
+                      "unit": " kW",
+                      "stroke_width": 1,
+                      "stroke_dash": 5,
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false
+                      },
+                      "data_generator": "const data = entity.attributes.battery_scheduled_power;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_batt_power) / 1000]);",
+                      "yaxis_id": "power",
+                      "transform": "return x / 1000;",
+                      "float_precision": 0
+                    },
+                    {
+                      "entity": "__mpc_grid__",
+                      "name": "Grid (plan)",
+                      "color": "#EF5350",
+                      "type": "line",
+                      "curve": "stepline",
+                      "stroke_width": 1,
+                      "stroke_dash": 5,
+                      "extend_to": false,
+                      "unit": " kW",
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false
+                      },
+                      "data_generator": "const data = entity.attributes.forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_grid_power) / 1000]);",
+                      "yaxis_id": "power",
+                      "transform": "return x / 1000;",
+                      "float_precision": 0
+                    },
+                    {
+                      "entity": "__mpc_load_power__",
+                      "name": "Load (plan)",
+                      "color": "#CE93D8",
+                      "type": "line",
+                      "curve": "smooth",
+                      "extend_to": false,
+                      "unit": " kW",
+                      "float_precision": 1,
+                      "stroke_width": 1,
+                      "stroke_dash": 4,
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false,
+                        "in_chart": true
+                      },
+                      "data_generator": "const data = entity.attributes.forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_load_power) / 1000]);",
+                      "yaxis_id": "power",
+                      "invert": true,
+                      "opacity": 0.6,
+                      "transform": "return x / 1000;"
+                    },
+                    {
+                      "entity": "__mpc_battery_soc__",
+                      "name": "SOC (plan)",
+                      "color": "#81C784",
+                      "type": "line",
+                      "curve": "stepline",
+                      "stroke_width": 1,
+                      "stroke_dash": 5,
+                      "extend_to": false,
+                      "unit": " %",
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false
+                      },
+                      "data_generator": "const data = entity.attributes.battery_scheduled_soc;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_batt_soc)]);",
+                      "yaxis_id": "soc",
+                      "float_precision": 1
+                    },
+                    {
+                      "entity": "__battery_soc__",
+                      "name": "SOC",
+                      "color": "#2196F3",
+                      "type": "area",
+                      "opacity": 0.2,
+                      "stroke_width": 2.5,
+                      "extend_to": false,
+                      "unit": " %",
+                      "group_by": {
+                        "func": "avg",
+                        "duration": "5min"
+                      },
+                      "show": {
+                        "in_header": true,
+                        "legend_value": true
+                      },
+                      "yaxis_id": "soc",
+                      "float_precision": 1
+                    },
+                    {
+                      "entity": "__buy_price__",
+                      "name": "Import Price (plan)",
+                      "color": "#EF9A9A",
+                      "type": "line",
+                      "extend_to": false,
+                      "unit": " EUR/kWh",
+                      "float_precision": 4,
+                      "stroke_width": 1,
+                      "opacity": 0.9,
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false
+                      },
+                      "data_generator": "const data = entity.attributes.unit_load_cost_forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_general_price)]);",
+                      "yaxis_id": "price",
+                      "curve": "stepline",
+                      "stroke_dash": 4
+                    },
+                    {
+                      "entity": "__sell_price__",
+                      "name": "Export Price (plan)",
+                      "color": "#90CAF9",
+                      "type": "line",
+                      "extend_to": false,
+                      "unit": " EUR/kWh",
+                      "float_precision": 4,
+                      "stroke_width": 1,
+                      "opacity": 0.9,
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false
+                      },
+                      "data_generator": "const data = entity.attributes.unit_prod_price_forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_feed_in_price)]);",
+                      "yaxis_id": "price",
+                      "curve": "stepline",
+                      "stroke_dash": 4
+                    },
+                    {
+                      "entity": "__current_import_cost__",
+                      "name": "Import Price",
+                      "color": "#EF5350",
+                      "type": "line",
+                      "opacity": 0.55,
+                      "stroke_width": 2,
+                      "extend_to": false,
+                      "unit": " EUR/kWh",
+                      "float_precision": 4,
+                      "group_by": {
+                        "func": "avg",
+                        "duration": "1h"
+                      },
+                      "show": {
+                        "in_header": false,
+                        "legend_value": true
+                      },
+                      "yaxis_id": "price",
+                      "curve": "stepline"
+                    },
+                    {
+                      "entity": "__current_export_rate__",
+                      "name": "Export Price",
+                      "color": "#42A5F5",
+                      "type": "line",
+                      "opacity": 0.55,
+                      "stroke_width": 2,
+                      "extend_to": false,
+                      "unit": " EUR/kWh",
+                      "float_precision": 4,
+                      "group_by": {
+                        "func": "avg",
+                        "duration": "1h"
+                      },
+                      "show": {
+                        "in_header": false,
+                        "legend_value": true
+                      },
+                      "yaxis_id": "price",
+                      "curve": "stepline"
+                    },
+                    {
+                      "entity": "__mpc_deferrable0__",
+                      "name": "Heat Pump (plan)",
+                      "color": "#FF6D00",
+                      "type": "area",
+                      "opacity": 0.05,
+                      "curve": "stepline",
+                      "extend_to": false,
+                      "unit": " kW",
+                      "stroke_width": 0.8,
+                      "stroke_dash": 4,
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false
+                      },
+                      "data_generator": "const data = entity.attributes.deferrables_schedule;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_deferrable0) / 1000]);",
+                      "yaxis_id": "power",
+                      "invert": true,
+                      "transform": "return x / 1000;",
+                      "float_precision": 0
+                    },
+                    {
+                      "entity": "__mpc_deferrable1__",
+                      "name": "Boiler (plan)",
+                      "color": "#26A69A",
+                      "type": "area",
+                      "opacity": 0.05,
+                      "curve": "stepline",
+                      "extend_to": false,
+                      "unit": " kW",
+                      "stroke_width": 0.8,
+                      "stroke_dash": 4,
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false
+                      },
+                      "data_generator": "const data = entity.attributes.deferrables_schedule;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_deferrable1) / 1000]);",
+                      "yaxis_id": "power",
+                      "invert": true,
+                      "transform": "return x / 1000;",
+                      "float_precision": 0
+                    },
+                    {
+                      "entity": "__heat_pump_power__",
+                      "name": "Heat Pump",
+                      "color": "#E65100",
+                      "type": "line",
+                      "stroke_width": 1.5,
+                      "extend_to": false,
+                      "transform": "return x / 1000;",
+                      "unit": " kW",
+                      "group_by": {
+                        "func": "avg",
+                        "duration": "5min"
+                      },
+                      "show": {
+                        "in_header": false,
+                        "legend_value": false
+                      },
+                      "yaxis_id": "power",
+                      "invert": true,
+                      "opacity": 1,
+                      "float_precision": 1
+                    },
+                    {
+                      "entity": "__emhass_net_cost_today__",
+                      "name": "Cost Today",
+                      "unit": " EUR",
+                      "show": {
+                        "legend_value": true,
+                        "in_chart": false,
+                        "in_header": true
+                      },
+                      "float_precision": 2,
+                      "yaxis_id": "power"
+                    },
+                    {
+                      "entity": "__emhass_savings_today__",
+                      "name": "Savings Today",
+                      "unit": " EUR",
+                      "color": "#4CAF50",
+                      "show": {
+                        "legend_value": true,
+                        "in_chart": false,
+                        "in_header": true
+                      },
+                      "float_precision": 2,
+                      "yaxis_id": "power"
+                    }
+                  ]
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "entity": "__solar_energy_today__",
+                  "primary": "Self-Sufficiency",
+                  "secondary": "{% set solar = states('__solar_energy_today__') | float(0) %}{% set load = states('__load_energy_today__') | float(1) %}{{ ((solar / load) * 100) | round(1) if load > 0 else 0 }}%",
+                  "icon": "mdi:check-decagram",
+                  "icon_color": "green",
+                  "card_mod": {
+                    "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; }"
+                  }
+                }
+              ]
+            }
+          ],
+          "_sigenergy_config": {
+            "entities": {
+              "solar_power": "__solar_power__",
+              "load_power": "__load_power__",
+              "battery_power": "__battery_power__",
+              "battery_soc": "__battery_soc__",
+              "grid_power": "__grid_power__",
+              "solar_energy_today": "__solar_energy_today__",
+              "load_energy_today": "__load_energy_today__",
+              "battery_charge_today": "__battery_charge_today__",
+              "battery_discharge_today": "__battery_discharge_today__",
+              "grid_import_today": "__grid_import_today__",
+              "grid_export_today": "__grid_export_today__",
+              "weather": "__weather__",
+              "emhass_mode": "__emhass_mode__",
+              "emhass_reason": "__emhass_reason__",
+              "mpc_battery": "__mpc_battery__",
+              "mpc_grid": "__mpc_grid__",
+              "mpc_pv": "__mpc_pv__",
+              "buy_price": "__buy_price__",
+              "sell_price": "__sell_price__",
+              "nordpool": "__nordpool__",
+              "ev_charger_power": "",
+              "ev_charger_state": "",
+              "ev_soc": "",
+              "ev_range": "",
+              "heat_pump_power": "",
+              "mpc_soc": "__mpc_battery_soc__",
+              "mpc_load": "__mpc_load_power__",
+              "mpc_optim_status": "__mpc_optim_status__",
+              "emhass_savings_today": "__emhass_savings_today__",
+              "emhass_net_cost_today": "__emhass_net_cost_today__",
+              "emhass_battery_action": "__emhass_battery_summary__",
+              "battery_pack1_soc": "__battery_pack1_soc__",
+              "battery_pack2_soc": "__battery_pack2_soc__",
+              "battery_pack3_soc": "__battery_pack3_soc__",
+              "battery_pack4_soc": "",
+              "inverter_temp": "__dc_transformer_temp__",
+              "battery_temp": "__battery_temp__",
+              "grid_voltage": "__grid_voltage__",
+              "grid_frequency": "__grid_frequency__",
+              "grid_power_ct": "__grid_ct_clamp__",
+              "grid_active_power": "__grid_power__",
+              "emhass_enabled": "input_boolean.emhass_enabled",
+              "battery_voltage": "__battery_voltage__",
+              "battery_current": "__battery_current__",
+              "pv1_power": "__pv1_power__",
+              "pv2_power": "__pv2_power__",
+              "inverter_rated_power": "__inverter_rated_power__",
+              "inverter_output_power": "__inverter_output_power__",
+              "inverter_internal_temp": "__inverter_temp__",
+              "rated_power": "__inverter_rated_power__",
+              "emhass_net_cost_month": "__emhass_net_cost_month__",
+              "emhass_savings_month": "__emhass_savings_monthly__",
+              "emhass_projected_bill": "__emhass_projected_bill__",
+              "emhass_projected_savings": "__emhass_projected_savings__",
+              "emhass_last_decision": "__emhass_last_decision__",
+              "automation_mpc_optimizer": "__emhass_mpc_automation__",
+              "automation_battery_control": "__emhass_battery_automation__",
+              "solcast_today": "__solcast_today__",
+              "solcast_tomorrow": "__solcast_tomorrow__",
+              "solcast_remaining": "__solcast_remaining__",
+              "forecast_solar_today": "",
+              "mpc_deferrable0": "__mpc_deferrable0__",
+              "mpc_deferrable1": "__mpc_deferrable1__",
+              "deferrable0_label": "Heat Pump",
+              "deferrable1_label": "Boiler",
+              "deferrable0_power": "__heat_pump_power__",
+              "deferrable1_power": "",
+              "mpc_cost_fun": "__mpc_cost_fun__",
+              "current_import_price": "__current_import_cost__",
+              "current_export_price": "__current_export_rate__",
+              "emhass_export_earnings_daily": "__emhass_export_earnings_daily__",
+              "emhass_import_cost_daily": "__emhass_import_cost_daily__",
+              "emhass_grid_only_cost_daily": "",
+              "emhass_projected_bill_without_opt": "__emhass_projected_bill___without_opt"
+            },
+            "features": {
+              "ev_charger": true,
+              "ev_vehicle": true,
+              "heat_pump": true,
+              "grid_connection": true,
+              "battery_packs": 2,
+              "emhass": true,
+              "weather_widget": true,
+              "sunrise_sunset": false,
+              "hide_cables": false,
+              "emhass_forecasts": true,
+              "deferrable_loads": true,
+              "financial_tracking": true,
+              "solar_forecast": true
+            },
+            "pricing": {
+              "source": "nordpool",
+              "cheap_threshold": 0.1,
+              "expensive_threshold": 0.25,
+              "currency": "€",
+              "show_price_overlay": true,
+              "show_price_badge": true,
+              "show_color_coding": true
+            },
+            "display": {
+              "theme": "dark",
+              "power_threshold": 1000,
+              "decimal_places": 1,
+              "chart_range": "today",
+              "soc_ring_low": 40,
+              "soc_ring_high": 60
+            }
+          }
+        }
+      ]
+    },
+    {
+      "title": "Settings",
+      "path": "settings",
+      "icon": "mdi:cog",
+      "cards": [
+        {
+          "type": "vertical-stack",
+          "cards": [
+            {
+              "type": "custom:sigenergy-settings-card",
+              "card_mod": {
+                "style": "ha-card {\n  overflow: visible !important;\n}\nha-card .info .name,\nha-card .info .secondary,\nha-card .info .state {\n  white-space: normal !important;\n  text-overflow: clip !important;\n  overflow: visible !important;\n  word-wrap: break-word !important;\n  overflow-wrap: break-word !important;\n}\nmushroom-state-info .primary,\nmushroom-state-info .secondary {\n  white-space: normal !important;\n  text-overflow: clip !important;\n  overflow: visible !important;\n  word-wrap: break-word !important;\n  overflow-wrap: break-word !important;\n}"
+              }
+            },
+            {
+              "type": "custom:mushroom-template-card",
+              "primary": "{{ states('__emhass_mode__') }}",
+              "secondary": "{{ states('__emhass_reason__') }}",
+              "icon": "{% set mode = states('__emhass_mode__') %}{% if 'CHARGE' in mode %}mdi:battery-charging{% elif 'DISCHARGE' in mode %}mdi:battery-arrow-down{% else %}mdi:battery-clock{% endif %}",
+              "icon_color": "{% set mode = states('__emhass_mode__') %}{% if 'CHARGE' in mode %}green{% elif 'DISCHARGE' in mode %}orange{% else %}blue{% endif %}",
+              "card_mod": {
+                "style": {
+                  "ha-tile-info$": ".primary { font-size: 22px !important; font-weight: bold !important; color: #00d4b8 !important; } .secondary { font-size: 12px !important; color: #8892a4 !important; }",
+                  ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                }
+              }
+            },
+            {
+              "type": "grid",
+              "columns": 3,
+              "square": false,
+              "cards": [
+                {
+                  "type": "custom:mushroom-template-card",
+                  "primary": "{{ states('__buy_price__') | float(0) | round(4) }}",
+                  "secondary": "Buy Price (€/kWh)",
+                  "icon": "mdi:cash-plus",
+                  "icon_color": "red",
+                  "card_mod": {
+                    "style": {
+                      "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: white !important; } .secondary { color: #8892a4 !important; font-size: 10px !important; }",
+                      ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                    }
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "primary": "{{ states('__sell_price__') | float(0) | round(4) }}",
+                  "secondary": "Sell Price (€/kWh)",
+                  "icon": "mdi:cash-minus",
+                  "icon_color": "green",
+                  "card_mod": {
+                    "style": {
+                      "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: white !important; } .secondary { color: #8892a4 !important; font-size: 10px !important; }",
+                      ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                    }
+                  }
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "primary": "{{ states('__emhass_savings_today__') | float(0) | round(2) }}€",
+                  "secondary": "Savings Today",
+                  "icon": "mdi:piggy-bank",
+                  "icon_color": "amber",
+                  "card_mod": {
+                    "style": {
+                      "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: #00c875 !important; } .secondary { color: #8892a4 !important; font-size: 10px !important; }",
+                      ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                    }
+                  },
+                  "multiline_secondary": true
+                }
+              ]
+            },
+            {
+              "type": "grid",
+              "columns": 2,
+              "square": false,
+              "cards": [
+                {
+                  "type": "custom:mushroom-template-card",
+                  "primary": "{{ states('__emhass_net_cost_month__') | float(0) | round(2) }}€",
+                  "secondary": "Net Cost This Month",
+                  "icon": "mdi:currency-eur",
+                  "icon_color": "{% if states('__emhass_net_cost_month__') | float(0) < 0 %}green{% else %}red{% endif %}",
+                  "card_mod": {
+                    "style": {
+                      "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: white !important; } .secondary { color: #8892a4 !important; font-size: 10px !important; }",
+                      ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                    }
+                  },
+                  "multiline_secondary": true
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "primary": "{{ states('__emhass_savings_monthly__') | float(0) | round(2) }}€",
+                  "secondary": "Savings This Month",
+                  "icon": "mdi:cash-check",
+                  "icon_color": "green",
+                  "card_mod": {
+                    "style": {
+                      "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: #00c875 !important; } .secondary { color: #8892a4 !important; font-size: 10px !important; }",
+                      ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                    }
+                  },
+                  "multiline_secondary": true
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "primary": "{{ states('__emhass_projected_bill__') | float(0) | round(2) }}€",
+                  "secondary": "Projected Monthly Bill",
+                  "icon": "mdi:receipt-text",
+                  "icon_color": "blue",
+                  "card_mod": {
+                    "style": {
+                      "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: white !important; } .secondary { color: #8892a4 !important; font-size: 10px !important; }",
+                      ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                    }
+                  },
+                  "multiline_secondary": true
+                },
+                {
+                  "type": "custom:mushroom-template-card",
+                  "primary": "{{ states('__emhass_projected_savings__') | float(0) | round(2) }}€",
+                  "secondary": "Projected Monthly Savings",
+                  "icon": "mdi:hand-coin",
+                  "icon_color": "teal",
+                  "card_mod": {
+                    "style": {
+                      "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: #00c875 !important; } .secondary { color: #8892a4 !important; font-size: 10px !important; }",
+                      ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                    }
+                  },
+                  "multiline_secondary": true
+                }
+              ]
+            },
+            {
+              "type": "custom:mushroom-template-card",
+              "primary": "{{ states('__emhass_battery_summary__') }}",
+              "secondary": "Battery Action Summary",
+              "icon": "mdi:robot",
+              "icon_color": "teal",
+              "card_mod": {
+                "style": {
+                  "ha-tile-info$": ".primary { font-size: 14px !important; color: white !important; } .secondary { font-size: 11px !important; color: #8892a4 !important; }",
+                  ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                }
+              }
+            },
+            {
+              "type": "custom:mushroom-template-card",
+              "primary": "{{ states('__emhass_last_decision__') }}",
+              "secondary": "Last MPC Decision",
+              "icon": "mdi:brain",
+              "icon_color": "purple",
+              "card_mod": {
+                "style": {
+                  "ha-tile-info$": ".primary { font-size: 12px !important; color: white !important; } .secondary { font-size: 11px !important; color: #8892a4 !important; }",
+                  ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                }
+              }
+            },
+            {
+              "type": "custom:mushroom-template-card",
+              "primary": "{{ states('__mpc_optim_status__') }}",
+              "secondary": "MPC Optimizer Status | Last run: {{ as_timestamp(states.__mpc_battery__.last_updated) | timestamp_custom('%H:%M') }}",
+              "icon": "mdi:chart-bell-curve-cumulative",
+              "icon_color": "{% if states('__mpc_optim_status__') == 'Optimal' %}green{% else %}red{% endif %}",
+              "multiline_secondary": true,
+              "card_mod": {
+                "style": {
+                  "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: #00d4b8 !important; } .secondary { font-size: 11px !important; color: #8892a4 !important; }",
+                  ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                }
+              }
+            },
+            {
+              "type": "grid",
+              "columns": 2,
+              "square": false,
+              "cards": [
+                {
+                  "type": "custom:mushroom-entity-card",
+                  "entity": "__emhass_mpc_automation__",
+                  "name": "MPC Optimizer",
+                  "icon": "mdi:robot",
+                  "tap_action": {
+                    "action": "toggle"
+                  },
+                  "card_mod": {
+                    "style": {
+                      ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                    }
+                  },
+                  "multiline_secondary": true
+                },
+                {
+                  "type": "custom:mushroom-entity-card",
+                  "entity": "__emhass_battery_automation__",
+                  "name": "Battery Control",
+                  "icon": "mdi:battery-sync",
+                  "tap_action": {
+                    "action": "toggle"
+                  },
+                  "card_mod": {
+                    "style": {
+                      ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                    }
+                  },
+                  "multiline_secondary": true
+                }
+              ]
+            },
+            {
+              "type": "custom:mushroom-template-card",
+              "primary": "Deye SUN-SG05LP1-EU",
+              "secondary": "Rated: {{ states('__inverter_rated_power__') | default('5000') }}W | Temp: {{ states('__inverter_temp__') | default('?') }}°C",
+              "icon": "mdi:solar-power-variant",
+              "icon_color": "amber",
+              "multiline_secondary": true,
+              "card_mod": {
+                "style": {
+                  "ha-tile-info$": ".primary { font-size: 16px !important; font-weight: bold !important; color: white !important; } .secondary { font-size: 11px !important; color: #8892a4 !important; }",
+                  ".": "ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "theme": "sigenergy_dark",
+      "panel": true
+    }
+  ]
+}

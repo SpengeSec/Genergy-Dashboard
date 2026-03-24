@@ -134,88 +134,60 @@ Install these **before** installing the Sigenergy Dashboard:
 
 Open HACS → Frontend, and install all 5 required plugins listed above. Restart Home Assistant after installing.
 
-### Step 2: Install Sigenergy Dashboard
+### Step 2: Install Genergy Dashboard
 
 #### Via HACS (Recommended)
 
-1. Open **HACS** → **Frontend** → click the three dots (⋮) → **Custom repositories**
-2. Paste the GitHub repository URL, select **Lovelace** (or **Plugin**) as category, click **Add**
-3. Search for **Sigenergy Dashboard** and click **Install**
+1. Open **HACS** → **Integrations** → click the three dots (⋮) → **Custom repositories**
+2. Paste the GitHub repository URL, select **Integration** as category, click **Add**
+3. Search for **Genergy Dashboard** and click **Install**
 4. Restart Home Assistant
-5. Hard-refresh your browser: **Ctrl+Shift+R** (Windows/Linux) or **Cmd+Shift+R** (Mac)
-
-> **Note**: HACS automatically registers the main JS file as a Lovelace resource. The dashboard JS auto-imports the house card, so only one resource entry is needed. The resource URL will be something like `/hacsfiles/Genergy-Dashboard/dist/genergy-dashboard.js` — this is correct and expected.
->
-> **Important**: HACS installs the JS resource but **cannot create a dashboard automatically** — this is a HACS limitation, not a bug. You must create the dashboard manually using the bootstrap YAML provided below (see [Step 5](#step-5-create-the-dashboard)).
 
 #### Manual Installation
 
 1. Download the latest release ZIP
-2. Extract the `dist/` folder (it contains everything: JS files, images)
-3. Copy the `dist/` contents to your HA config:
+2. Copy the `custom_components/genergy_dashboard/` folder to your HA config directory:
    ```
-   dist/sigenergy-dashboard.js  → /config/www/sigenergy-dashboard/dist/sigenergy-dashboard.js
-   dist/sigenergy-house-card.js → /config/www/sigenergy-dashboard/dist/sigenergy-house-card.js
-   dist/images/                 → /config/www/sigenergy-dashboard/dist/images/
+   custom_components/genergy_dashboard/ → /config/custom_components/genergy_dashboard/
    ```
-4. In Home Assistant: **Settings** → **Dashboards** → **⋮** → **Resources**
-5. Add **one** resource:
-   ```
-   URL: /local/sigenergy-dashboard/dist/sigenergy-dashboard.js
-   Type: JavaScript Module
-   ```
-   > The dashboard JS automatically imports the house card from the same directory — no need to add it separately.
-6. Restart Home Assistant
+3. Restart Home Assistant
 
-### Step 3: Install Theme
+### Step 3: Add the Integration
 
-1. Copy `themes/sigenergy_dark.yaml` to your `/config/themes/` directory
-2. Restart Home Assistant (or call `homeassistant.reload_themes`)
-3. The dashboard automatically applies this theme to its views
+1. In Home Assistant go to **Settings → Devices & Services → Add Integration**
+2. Search for **Genergy Dashboard**
+3. A guided config flow walks you through entity mapping:
+   - **Step 1 — Core Sensors**: Map your solar, battery, grid, and load power entities
+   - **Step 2 — Energy Totals**: Map daily energy sensors (solar, consumption, grid import/export, battery charge/discharge)
+   - **Step 3 — Features**: Enable optional features (EMHASS, Solcast, EV charger, heat pump) and map their entities
+4. Click **Submit** — the integration automatically:
+   - Registers the dashboard in Lovelace with **Show in Sidebar** enabled
+   - Generates the full dashboard configuration from the template + your entity mappings
+   - Installs the bundled `sigenergy_dark` theme
+   - Registers the JS resources for custom cards (house card, settings card, device card)
+5. The **Sigenergy** dashboard appears in the sidebar immediately — no restart required
 
-> **Important**: Without the theme file, cards use CSS fallback styling but the page background may not match the dark design.
+> **Sigenergy users**: The config flow detects Sigenergy inverters and pre-fills default entity IDs automatically. Just verify and submit.
 
-### Step 4: Copy Images
-
-> **HACS users**: Images are automatically installed in the correct location — skip this step.
->
-> **Manual users**: Images are already included in the `dist/images/` folder. If you copied the full `dist/` directory in Step 2, images are already in place.
-
-The package includes 13 images used by the dashboard:
-- **Battery Device Card**: `1inverter1battery.png` … `1inverter6battery.png` (6 battery stack renders)
-- **House Card**: `home_has_solar_has_car.png`, `dark_home_has_solar_has_car.png`, `home_has_solar_no_car.png`, `sigenstor_home.png`, `ammeter_home.png`, `ac_charger_bg.png`, `device_heat_pump.png`
-
-### Step 5: Create the Dashboard
-
-1. In Home Assistant go to **Settings → Dashboards → Add Dashboard**
-2. Set:
-   - **Title**: `Sigenergy`
-   - **URL path**: `dashboard-sigenergy` — exact spelling, case-sensitive
-   - **Icon**: `mdi:solar-power` (optional)
-3. Click **Create**
-4. Open the new dashboard
-5. Click the **three-dot menu (⋮) → Edit → Raw configuration editor**
-6. Select all existing content and delete it
-7. Paste the entire contents of [`dashboards/sigenergy.yaml`](dashboards/sigenergy.yaml)
-8. Click **Save**
-9. The Sigenergy Settings card will appear — use it to configure your entities, features, and preferences. The full dashboard builds automatically after saving your first configuration.
-
-> **Warning**: The URL path **must** be exactly `dashboard-sigenergy` — the settings card uses this path to persist your configuration. A different path means settings will not save correctly.
+> **Note**: The dashboard is created with URL path `dashboard-sigenergy`. The settings card uses this path to persist your configuration.
 
 ---
 
 ## Quick Start Guide
 
-After installation, the dashboard is empty until you configure your entities:
+After adding the integration, the dashboard is pre-configured with your entity mappings:
 
-1. Navigate to your Sigenergy dashboard
-2. Open the **Settings** tab (⚙️ gear icon)
-3. In the **⚡ Entities** tab, fill in your entity IDs:
-   - At minimum, configure: `solar_power`, `load_power`, `battery_power`, `battery_soc`, `grid_power`
-   - Each field shows a live state badge — **green ✓** = entity found, **red ✗** = not found
-4. In the **🔧 Features** tab, enable your equipment (EV charger, heat pump, etc.)
-5. Click **💾 Save & Apply** at the bottom of the Display tab
-6. The dashboard rebuilds automatically with your configured entities
+1. Navigate to the **Sigenergy** dashboard in the sidebar
+2. Verify your data is showing correctly in the overview
+3. Open the **Settings** tab (⚙️ gear icon) to fine-tune:
+   - **⚡ Entities** — Adjust or add entity mappings (each field shows a live state badge)
+   - **🔧 Features** — Toggle EV charger, heat pump, EMHASS, solar forecast, etc.
+   - **💰 Pricing** — Configure price entities, thresholds, currency
+   - **🎨 Display** — Decimal places, chart range, SoC thresholds, power auto-scaling
+4. Click **💾 Save & Apply** at the bottom of the Display tab
+5. The dashboard rebuilds automatically with your updated configuration
+
+> **Tip**: If you skipped any optional entities during the config flow, you can add them later in the Settings tab.
 
 ---
 
@@ -469,44 +441,64 @@ The house card composites multiple PNG layers:
 
 | Problem | Solution |
 |---|---|
+| **Dashboard not in sidebar** | Go to Settings → Devices & Services, find Genergy Dashboard, check it's loaded. Try a hard refresh (Ctrl+Shift+R) |
 | **Cards not appearing** | Clear browser cache (Ctrl+Shift+Delete), hard-refresh (Ctrl+Shift+R) |
 | **"Custom element doesn't exist"** | Install the 5 required HACS dependencies (layout-card, apexcharts-card, sankey-chart, mushroom, card-mod) and restart HA |
 | **Entity not found (red ✗ badge)** | Check entity ID in Developer Tools → States. Entity IDs are case-sensitive |
-| **Light/wrong theme** | Install `themes/sigenergy_dark.yaml` to `/config/themes/` and restart HA |
-| **House card shows no image** | Ensure `dist/images/` folder exists alongside the JS files (e.g., `/config/www/sigenergy-dashboard/dist/images/`) |
+| **Light/wrong theme** | The integration auto-installs the theme. If missing, check `/config/themes/sigenergy_dark.yaml` exists and reload themes |
+| **House card shows no image** | Ensure the integration is properly installed — images are bundled in the `frontend/images/` directory |
 | **Charts show no data** | Ensure core entities (`solar_power`, `load_power`, etc.) are correctly set and have history data |
 | **Forecast lines not showing** | Enable EMHASS + EMHASS Forecasts in Features tab, then set MPC entity fields in Entities tab |
 | **Settings don't persist across browsers** | Make sure dashboard URL is exactly `dashboard-sigenergy` (case-sensitive) |
 | **Battery detail panel empty** | Set `battery_pack_prefix` (e.g., `sensor.battery_monitor_pack_`) in Entities tab |
-| **Cards overlap or misaligned** | Ensure `layout-card` is installed. Try: Settings → Dashboards → Resources → check both JS resources are listed |
+| **Cards overlap or misaligned** | Ensure `layout-card` is installed. Try: Settings → Dashboards → Resources → check JS resources are listed |
 | **Price badge not showing** | Enable Price Badge in Pricing tab AND set a price entity in Entities tab |
+| **Integration not found** | Make sure `custom_components/genergy_dashboard/` exists in your HA config dir and restart HA |
 
 ---
 
 ## Project Structure
 
 ```
-sigenergy-dashboard/
+genergy-dashboard/
 ├── .github/
 │   └── workflows/
 │       └── validate.yaml              # HACS validation CI
-├── hacs.json                          # HACS plugin metadata
+├── hacs.json                          # HACS integration metadata
 ├── LICENSE                            # CC BY-NC-SA 4.0 license
 ├── README.md                          # This file
+├── custom_components/
+│   └── genergy_dashboard/
+│       ├── __init__.py                # Integration setup: JS/theme registration, dashboard creation
+│       ├── config_flow.py             # Guided config flow for entity mapping
+│       ├── const.py                   # Constants, entity keys, placeholder map, defaults
+│       ├── dashboard_generator.py     # Template-based dashboard config generator
+│       ├── default_dashboard.json     # Dashboard template with placeholders
+│       ├── manifest.json              # HA integration manifest
+│       ├── strings.json               # Config flow UI strings
+│       ├── translations/
+│       │   └── en.json                # English translations
+│       ├── frontend/
+│       │   ├── genergy-dashboard.js   # Bridge JS (HACS resource entry point)
+│       │   ├── sigenergy-dashboard.js # Bundle: settings card + device card + dashboard builder
+│       │   ├── sigenergy-house-card.js# Animated house card (Lit Element)
+│       │   └── images/               # Runtime images (battery renders, house card assets)
+│       │       ├── 1inverter[1-6]battery.png
+│       │       ├── home_has_solar_has_car.png
+│       │       ├── dark_home_has_solar_has_car.png
+│       │       ├── home_has_solar_no_car.png
+│       │       ├── sigenstor_home.png
+│       │       ├── ammeter_home.png
+│       │       ├── ac_charger_bg.png
+│       │       └── device_heat_pump.png
+│       └── themes/
+│           └── sigenergy_dark.yaml    # Bundled dark theme (auto-installed)
 ├── dashboards/
-│   └── sigenergy.yaml                 # Bootstrap dashboard YAML (paste into Raw Editor)
+│   └── sigenergy.yaml                 # Bootstrap dashboard YAML (legacy manual install)
 ├── dist/
-│   ├── sigenergy-dashboard.js         # Bundle: settings card + device card + dashboard builder
-│   ├── sigenergy-house-card.js        # Animated house card (Lit Element)
-│   └── images/                        # Runtime images (battery renders, house card assets)
-│       ├── 1inverter[1-6]battery.png  # Battery stack renders (6 files)
-│       ├── home_has_solar_has_car.png # House card day base
-│       ├── dark_home_has_solar_has_car.png # House card night base
-│       ├── home_has_solar_no_car.png  # House card no-EV variant
-│       ├── sigenstor_home.png         # Battery overlay
-│       ├── ammeter_home.png           # Meter overlay
-│       ├── ac_charger_bg.png          # EV charger overlay
-│       └── device_heat_pump.png       # Heat pump overlay
+│   ├── sigenergy-dashboard.js         # Standalone JS bundle (legacy HACS plugin mode)
+│   ├── sigenergy-house-card.js        # Standalone house card JS (legacy)
+│   └── images/                        # Runtime images (legacy)
 ├── screenshots/                       # README screenshots
 ├── src/
 │   ├── cards/
@@ -517,7 +509,7 @@ sigenergy-dashboard/
 │       ├── config-store.js            # Config persistence (localStorage + HA WebSocket)
 │       └── entity-helpers.js          # Entity state formatting helpers
 └── themes/
-    └── sigenergy_dark.yaml            # HA theme (required for consistent dark appearance)
+    └── sigenergy_dark.yaml            # HA theme source (copied by integration during setup)
 ```
 
 ---

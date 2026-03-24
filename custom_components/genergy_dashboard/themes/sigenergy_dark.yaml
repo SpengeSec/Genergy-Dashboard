@@ -1,0 +1,27 @@
+sigenergy_dark:
+  modes:
+    dark:
+      accent-color: '#00d4b8'
+      app-header-background-color: '#1a1f2e'
+      app-header-text-color: '#ffffff'
+      card-background-color: '#22273a'
+      divider-color: '#2d3451'
+      ha-card-background: '#22273a'
+      ha-card-border-color: '#2d3451'
+      ha-card-border-radius: 16px
+      ha-card-header-color: '#ffffff'
+      lovelace-background: '#1a1f2e'
+      paper-card-background-color: '#22273a'
+      primary-background-color: '#1a1f2e'
+      primary-color: '#00d4b8'
+      primary-text-color: '#ffffff'
+      rgb-primary-color: 0,212,184
+      secondary-background-color: '#22273a'
+      secondary-text-color: '#8892a4'
+      sidebar-background-color: '#151928'
+      sidebar-icon-color: '#8892a4'
+      sidebar-selected-icon-color: '#00d4b8'
+      sidebar-selected-text-color: '#00d4b8'
+      sidebar-text-color: '#ffffff'
+      state-icon-active-color: '#00d4b8'
+      switch-checked-color: '#00d4b8'

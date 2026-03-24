@@ -1,0 +1,120 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Genergy Dashboard Setup",
+        "description": "Set up your solar dashboard. Enable defaults for quick setup.",
+        "data": {
+          "use_sigenergy_defaults": "Use Sigenergy defaults"
+        }
+      },
+      "core": {
+        "title": "Core Power Sensors",
+        "description": "Select the main power sensors for your inverter system.",
+        "data": {
+          "solar_power": "Solar Power (W)",
+          "load_power": "Home Load Power (W)",
+          "battery_power": "Battery Power (W)",
+          "battery_soc": "Battery State of Charge (%)",
+          "grid_power": "Grid Power (W)"
+        }
+      },
+      "energy": {
+        "title": "Daily Energy Sensors",
+        "description": "Select sensors for daily energy totals.",
+        "data": {
+          "solar_energy_today": "Solar Energy Today (kWh)",
+          "load_energy_today": "Load Energy Today (kWh)",
+          "battery_charge_today": "Battery Charge Today (kWh)",
+          "battery_discharge_today": "Battery Discharge Today (kWh)",
+          "grid_import_today": "Grid Import Today (kWh)",
+          "grid_export_today": "Grid Export Today (kWh)"
+        }
+      },
+      "extras": {
+        "title": "Additional Entities & Features",
+        "description": "Configure optional sensors, device details, and feature toggles. Enable EMHASS/Solcast to auto-populate their standard entity names.",
+        "data": {
+          "weather": "Weather Entity",
+          "inverter_temp": "Inverter Temperature",
+          "battery_temp": "Battery Temperature",
+          "battery_pack1_soc": "Battery Pack 1 SoC",
+          "battery_pack2_soc": "Battery Pack 2 SoC",
+          "battery_pack3_soc": "Battery Pack 3 SoC",
+          "inverter_rated_power": "Inverter Rated Power",
+          "pv1_power": "PV String 1 Power",
+          "pv2_power": "PV String 2 Power",
+          "grid_voltage": "Grid Voltage",
+          "grid_frequency": "Grid Frequency",
+          "grid_ct_clamp": "Grid CT Clamp Power",
+          "battery_voltage": "Battery Voltage",
+          "battery_current": "Battery Current",
+          "inverter_output_power": "Inverter Output Power",
+          "dc_transformer_temp": "DC Transformer Temperature",
+          "ev_charger_power": "EV Charger Power",
+          "ev_charger_state": "EV Charger State",
+          "heat_pump_power": "Heat Pump Power",
+          "feature_ev": "Enable EV Charger",
+          "feature_heat_pump": "Enable Heat Pump",
+          "feature_emhass": "Enable EMHASS (auto-fills standard entity names)",
+          "feature_solcast": "Enable Solcast (auto-fills forecast entities)",
+          "battery_packs": "Number of Battery Packs"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Core Power Sensors",
+        "data": {
+          "solar_power": "Solar Power (W)",
+          "load_power": "Home Load Power (W)",
+          "battery_power": "Battery Power (W)",
+          "battery_soc": "Battery State of Charge (%)",
+          "grid_power": "Grid Power (W)"
+        }
+      },
+      "energy": {
+        "title": "Daily Energy Sensors",
+        "data": {
+          "solar_energy_today": "Solar Energy Today (kWh)",
+          "load_energy_today": "Load Energy Today (kWh)",
+          "battery_charge_today": "Battery Charge Today (kWh)",
+          "battery_discharge_today": "Battery Discharge Today (kWh)",
+          "grid_import_today": "Grid Import Today (kWh)",
+          "grid_export_today": "Grid Export Today (kWh)"
+        }
+      },
+      "extras": {
+        "title": "Additional Entities & Features",
+        "data": {
+          "weather": "Weather Entity",
+          "inverter_temp": "Inverter Temperature",
+          "battery_temp": "Battery Temperature",
+          "battery_pack1_soc": "Battery Pack 1 SoC",
+          "battery_pack2_soc": "Battery Pack 2 SoC",
+          "battery_pack3_soc": "Battery Pack 3 SoC",
+          "inverter_rated_power": "Inverter Rated Power",
+          "pv1_power": "PV String 1 Power",
+          "pv2_power": "PV String 2 Power",
+          "grid_voltage": "Grid Voltage",
+          "grid_frequency": "Grid Frequency",
+          "grid_ct_clamp": "Grid CT Clamp Power",
+          "battery_voltage": "Battery Voltage",
+          "battery_current": "Battery Current",
+          "inverter_output_power": "Inverter Output Power",
+          "dc_transformer_temp": "DC Transformer Temperature",
+          "ev_charger_power": "EV Charger Power",
+          "ev_charger_state": "EV Charger State",
+          "heat_pump_power": "Heat Pump Power",
+          "feature_ev": "Enable EV Charger",
+          "feature_heat_pump": "Enable Heat Pump",
+          "feature_emhass": "Enable EMHASS (auto-fills standard entity names)",
+          "feature_solcast": "Enable Solcast (auto-fills forecast entities)",
+          "battery_packs": "Number of Battery Packs"
+        }
+      }
+    }
+  }
+}

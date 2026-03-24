@@ -1,8 +1,6 @@
 {
-  "name": "Sigenergy Dashboard",
-  "type": "plugin",
+  "name": "Genergy Dashboard",
+  "type": "integration",
   "render_readme": true,
-  "homeassistant": "2024.1.0",
-  "content_in_root": false,
-  "filename": "dist/genergy-dashboard.js"
+  "homeassistant": "2024.1.0"
 }
