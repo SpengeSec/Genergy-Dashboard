@@ -14,4 +14,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: hacs/action@main
         with:
-          category: plugin
+          category: integration
