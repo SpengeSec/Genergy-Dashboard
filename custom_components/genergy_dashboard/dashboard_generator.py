@@ -71,6 +71,10 @@ def _strip_unconfigured(obj: Any) -> Any:
     - In dicts with a ``cards`` key: filter out unconfigured cards
     - ``conditional`` cards: drop if the condition entity is unresolved
     - ``entity`` / ``entity_id`` values: drop the containing dict if empty
+    - Cards without ``entity`` key but with unresolved placeholders in
+      template fields (primary, secondary, icon, icon_color) are also dropped.
+      This prevents mushroom-template-card "Configuration error" when Jinja
+      templates reference unconfigured entities like ``states('__emhass_mode__')``.
     """
     if isinstance(obj, dict):
         # Conditional card: check if condition entity is configured
@@ -84,6 +88,16 @@ def _strip_unconfigured(obj: Any) -> Any:
             val = obj.get(key)
             if isinstance(val, str) and (not val or _PLACEHOLDER_RE.search(val)):
                 return None
+
+        # FIX(bug1-2): Cards without entity key but with unresolved placeholders
+        # in Jinja template fields — these cause "Configuration error" in HA.
+        _TEMPLATE_FIELDS = ("primary", "secondary", "icon", "icon_color",
+                            "badge_icon", "badge_color", "content", "name")
+        if obj.get("type"):
+            for field in _TEMPLATE_FIELDS:
+                val = obj.get(field)
+                if isinstance(val, str) and _PLACEHOLDER_RE.search(val):
+                    return None
 
         result = {}
         for k, v in obj.items():
@@ -157,6 +171,52 @@ def _remove_empty_containers(obj: Any) -> Any:
     return obj
 
 
+def _apply_feature_toggles(dashboard: dict, config: dict[str, Any]) -> dict:
+    """Apply feature toggle overrides to the house card and clean up
+    unresolved entity placeholders in nested config dicts.
+
+    The template has features hardcoded to True. This function overrides
+    them with the user's actual selections (e.g. feature_ev: False).
+    It also replaces any remaining __placeholder__ strings in entity
+    value positions with empty strings so custom cards don't try to
+    look up literal placeholder text as HA entity IDs.
+    """
+    from .const import CONF_FEATURE_EV, CONF_FEATURE_HEAT_PUMP, CONF_BATTERY_PACKS
+
+    ev_enabled = config.get(CONF_FEATURE_EV, False)
+    hp_enabled = config.get(CONF_FEATURE_HEAT_PUMP, False)
+    battery_packs = config.get(CONF_BATTERY_PACKS, 1)
+
+    def _patch(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            # Patch house card features
+            if obj.get("type") == "custom:sigenergy-house-card":
+                features = obj.get("features", {})
+                features["ev_charger"] = ev_enabled
+                features["ev_vehicle"] = ev_enabled
+                features["heat_pump"] = hp_enabled
+                obj["features"] = features
+
+            # Patch device card battery packs
+            if obj.get("type") == "custom:sigenergy-device-card":
+                obj["battery_packs"] = battery_packs
+
+            # Clean unresolved placeholders in entity value dicts
+            if "entities" in obj and isinstance(obj["entities"], dict):
+                for k, v in obj["entities"].items():
+                    if isinstance(v, str) and _PLACEHOLDER_RE.search(v):
+                        obj["entities"][k] = ""
+
+            for k, v in obj.items():
+                obj[k] = _patch(v)
+            return obj
+        if isinstance(obj, list):
+            return [_patch(item) for item in obj]
+        return obj
+
+    return _patch(dashboard)
+
+
 def generate_dashboard(config: dict[str, Any]) -> dict:
     """Generate a complete Lovelace dashboard config from entity configuration.
 
@@ -169,10 +229,13 @@ def generate_dashboard(config: dict[str, Any]) -> dict:
     subs = _build_substitution_map(config)
     dashboard = _substitute(dashboard, subs)
 
-    # Step 2: strip cards that reference unconfigured entities
+    # Step 2: apply feature toggles and clean nested entity placeholders
+    dashboard = _apply_feature_toggles(dashboard, config)
+
+    # Step 3: strip cards that reference unconfigured entities
     dashboard = _strip_unconfigured(dashboard)
 
-    # Step 3: remove empty containers
+    # Step 4: remove empty containers
     dashboard = _remove_empty_containers(dashboard)
 
     return dashboard

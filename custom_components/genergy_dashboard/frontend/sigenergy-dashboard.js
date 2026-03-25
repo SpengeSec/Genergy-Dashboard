@@ -1781,7 +1781,7 @@ class SigenergyDeviceCard extends HTMLElement {
     const store = window.SigenergyConfig;
     const packs = store ? store.getFeature('battery_packs') : (this._config.battery_packs || 2);
     const battSocEntity = store ? store.getEntity('battery_soc') : 'sensor.deyeinvertermaster_battery_soc';
-    const invPowerEntity = this._config.inverter_power || 'sensor.deyeinvertermaster_inverter_output_power';
+    const invPowerEntity = this._config.inverter_power || (store ? store.getEntity('inverter_output_power') : null) || 'sensor.deyeinvertermaster_inverter_output_power';
     const invPower = this._getVal(invPowerEntity);
     const battSocFallback = this._getVal(battSocEntity);
     const packSocs = [];
@@ -1911,16 +1911,25 @@ class SigenergyDeviceCard extends HTMLElement {
     };
 
     if (this._expanded['inverter']) {
+      // FIX(bug4): Read entity IDs from config store instead of hardcoding Deye names
+      var invTemp = store ? store.getEntity('inverter_temp') : 'sensor.deyeinvertermaster_temperature_dc_transformer';
+      var invIntTemp = store ? store.getEntity('inverter_internal_temp') : '';
+      var invOutput = store ? store.getEntity('inverter_output_power') : 'sensor.deyeinvertermaster_inverter_output_power';
+      var invRated = store ? store.getEntity('inverter_rated_power') : 'sensor.deyeinvertermaster_inverter_rated_power';
+      var pvOne = store ? store.getEntity('pv1_power') : 'sensor.deyeinvertermaster_pv1_power';
+      var pvTwo = store ? store.getEntity('pv2_power') : 'sensor.deyeinvertermaster_pv2_power';
+      var gridV = store ? store.getEntity('grid_voltage') : 'sensor.deyeinvertermaster_grid_voltage_l1';
+      var gridHz = store ? store.getEntity('grid_frequency') : 'sensor.deyeinvertermaster_grid_frequency';
       panels += '<div style="' + panelStyle + '">';
       panels += '<div style="' + headerStyle + '">⚡ Inverter Details</div>';
       panels += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity('sensor.deyeinvertermaster_temperature_dc_transformer', 1, '°C') + '</span><span style="' + statLbl + '">Temperature</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity('sensor.deyeinvertermaster_inverter_output_power', 0, 'W') + '</span><span style="' + statLbl + '">Output</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + (fmtEntity('sensor.deyeinvertermaster_inverter_rated_power', 0, '') !== '—' ? (parseFloat(self._hass.states['sensor.deyeinvertermaster_inverter_rated_power'].state) / 1000).toFixed(1) + 'kW' : '—') + '</span><span style="' + statLbl + '">Rated</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity('sensor.deyeinvertermaster_pv1_power', 0, 'W') + '</span><span style="' + statLbl + '">PV1</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity('sensor.deyeinvertermaster_pv2_power', 0, 'W') + '</span><span style="' + statLbl + '">PV2</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity('sensor.deyeinvertermaster_grid_voltage_l1', 1, 'V') + '</span><span style="' + statLbl + '">Grid V</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity('sensor.deyeinvertermaster_grid_frequency', 1, 'Hz') + '</span><span style="' + statLbl + '">Grid Hz</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(invTemp || invIntTemp, 1, '°C') + '</span><span style="' + statLbl + '">Temperature</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(invOutput, 0, 'W') + '</span><span style="' + statLbl + '">Output</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + (invRated && fmtEntity(invRated, 0, '') !== '—' ? (parseFloat(self._hass.states[invRated]?.state || 0) / 1000).toFixed(1) + 'kW' : '—') + '</span><span style="' + statLbl + '">Rated</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(pvOne, 0, 'W') + '</span><span style="' + statLbl + '">PV1</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(pvTwo, 0, 'W') + '</span><span style="' + statLbl + '">PV2</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridV, 1, 'V') + '</span><span style="' + statLbl + '">Grid V</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridHz, 1, 'Hz') + '</span><span style="' + statLbl + '">Grid Hz</span></div>';
       panels += '</div></div>';
     }
 

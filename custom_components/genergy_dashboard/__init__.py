@@ -67,8 +67,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> None:
-    """Handle options update — regenerate dashboard."""
-    await _create_or_update_dashboard(hass, entry)
+    """Handle options update — regenerate the dashboard config."""
+    await _regenerate_dashboard(hass, entry)
 
 
 def _install_theme(hass: HomeAssistant) -> None:
@@ -206,6 +206,69 @@ async def _create_or_update_dashboard(
             await _send_yaml_notification(hass, dashboard_config)
         except Exception:
             _LOGGER.exception("Genergy Dashboard: Fallback also failed")
+
+
+async def _regenerate_dashboard(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Regenerate the dashboard config when options change.
+
+    Unlike _create_or_update_dashboard, this always regenerates — even if
+    the dashboard already exists.  It preserves user-made JS settings by
+    reading the existing _sigenergy_config and merging it back.
+    """
+    try:
+        from homeassistant.components.lovelace import LOVELACE_DATA
+
+        lovelace_data = hass.data.get(LOVELACE_DATA)
+        if lovelace_data is None:
+            return
+
+        dashboard_obj = lovelace_data.dashboards.get(DASHBOARD_URL_PATH)
+        if dashboard_obj is None:
+            # Dashboard doesn't exist at all — fall back to creating it
+            await _create_or_update_dashboard(hass, entry)
+            return
+
+        # Read existing config, preserve _sigenergy_config if present
+        existing = None
+        try:
+            existing = await dashboard_obj.async_load(False)
+        except Exception:
+            pass
+
+        existing_js_config = None
+        if existing and isinstance(existing, dict):
+            views = existing.get("views", [])
+            for view in views:
+                cards = view.get("cards", [])
+                if cards and isinstance(cards[0], dict):
+                    existing_js_config = cards[0].get("_sigenergy_config")
+                    if existing_js_config:
+                        break
+
+        # Generate fresh dashboard from the updated config entry
+        entity_config = dict(entry.data)
+        entity_config.update(dict(entry.options))
+        dashboard_config = await hass.async_add_executor_job(
+            generate_dashboard, entity_config
+        )
+
+        # Merge the preserved JS config back in
+        if existing_js_config and isinstance(dashboard_config, dict):
+            views = dashboard_config.get("views", [])
+            for view in views:
+                cards = view.get("cards", [])
+                if cards and isinstance(cards[0], dict):
+                    cards[0]["_sigenergy_config"] = existing_js_config
+                    break
+
+        if hasattr(dashboard_obj, "async_save"):
+            await dashboard_obj.async_save(dashboard_config)
+            _LOGGER.info("Genergy Dashboard: Dashboard regenerated after options update")
+
+    except Exception:
+        _LOGGER.exception("Genergy Dashboard: Failed to regenerate dashboard")
 
 
 async def _send_yaml_notification(

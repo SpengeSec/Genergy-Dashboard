@@ -190,6 +190,19 @@ SIGENERGY_DEFAULTS = {
     CONF_BATTERY_PACK1_SOC: "sensor.sigen_inverter_battery_state_of_charge",
     CONF_INVERTER_TEMP: "sensor.sigen_inverter_pcs_internal_temperature",
     CONF_BATTERY_TEMP: "sensor.sigen_inverter_battery_average_cell_temperature",
+    # Inverter details
+    CONF_INVERTER_OUTPUT_POWER: "sensor.sigen_active_power",
+    CONF_INVERTER_RATED_POWER: "sensor.sigen_rated_active_power",
+    CONF_DC_TRANSFORMER_TEMP: "sensor.sigen_inverter_temperature",
+    # PV string power (template sensors from modbus yaml)
+    CONF_PV1_POWER: "sensor.sigen_pv1_power",
+    CONF_PV2_POWER: "sensor.sigen_pv2_power",
+    # Grid details
+    CONF_GRID_VOLTAGE: "sensor.sigen_phase_a_voltage",
+    CONF_GRID_FREQUENCY: "sensor.sigen_grid_frequency",
+    # Battery details
+    CONF_BATTERY_VOLTAGE: "sensor.sigen_ess_average_cell_voltage",
+    CONF_BATTERY_CURRENT: "",
 }
 
 # ---------------------------------------------------------------------------
