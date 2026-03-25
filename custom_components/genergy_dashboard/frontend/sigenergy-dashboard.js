@@ -1,5 +1,5 @@
 /**
- * Sigenergy Dashboard v0.2.0 — Bundled Distribution
+ * Sigenergy Dashboard v2.1.0 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -13,12 +13,11 @@
  */
 
 // Auto-detect base URL for HACS/manual install compatibility
-const _SIGENERGY_SCRIPT_DIR = new URL('.', import.meta.url).pathname;
+const _SIGENERGY_SCRIPT_URL = import.meta.url;
+// JS may be served from /js/ endpoint but images live under /frontend/
+const _SIGENERGY_SCRIPT_DIR = new URL('.', _SIGENERGY_SCRIPT_URL).pathname.replace('/js/', '/frontend/');
 
-// Auto-load house card from same directory (HACS only registers one resource)
-if (!customElements.get('sigenergy-house-card')) {
-  import(new URL('sigenergy-house-card.js', import.meta.url).href).catch(() => {});
-}
+// House card auto-load is deferred until after SigConfigStore is initialised (see below)
 
 // ═══════════════════════════════════════════════════════════
 // Config Store (singleton)
@@ -276,6 +275,15 @@ class SigConfigStore {
 }
 
 window.SigenergyConfig = new SigConfigStore();
+
+// Auto-load house card from same directory (after ConfigStore is available)
+if (!customElements.get('sigenergy-house-card')) {
+  const _hcUrl = new URL('sigenergy-house-card.js', _SIGENERGY_SCRIPT_URL);
+  // Forward cache-buster from parent module URL (set by __init__.py)
+  const _parentV = new URL(_SIGENERGY_SCRIPT_URL).searchParams.get('v');
+  if (_parentV) _hcUrl.searchParams.set('v', _parentV);
+  import(_hcUrl.href).catch(() => {});
+}
 
 // ═══════════════════════════════════════════════════════════
 // Settings Card (Lit Element)
@@ -1688,8 +1696,6 @@ class SigenergySettingsCard extends HTMLElement {
   }
 }
 
-if (!customElements.get('sigenergy-settings-card')) customElements.define('sigenergy-settings-card', SigenergySettingsCard);
-
 // ═══════════════════════════════════════════════════════════
 // Device Card — Battery Stack Visualization
 // ═══════════════════════════════════════════════════════════
@@ -1997,7 +2003,104 @@ class SigenergyDeviceCard extends HTMLElement {
   }
 }
 
-if (!customElements.get('sigenergy-device-card')) customElements.define('sigenergy-device-card', SigenergyDeviceCard);
+// ═══════════════════════════════════════════════════════════
+// Robust Element Registration — belt-and-suspenders approach
+// Handles ES module caching, race conditions, and timing issues
+// ═══════════════════════════════════════════════════════════
+
+// Store class references on window for resilient re-registration
+window.__sigCardClasses = window.__sigCardClasses || {};
+window.__sigCardClasses['sigenergy-settings-card'] = SigenergySettingsCard;
+window.__sigCardClasses['sigenergy-device-card'] = SigenergyDeviceCard;
+
+// Core registration function — safe to call repeatedly
+function _sigRegisterAll() {
+  var registered = 0;
+  var classes = window.__sigCardClasses;
+  if (!classes) return 0;
+  for (var name in classes) {
+    if (!customElements.get(name)) {
+      try {
+        customElements.define(name, classes[name]);
+        registered++;
+      } catch(e) { /* already defined or invalid — ignore */ }
+    }
+  }
+  return registered;
+}
+
+// Attempt 1: Immediate (module evaluation time)
+_sigRegisterAll();
+
+// Attempt 2: Microtask (after current task completes)
+if (typeof queueMicrotask === 'function') {
+  queueMicrotask(_sigRegisterAll);
+}
+
+// Attempt 3: Next animation frame
+requestAnimationFrame(_sigRegisterAll);
+
+// Attempt 4: Next tick
+setTimeout(_sigRegisterAll, 0);
+
+// Attempt 5: Fast watchdog — 100ms for first 10s, then 1s for 50s
+// Also handles error card recovery after late registration
+(function _sigWatchdog() {
+  var checks = 0;
+  var phase1 = 100;  // 100 checks × 100ms = 10 seconds
+  var phase2 = 50;   // 50 checks × 1000ms = 50 seconds
+
+  function _replaceErrorCards() {
+    try {
+      var ha = document.querySelector('home-assistant');
+      if (!ha || !ha.shadowRoot) return;
+      var main = ha.shadowRoot.querySelector('home-assistant-main');
+      if (!main || !main.shadowRoot) return;
+      var panel = main.shadowRoot.querySelector('ha-panel-lovelace');
+      if (!panel || !panel.shadowRoot) return;
+      var root = panel.shadowRoot.querySelector('hui-root');
+      if (!root || !root.shadowRoot) return;
+      function walkShadow(node) {
+        if (!node) return;
+        var children = node.children || [];
+        for (var i = 0; i < children.length; i++) {
+          var child = children[i];
+          if (child.tagName && child.tagName.toLowerCase() === 'hui-error-card') {
+            var msg = child.shadowRoot?.querySelector('.error')?.textContent || '';
+            if (msg.includes('sigenergy-settings-card') || msg.includes('sigenergy-device-card')) {
+              var parent = child.parentElement;
+              if (parent && typeof parent._rebuildCard === 'function') {
+                parent._rebuildCard();
+              } else if (parent && parent.config) {
+                var cfg = parent.config;
+                parent.config = undefined;
+                requestAnimationFrame(function() { parent.config = cfg; });
+              }
+            }
+          }
+          if (child.shadowRoot) walkShadow(child.shadowRoot);
+          walkShadow(child);
+        }
+      }
+      walkShadow(root.shadowRoot);
+    } catch(e) { /* DOM traversal failed — not critical */ }
+  }
+
+  function check() {
+    checks++;
+    var fixed = _sigRegisterAll();
+    if (fixed > 0) {
+      setTimeout(_replaceErrorCards, 50);
+    }
+    if (checks < phase1) {
+      setTimeout(check, 100);
+    } else if (checks < phase1 + phase2) {
+      setTimeout(check, 1000);
+    }
+  }
+
+  setTimeout(check, 50);
+})();
 
 window.customCards = window.customCards || [];
 window.customCards.push({
@@ -2015,7 +2118,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c SIGENERGY-DASHBOARD %c v0.7.0 ',
+  '%c SIGENERGY-DASHBOARD %c v2.1.0 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );

@@ -3,12 +3,10 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
 
-> **⚠️ Early Development Stage**
+> **⚠️ Active Development**
 >
-> This project is under active development. Expect bugs and incomplete features.
-> - The **Overview** view is the only fully presentable (done) view at this time.
-> - Some options shown in the **Settings** view do not currently have a working implementation.
-> - Other views (History, Devices, etc.) are work-in-progress and may be empty or broken.
+> This project is under active development. The **Overview** and **Settings** views are fully functional.
+> Other views (History, Devices, etc.) may be incomplete or under construction.
 >
 > Feedback and bug reports are welcome!
 
@@ -167,7 +165,7 @@ Open HACS → Frontend, and install all 5 required plugins listed above. Restart
    - Registers the JS resources for custom cards (house card, settings card, device card)
 5. The **Sigenergy** dashboard appears in the sidebar immediately — no restart required
 
-> **Sigenergy users**: The config flow detects Sigenergy inverters and pre-fills default entity IDs automatically. Just verify and submit.
+> **Sigenergy users**: Check the "Use Sigenergy defaults" checkbox on the first step. This pre-fills all entity IDs with the correct Sigenergy naming convention (`sensor.sigen_plant_*` / `sensor.sigen_inverter_*`) and creates the dashboard immediately — no manual entity mapping required.
 
 > **Note**: The dashboard is created with URL path `dashboard-sigenergy`. The settings card uses this path to persist your configuration.
 
@@ -201,7 +199,7 @@ Go to **Developer Tools** → **States** in Home Assistant and search for your i
 |---|---|---|---|
 | **Deye** | `sensor.deyeinverter_pv_power` | `sensor.deyeinverter_battery_output_power` | `sensor.deyeinverter_grid_load_l1` |
 | **SunSynk** | `sensor.sunsynk_pv_power` | `sensor.sunsynk_battery_power` | `sensor.sunsynk_grid_power` |
-| **Sigenergy** | `sensor.sigenergy_pv_power` | `sensor.sigenergy_battery_power` | `sensor.sigenergy_grid_power` |
+| **Sigenergy** | `sensor.sigen_plant_pv_power` | `sensor.sigen_plant_battery_power` | `sensor.sigen_plant_grid_active_power` |
 | **Huawei** | `sensor.inverter_input_power` | `sensor.battery_charge_discharge_power` | `sensor.power_meter_active_power` |
 | **SolarEdge** | `sensor.solaredge_current_power` | `sensor.solaredge_storage_power` | `sensor.solaredge_grid_power` |
 | **Fronius** | `sensor.fronius_pv_power` | `sensor.fronius_battery_power` | `sensor.fronius_grid_power` |
@@ -443,7 +441,8 @@ The house card composites multiple PNG layers:
 |---|---|
 | **Dashboard not in sidebar** | Go to Settings → Devices & Services, find Genergy Dashboard, check it's loaded. Try a hard refresh (Ctrl+Shift+R) |
 | **Cards not appearing** | Clear browser cache (Ctrl+Shift+Delete), hard-refresh (Ctrl+Shift+R) |
-| **"Custom element doesn't exist"** | Install the 5 required HACS dependencies (layout-card, apexcharts-card, sankey-chart, mushroom, card-mod) and restart HA |
+| **"Custom element doesn't exist: sigenergy-settings-card" (or sigenergy-house-card)** | This is auto-recovered by the built-in watchdog. **1)** Try a hard refresh (Ctrl+Shift+R / Cmd+Shift+R). **2)** If it persists, restart Home Assistant — the integration registers JS resources on startup. **3)** Check Settings → Devices & Services and confirm Genergy Dashboard is loaded without errors. |
+| **"Custom element doesn't exist: layout-card" (or apexcharts/mushroom/etc.)** | Install the 5 required HACS dependencies (layout-card, apexcharts-card, sankey-chart, mushroom, card-mod) and restart HA |
 | **Entity not found (red ✗ badge)** | Check entity ID in Developer Tools → States. Entity IDs are case-sensitive |
 | **Light/wrong theme** | The integration auto-installs the theme. If missing, check `/config/themes/sigenergy_dark.yaml` exists and reload themes |
 | **House card shows no image** | Ensure the integration is properly installed — images are bundled in the `frontend/images/` directory |
@@ -511,6 +510,24 @@ genergy-dashboard/
 └── themes/
     └── sigenergy_dark.yaml            # HA theme source (copied by integration during setup)
 ```
+
+---
+
+## Changelog
+
+### v2.1.0
+- **Robust custom element registration** — Multi-attempt registration with queueMicrotask, requestAnimationFrame, and setTimeout fallbacks. Watchdog monitors element health and triggers re-registration if elements are lost.
+- **No-cache JS serving** — Custom HTTP handler serves JavaScript with `Cache-Control: no-store` headers, preventing stale ES module caching on page reload.
+- **Error card recovery** — Automatic detection and recovery of "Configuration error" placeholders via shadow DOM traversal, replacing them with working card instances.
+- **Improved stability** — Fixed class initialization order issue, image path resolution after JS endpoint change, and silent module evaluation failures.
+- **Config flow improvements** — Extended Deye/SunSynk default entity mappings.
+
+### v2.0.0
+- **Converted to HA integration** — Full config flow with guided entity mapping, auto-dashboard creation, and sidebar registration.
+- **Settings card** — 4-tab UI for entity mapping, feature toggles, pricing, and display preferences.
+- **Device card** — Battery stack visualization with expandable pack details.
+- **House card** — Animated isometric house with power flow comets, cable path editor, and responsive design.
+- **Bundled theme** — Auto-installed `sigenergy_dark` theme.
 
 ---
 

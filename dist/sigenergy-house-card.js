@@ -24,14 +24,21 @@ import {
 } from "https://unpkg.com/lit-element@3.3.3/lit-element.js?module";
 
 // Auto-detect base URL for HACS/manual install compatibility
-const _HOUSE_CARD_DIR = new URL('.', import.meta.url).pathname;
+// JS may be served from /js/ endpoint but images live under /frontend/
+const _HOUSE_CARD_RAW_DIR = new URL('.', import.meta.url).pathname;
+const _HOUSE_CARD_DIR = _HOUSE_CARD_RAW_DIR.replace('/js/', '/frontend/');
 
 // ─── Import shared config store for SoC ring thresholds ──────────────────────
 let SigConfigStore = null;
-try {
-  const mod = await import(new URL('../src/utils/config-store.js', import.meta.url).href);
-  SigConfigStore = mod.SigConfigStore || mod.default;
-} catch (_) { /* standalone usage without config store */ }
+if (window.SigenergyConfig) {
+  // Wrap global config store with getInstance() shim for house card compatibility
+  SigConfigStore = { getInstance() { return { config: window.SigenergyConfig.get() }; } };
+} else {
+  try {
+    const mod = await import(new URL('../src/utils/config-store.js', import.meta.url).href);
+    SigConfigStore = mod.SigConfigStore || mod.default;
+  } catch (_) { /* standalone usage without config store */ }
+}
 
 // ─── Default Configuration ───────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
@@ -347,14 +354,17 @@ class SigenergyHouseCard extends LitElement {
 
   // ── SoC ring color (configurable via SigConfigStore) ────────────────────
   _socRingColor(soc) {
+    if (soc == null || isNaN(soc)) return '#555';  // unknown
     let lo = 40, hi = 60;
-    if (SigConfigStore) {
-      const cfg = SigConfigStore.getInstance().config;
-      if (cfg && cfg.display) {
-        lo = cfg.display.soc_ring_low ?? lo;
-        hi = cfg.display.soc_ring_high ?? hi;
+    try {
+      if (SigConfigStore) {
+        const cfg = SigConfigStore.getInstance().config;
+        if (cfg && cfg.display) {
+          lo = cfg.display.soc_ring_low ?? lo;
+          hi = cfg.display.soc_ring_high ?? hi;
+        }
       }
-    }
+    } catch (_) { /* ignore config store errors */ }
     if (soc < lo) return '#e74c3c';  // red
     if (soc < hi) return '#f39c12';  // orange
     return '#2ecc71';                 // green
@@ -1259,7 +1269,13 @@ class SigenergyHouseCard extends LitElement {
 }
 
 // ── Register ─────────────────────────────────────────────────────────────────
-customElements.define("sigenergy-house-card", SigenergyHouseCard);
+// Store class reference for resilient re-registration
+if (!window.__sigCardClasses) window.__sigCardClasses = {};
+window.__sigCardClasses['sigenergy-house-card'] = SigenergyHouseCard;
+if (!customElements.get("sigenergy-house-card")) {
+  try { customElements.define("sigenergy-house-card", SigenergyHouseCard); }
+  catch(e) { /* ignore */ }
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push({

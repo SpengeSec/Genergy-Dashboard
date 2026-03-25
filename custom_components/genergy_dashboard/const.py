@@ -173,36 +173,57 @@ PLACEHOLDER_MAP = {
 
 # ---------------------------------------------------------------------------
 # Sigenergy defaults (inverter-specific entities)
+# Authoritative mapping based on Sigenergy Local Modbus integration entities.
+# grid_power is SIGNED: positive = importing, negative = exporting.
+# grid_voltage and grid_frequency are NOT provided by Sigenergy Local Modbus
+# (the integration only exposes rated values, not live readings).
 # ---------------------------------------------------------------------------
 SIGENERGY_DEFAULTS = {
+    # Core power (plant-level — aggregates across inverters)
     CONF_SOLAR_POWER: "sensor.sigen_plant_pv_power",
     CONF_LOAD_POWER: "sensor.sigen_plant_total_load_power",
     CONF_BATTERY_POWER: "sensor.sigen_plant_battery_power",
     CONF_BATTERY_SOC: "sensor.sigen_plant_battery_state_of_charge",
     CONF_GRID_POWER: "sensor.sigen_plant_grid_active_power",
+    # Daily energy totals
     CONF_SOLAR_ENERGY_TODAY: "sensor.sigen_plant_daily_pv_energy",
     CONF_LOAD_ENERGY_TODAY: "sensor.sigen_plant_daily_load_consumption",
     CONF_BATTERY_CHARGE_TODAY: "sensor.sigen_plant_daily_battery_charge_energy",
     CONF_BATTERY_DISCHARGE_TODAY: "sensor.sigen_plant_daily_battery_discharge_energy",
     CONF_GRID_IMPORT_TODAY: "sensor.sigen_plant_daily_grid_import_energy",
     CONF_GRID_EXPORT_TODAY: "sensor.sigen_plant_daily_grid_export_energy",
+    # Environment
     CONF_WEATHER: "weather.forecast_home",
-    CONF_BATTERY_PACK1_SOC: "sensor.sigen_inverter_battery_state_of_charge",
-    CONF_INVERTER_TEMP: "sensor.sigen_inverter_pcs_internal_temperature",
+    # Battery system
     CONF_BATTERY_TEMP: "sensor.sigen_inverter_battery_average_cell_temperature",
+    CONF_BATTERY_VOLTAGE: "",  # No direct battery voltage sensor in Sigenergy Local Modbus
+    CONF_BATTERY_CURRENT: "",  # No direct battery current sensor
+    # Battery pack monitoring — Sigenergy exposes ONE inverter-level SoC only.
+    # Per-pack granularity requires a separate BMS integration (e.g. Gobel).
+    CONF_BATTERY_PACK1_SOC: "sensor.sigen_inverter_battery_state_of_charge",
+    CONF_BATTERY_PACK2_SOC: "",
+    CONF_BATTERY_PACK3_SOC: "",
     # Inverter details
-    CONF_INVERTER_OUTPUT_POWER: "sensor.sigen_active_power",
-    CONF_INVERTER_RATED_POWER: "sensor.sigen_rated_active_power",
-    CONF_DC_TRANSFORMER_TEMP: "sensor.sigen_inverter_temperature",
-    # PV string power (template sensors from modbus yaml)
-    CONF_PV1_POWER: "sensor.sigen_pv1_power",
-    CONF_PV2_POWER: "sensor.sigen_pv2_power",
-    # Grid details
-    CONF_GRID_VOLTAGE: "sensor.sigen_phase_a_voltage",
-    CONF_GRID_FREQUENCY: "sensor.sigen_grid_frequency",
-    # Battery details
-    CONF_BATTERY_VOLTAGE: "sensor.sigen_ess_average_cell_voltage",
-    CONF_BATTERY_CURRENT: "",
+    CONF_INVERTER_TEMP: "sensor.sigen_inverter_pcs_internal_temperature",
+    CONF_INVERTER_OUTPUT_POWER: "sensor.sigen_inverter_active_power",
+    CONF_INVERTER_RATED_POWER: "sensor.sigen_plant_max_active_power",
+    CONF_DC_TRANSFORMER_TEMP: "",  # No separate DC transformer temp in Sigenergy
+    CONF_PV1_POWER: "sensor.sigen_inverter_pv1_power",
+    CONF_PV2_POWER: "sensor.sigen_inverter_pv2_power",
+    # Grid electrical detail — NOT provided by Sigenergy Local Modbus
+    CONF_GRID_VOLTAGE: "",
+    CONF_GRID_FREQUENCY: "",
+    CONF_GRID_CT_CLAMP: "",
+    # Peripheral devices — no Sigenergy modbus entities exist for these
+    CONF_EV_CHARGER_POWER: "",
+    CONF_EV_CHARGER_STATE: "",
+    CONF_HEAT_PUMP_POWER: "",
+    # Feature flags — disable features with no Sigenergy entities
+    CONF_FEATURE_EV: False,
+    CONF_FEATURE_HEAT_PUMP: False,
+    CONF_FEATURE_EMHASS: False,
+    CONF_FEATURE_SOLCAST: False,
+    CONF_BATTERY_PACKS: 1,
 }
 
 # ---------------------------------------------------------------------------

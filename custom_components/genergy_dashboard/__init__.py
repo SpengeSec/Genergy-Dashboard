@@ -1,14 +1,18 @@
 """Genergy Dashboard integration for Home Assistant."""
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
+import time
 from pathlib import Path
+
+from aiohttp import web
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.components.frontend import add_extra_js_url
-from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.http import HomeAssistantView
 
 from .const import DOMAIN, DASHBOARD_URL_PATH, DASHBOARD_TITLE
 from .dashboard_generator import generate_dashboard
@@ -16,9 +20,66 @@ from .dashboard_generator import generate_dashboard
 _LOGGER = logging.getLogger(__name__)
 
 
+class _NoCacheJSView(HomeAssistantView):
+    """Serve JS files with Cache-Control: no-store to prevent stale module caching."""
+
+    requires_auth = False
+    url = f"/{DOMAIN}/js/{{filename}}"
+    name = f"{DOMAIN}:js"
+
+    def __init__(self, frontend_dir: Path) -> None:
+        self._dir = frontend_dir
+
+    async def get(self, request: web.Request, filename: str) -> web.Response:
+        # Prevent path traversal
+        safe = Path(filename).name
+        filepath = self._dir / safe
+        if not filepath.is_file() or not safe.endswith(".js"):
+            return web.Response(status=404)
+        body = filepath.read_bytes()
+        return web.Response(
+            body=body,
+            content_type="application/javascript",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Genergy Dashboard component."""
     hass.data.setdefault(DOMAIN, {})
+
+    frontend_dir = Path(__file__).parent / "frontend"
+    if frontend_dir.exists():
+        # Register custom no-cache JS view (replaces StaticPathConfig for JS)
+        hass.http.register_view(_NoCacheJSView(frontend_dir))
+
+        # Still register static path for non-JS assets (images, etc.)
+        from homeassistant.components.http import StaticPathConfig
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    f"/{DOMAIN}/frontend",
+                    str(frontend_dir),
+                    cache_headers=False,
+                )
+            ]
+        )
+
+        # Register JS resources via the no-cache endpoint.
+        # Use boot timestamp as cache buster so the URL changes each HA restart,
+        # forcing fresh ES module evaluation.
+        boot_ts = str(int(time.time()))[-6:]
+        js_path = frontend_dir / "sigenergy-dashboard.js"
+        cache_buster = f"?v={boot_ts}"
+        if js_path.exists():
+            digest = hashlib.md5(js_path.read_bytes()).hexdigest()[:8]  # noqa: S324
+            cache_buster = f"?v={digest}.{boot_ts}"
+        add_extra_js_url(hass, f"/{DOMAIN}/js/sigenergy-dashboard.js{cache_buster}")
+        _LOGGER.info("Genergy Dashboard: JS resources registered")
+
     return True
 
 
@@ -26,24 +87,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Genergy Dashboard from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
-
-    # Register static paths for bundled JS cards
-    frontend_dir = Path(__file__).parent / "frontend"
-    if frontend_dir.exists():
-        await hass.http.async_register_static_paths(
-            [
-                StaticPathConfig(
-                    f"/{DOMAIN}/frontend",
-                    str(frontend_dir),
-                    cache_headers=True,
-                )
-            ]
-        )
-        # Register JS resources so custom cards load in the browser
-        add_extra_js_url(hass, f"/{DOMAIN}/frontend/genergy-dashboard.js")
-        add_extra_js_url(hass, f"/{DOMAIN}/frontend/sigenergy-dashboard.js")
-        add_extra_js_url(hass, f"/{DOMAIN}/frontend/sigenergy-house-card.js")
-        _LOGGER.info("Genergy Dashboard: JS resources registered")
 
     # Install bundled theme
     await hass.async_add_executor_job(_install_theme, hass)
