@@ -49,9 +49,9 @@
                     "heat_pump_power": "__heat_pump_power__"
                   },
                   "features": {
-                    "ev_charger": true,
-                    "ev_vehicle": true,
-                    "heat_pump": true,
+                    "ev_charger": false,
+                    "ev_vehicle": false,
+                    "heat_pump": false,
                     "grid": true,
                     "hide_cables": false
                   },
@@ -984,9 +984,9 @@
               "emhass_projected_bill_without_opt": "__emhass_projected_bill___without_opt"
             },
             "features": {
-              "ev_charger": true,
-              "ev_vehicle": true,
-              "heat_pump": true,
+              "ev_charger": false,
+              "ev_vehicle": false,
+              "heat_pump": false,
               "grid_connection": true,
               "battery_packs": 2,
               "emhass": true,
