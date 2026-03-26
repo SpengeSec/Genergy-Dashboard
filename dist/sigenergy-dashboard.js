@@ -452,9 +452,35 @@ class SigenergySettingsCard extends HTMLElement {
     return { isCumulative: true, dailyEntity: sourceEntityId };
   }
 
+  /**
+   * Check which required HACS frontend cards are missing.
+   * Returns an array of { name, tag, hacs, purpose } objects for missing cards.
+   */
+  _checkPrerequisites() {
+    const REQUIRED_CARDS = [
+      { name: 'Layout Card', tag: 'layout-card', hacs: 'layout-card', repo: 'thomasloven/lovelace-layout-card', hacsId: '156434866', owner: 'thomasloven', repository: 'lovelace-layout-card', purpose: 'Responsive grid layout' },
+      { name: 'ApexCharts Card', tag: 'apexcharts-card', hacs: 'apexcharts-card', repo: 'RomRider/apexcharts-card', hacsId: '331701152', owner: 'RomRider', repository: 'apexcharts-card', purpose: 'Energy time-series charts' },
+      { name: 'Sankey Chart Card', tag: 'sankey-chart', hacs: 'ha-sankey-chart', repo: 'MindFreeze/ha-sankey-chart', hacsId: '455846088', owner: 'MindFreeze', repository: 'ha-sankey-chart', purpose: 'Energy flow diagram' },
+      { name: 'Mushroom Cards', tag: 'mushroom-template-card', hacs: 'mushroom', repo: 'piitaya/lovelace-mushroom', hacsId: '444350375', owner: 'piitaya', repository: 'lovelace-mushroom', purpose: 'Status pills and cards' },
+      { name: 'Card Mod', tag: 'card-mod', hacs: 'lovelace-card-mod', repo: 'thomasloven/lovelace-card-mod', hacsId: '190927524', owner: 'thomasloven', repository: 'lovelace-card-mod', purpose: 'CSS styling injection' },
+    ];
+    const missing = [];
+    for (const card of REQUIRED_CARDS) {
+      if (!customElements.get(card.tag)) {
+        missing.push(card);
+      }
+    }
+    return missing;
+  }
+
   _render() {
     const cfg = this._storeGet();
     const tab = this._activeTab;
+
+    // Check prerequisites on first render
+    const missingCards = this._checkPrerequisites();
+    const prereqDismissed = localStorage.getItem('genergy_prereq_dismissed') === 'true';
+    const showPrereqBanner = missingCards.length > 0 && !prereqDismissed;
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -561,10 +587,71 @@ class SigenergySettingsCard extends HTMLElement {
           .row-label { min-width: 100%; margin-bottom: 4px; }
           .row-state { min-width: 100%; text-align: left; margin-top: 4px; }
         }
+        .prereq-banner {
+          background: rgba(231,76,60,0.12);
+          border: 1px solid rgba(231,76,60,0.4);
+          border-radius: 10px;
+          padding: 14px 16px;
+          margin-bottom: 14px;
+        }
+        .prereq-banner h3 {
+          margin: 0 0 8px; font-size: 14px; font-weight: 700;
+          color: #e74c3c; display: flex; align-items: center; gap: 6px;
+        }
+        .prereq-banner p {
+          margin: 0 0 10px; font-size: 12px; color: var(--secondary-text-color, #8892a4);
+        }
+        .prereq-list { list-style: none; padding: 0; margin: 0 0 10px; }
+        .prereq-list li {
+          display: flex; align-items: center; gap: 8px;
+          padding: 6px 8px; margin-bottom: 4px;
+          background: rgba(45,52,81,0.4); border-radius: 6px;
+          font-size: 12px;
+        }
+        .prereq-list .card-name { font-weight: 600; color: #e74c3c; min-width: 130px; }
+        .prereq-list .card-purpose { flex: 1; color: var(--secondary-text-color, #8892a4); }
+        .prereq-list .card-link {
+          color: #00d4b8; text-decoration: none; font-weight: 600; font-size: 11px;
+          padding: 3px 8px; border: 1px solid rgba(0,212,184,0.4);
+          border-radius: 4px; white-space: nowrap;
+        }
+        .prereq-list .card-link:hover { background: rgba(0,212,184,0.15); }
+        .prereq-dismiss {
+          background: none; border: 1px solid rgba(231,76,60,0.4);
+          color: var(--secondary-text-color, #8892a4); font-size: 11px;
+          padding: 4px 10px; border-radius: 4px; cursor: pointer;
+        }
+        .prereq-dismiss:hover { background: rgba(231,76,60,0.1); }
+        .prereq-refresh {
+          background: none; border: 1px solid rgba(0,212,184,0.4);
+          color: #00d4b8; font-size: 11px;
+          padding: 4px 10px; border-radius: 4px; cursor: pointer; margin-left: 6px;
+        }
+        .prereq-refresh:hover { background: rgba(0,212,184,0.1); }
       </style>
 
       <div class="card">
         <h2>⚙️ Sigenergy Settings</h2>
+        ${showPrereqBanner ? `
+        <div class="prereq-banner">
+          <h3>⚠️ Missing Required Cards</h3>
+          <p>The following HACS frontend plugins are required for the dashboard to work properly. Install them, then hard-refresh your browser (Ctrl+Shift+R).</p>
+          <ul class="prereq-list">
+            ${missingCards.map(c => `
+              <li>
+                <span class="card-name">${c.name}</span>
+                <span class="card-purpose">${c.purpose}</span>
+                <a class="card-link" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=${c.owner}&repository=${c.repository}" target="_blank" rel="noopener">Install via HACS</a>
+              </li>
+            `).join('')}
+          </ul>
+          <p style="font-size:11px;color:var(--secondary-text-color,#8892a4);margin:0 0 10px;">
+            Or open <a href="/hacs/integrations" target="_top" style="color:#00d4b8">HACS</a> and search for: ${missingCards.map(c => '<b>' + c.hacs + '</b>').join(', ')}
+          </p>
+          <button class="prereq-dismiss" id="prereq-dismiss">Dismiss</button>
+          <button class="prereq-refresh" id="prereq-recheck">Re-check</button>
+        </div>
+        ` : ''}
         <div class="tabs">
           <button class="tab ${tab===0?'active':''}" data-tab="0">⚡ Entities</button>
           <button class="tab ${tab===1?'active':''}" data-tab="1">🔧 Features</button>
@@ -582,6 +669,22 @@ class SigenergySettingsCard extends HTMLElement {
         this._render();
       });
     });
+
+    // Prerequisite banner buttons
+    const dismissBtn = this.shadowRoot.getElementById('prereq-dismiss');
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', () => {
+        localStorage.setItem('genergy_prereq_dismissed', 'true');
+        this._render();
+      });
+    }
+    const recheckBtn = this.shadowRoot.getElementById('prereq-recheck');
+    if (recheckBtn) {
+      recheckBtn.addEventListener('click', () => {
+        localStorage.removeItem('genergy_prereq_dismissed');
+        this._render();
+      });
+    }
 
     const content = this.shadowRoot.getElementById('content');
     if (tab === 0) this._renderEntities(content, cfg);

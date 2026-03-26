@@ -19,6 +19,15 @@ from .dashboard_generator import generate_dashboard
 
 _LOGGER = logging.getLogger(__name__)
 
+# Required HACS frontend cards: (keyword to match in Lovelace resource URL, display name, HACS search term)
+REQUIRED_HACS_CARDS: list[tuple[str, str, str, str, str]] = [
+    ("layout-card", "Layout Card", "layout-card", "thomasloven", "lovelace-layout-card"),
+    ("apexcharts-card", "ApexCharts Card", "apexcharts-card", "RomRider", "apexcharts-card"),
+    ("sankey-chart", "Sankey Chart Card", "sankey-chart", "MindFreeze", "ha-sankey-chart"),
+    ("mushroom", "Mushroom Cards", "mushroom", "piitaya", "lovelace-mushroom"),
+    ("card-mod", "Card Mod", "card-mod", "thomasloven", "lovelace-card-mod"),
+]
+
 
 class _NoCacheJSView(HomeAssistantView):
     """Serve JS files with Cache-Control: no-store to prevent stale module caching."""
@@ -86,10 +95,99 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 PLATFORMS: list[str] = ["sensor"]
 
 
+async def _check_prerequisites(hass: HomeAssistant) -> None:
+    """Check if required HACS frontend cards are installed and notify user if not."""
+    from homeassistant.components.persistent_notification import async_create as pn_create
+
+    missing: list[str] = []
+
+    try:
+        # Try to read Lovelace resource list to check for installed cards
+        from homeassistant.components.lovelace import LOVELACE_DATA
+
+        lovelace_data = hass.data.get(LOVELACE_DATA)
+        if lovelace_data is None:
+            _LOGGER.debug("Genergy Dashboard: Lovelace not loaded yet, skipping prereq check")
+            return
+
+        # Get the default dashboard's resources (stored in lovelace_resources)
+        resources = lovelace_data.resources
+        if resources is None:
+            _LOGGER.debug("Genergy Dashboard: No Lovelace resources found")
+            missing = [name for _, name, _, _, _ in REQUIRED_HACS_CARDS]
+        else:
+            items = resources.async_items() if hasattr(resources, "async_items") else []
+            loaded_urls = [
+                (item.get("url") or "").lower() for item in items
+            ]
+
+            for keyword, display_name, _, owner, repository in REQUIRED_HACS_CARDS:
+                if not any(keyword in url for url in loaded_urls):
+                    missing.append((display_name, owner, repository))
+
+    except Exception as err:
+        _LOGGER.debug("Genergy Dashboard: Could not check Lovelace resources: %s", err)
+        return
+
+    if not missing:
+        _LOGGER.info("Genergy Dashboard: All required HACS cards are installed")
+        # Clean up any previous notification
+        from homeassistant.components.persistent_notification import async_dismiss
+        async_dismiss(hass, "genergy_missing_cards")
+        return
+
+    _LOGGER.warning(
+        "Genergy Dashboard: Missing HACS frontend cards: %s. "
+        "Dashboard may not render correctly.",
+        ", ".join(name for name, _, _ in missing),
+    )
+
+    # Create a persistent notification with direct my.home-assistant.io links
+    card_list = "\n".join(
+        f"  • **{name}** — [Install via HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner={owner}&repository={repo})"
+        for name, owner, repo in missing
+    )
+    pn_create(
+        hass,
+        title="🎨 Genergy Dashboard: Missing HACS Cards",
+        message=(
+            f"The following HACS frontend cards are required but not installed:\n\n"
+            f"{card_list}\n\n"
+            f"After installing, restart Home Assistant and hard-refresh your browser.\n\n"
+            f"If HACS is not installed, visit https://hacs.xyz/docs/use/"
+        ),
+        notification_id="genergy_missing_cards",
+    )
+
+    # Also create a Repair issue if available (HA 2022.9+)
+    try:
+        from homeassistant.helpers.issue_registry import (
+            async_create_issue,
+            IssueSeverity,
+        )
+
+        async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id="missing_hacs_frontend_cards",
+            is_fixable=False,
+            severity=IssueSeverity.WARNING,
+            translation_key="missing_cards",
+            translation_placeholders={
+                "cards": ", ".join(name for name, _, _ in missing),
+            },
+        )
+    except ImportError:
+        pass  # Older HA version without issue registry
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Genergy Dashboard from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
+
+    # Check for missing HACS frontend prerequisites
+    await _check_prerequisites(hass)
 
     # Install bundled theme
     await hass.async_add_executor_job(_install_theme, hass)

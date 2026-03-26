@@ -3,6 +3,8 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=SpengeSec&repository=Genergy-Dashboard)
+
 > **⚠️ Active Development**
 >
 > This project is under active development. The **Overview** and **Settings** views are fully functional.
@@ -51,6 +53,7 @@ Built-in visual cable path editor for customizing the animated power flow routes
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
+- [Automated Prerequisite Detection](#automated-prerequisite-detection)
 - [Quick Start Guide](#quick-start-guide)
 - [Configuration Guide](#configuration-guide)
 - [Entity Reference](#entity-reference)
@@ -109,15 +112,21 @@ Built-in visual cable path editor for customizing the animated power flow routes
 
 ### Required HACS Frontend Plugins
 
-Install these **before** installing the Sigenergy Dashboard:
+The dashboard requires the following HACS frontend plugins. **The integration automatically detects missing cards** and shows a banner in the Settings view with direct install links for each one:
 
-| Plugin | HACS Search Name | Purpose |
+![Prerequisite Detection Banner](screenshots/prereq-banner.png)
+
+You can also install them manually:
+
+| Plugin | Install Link | Purpose |
 |---|---|---|
-| [Layout Card](https://github.com/thomasloven/lovelace-layout-card) | `layout-card` | Responsive grid layout |
-| [ApexCharts Card](https://github.com/RomRider/apexcharts-card) | `apexcharts-card` | Energy time-series charts |
-| [Sankey Chart Card](https://github.com/MindFreeze/ha-sankey-chart) | `sankey-chart` | Energy flow diagram |
-| [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom) | `mushroom` | Status pills and cards |
-| [Card Mod](https://github.com/thomasloven/lovelace-card-mod) | `card-mod` | CSS styling injection |
+| [Layout Card](https://github.com/thomasloven/lovelace-layout-card) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=thomasloven&repository=lovelace-layout-card) | Responsive grid layout |
+| [ApexCharts Card](https://github.com/RomRider/apexcharts-card) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=RomRider&repository=apexcharts-card) | Energy time-series charts |
+| [Sankey Chart Card](https://github.com/MindFreeze/ha-sankey-chart) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MindFreeze&repository=ha-sankey-chart) | Energy flow diagram |
+| [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=piitaya&repository=lovelace-mushroom) | Status pills and cards |
+| [Card Mod](https://github.com/thomasloven/lovelace-card-mod) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=thomasloven&repository=lovelace-card-mod) | CSS styling injection |
+
+> **Note**: After installing the plugins, restart Home Assistant and hard-refresh your browser (Ctrl+Shift+R / Cmd+Shift+R).
 
 ### Optional Integrations
 
@@ -134,13 +143,17 @@ Install these **before** installing the Sigenergy Dashboard:
 
 ### Step 1: Install Dependencies
 
-Open HACS → Frontend, and install all 5 required plugins listed above. Restart Home Assistant after installing.
+The integration will **automatically detect** missing HACS frontend plugins and guide you through installation (see [Prerequisites](#prerequisites)). You can also pre-install them via the install links above.
+
+Restart Home Assistant after installing any new plugins.
 
 ### Step 2: Install Genergy Dashboard
 
 #### Via HACS (Recommended)
 
-1. Open **HACS** → **Integrations** → click the three dots (⋮) → **Custom repositories**
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=SpengeSec&repository=Genergy-Dashboard)
+
+1. Click the button above, or open **HACS** → **Integrations** → click the three dots (⋮) → **Custom repositories**
 2. Paste the GitHub repository URL, select **Integration** as category, click **Add**
 3. Search for **Genergy Dashboard** and click **Install**
 4. Restart Home Assistant
@@ -172,6 +185,30 @@ Open HACS → Frontend, and install all 5 required plugins listed above. Restart
 > **Sigenergy users**: Check the "Use Sigenergy defaults" checkbox on the first step. This pre-fills all entity IDs with the correct Sigenergy naming convention (`sensor.sigen_plant_*` / `sensor.sigen_inverter_*`) and creates the dashboard immediately — no manual entity mapping required.
 
 > **Note**: The dashboard is created with URL path `dashboard-sigenergy`. The settings card uses this path to persist your configuration.
+
+---
+
+## Automated Prerequisite Detection
+
+The integration includes a **two-layer detection system** that automatically checks for required HACS frontend plugins:
+
+### Backend Detection (on startup)
+When the integration loads, it scans your Lovelace resource list for the 5 required cards. If any are missing:
+- A **persistent notification** appears in Home Assistant with direct install links for each missing card
+- A **Repair issue** is created in **Settings → System → Repairs** with a warning
+
+### Frontend Detection (in the Settings view)
+When you open the Settings tab, the dashboard checks if required custom elements are registered in the browser. If any are missing:
+- A **red banner** appears at the top of the Settings card listing each missing card with:
+  - Card name and purpose
+  - **"Install via HACS" button** that links directly to the correct HACS repository page (via [my.home-assistant.io](https://my.home-assistant.io))
+  - Fallback search terms for manual HACS browsing
+- **Dismiss** button to hide the banner (stored in localStorage)
+- **Re-check** button to verify after installing
+
+![Prerequisite Detection Banner](screenshots/prereq-banner.png)
+
+> **After installing missing cards**: Restart Home Assistant, then hard-refresh your browser (Ctrl+Shift+R / Cmd+Shift+R). The banner will automatically disappear once all cards are detected.
 
 ---
 
@@ -452,7 +489,7 @@ The house card composites multiple PNG layers:
 | **Dashboard not in sidebar** | Go to Settings → Devices & Services, find Genergy Dashboard, check it's loaded. Try a hard refresh (Ctrl+Shift+R) |
 | **Cards not appearing** | Clear browser cache (Ctrl+Shift+Delete), hard-refresh (Ctrl+Shift+R) |
 | **"Custom element doesn't exist: sigenergy-settings-card" (or sigenergy-house-card)** | This is auto-recovered by the built-in watchdog. **1)** Try a hard refresh (Ctrl+Shift+R / Cmd+Shift+R). **2)** If it persists, restart Home Assistant — the integration registers JS resources on startup. **3)** Check Settings → Devices & Services and confirm Genergy Dashboard is loaded without errors. |
-| **"Custom element doesn't exist: layout-card" (or apexcharts/mushroom/etc.)** | Install the 5 required HACS dependencies (layout-card, apexcharts-card, sankey-chart, mushroom, card-mod) and restart HA |
+| **"Custom element doesn't exist: layout-card" (or apexcharts/mushroom/etc.)** | The integration will detect and notify you about missing cards automatically. Open the Settings tab to see the prerequisite banner with direct install links. Or install the 5 required HACS dependencies manually (see [Prerequisites](#prerequisites)) and restart HA |
 | **Entity not found (red ✗ badge)** | Check entity ID in Developer Tools → States. Entity IDs are case-sensitive |
 | **Light/wrong theme** | The integration auto-installs the theme. If missing, check `/config/themes/sigenergy_dark.yaml` exists and reload themes |
 | **House card shows no image** | Ensure the integration is properly installed — images are bundled in the `frontend/images/` directory |
@@ -524,6 +561,13 @@ genergy-dashboard/
 ---
 
 ## Changelog
+
+### v2.4.0
+- **Automated prerequisite detection** — Two-layer detection system that checks for required HACS frontend plugins (Layout Card, ApexCharts Card, Sankey Chart Card, Mushroom Cards, Card Mod) both on backend startup and in the frontend Settings view.
+- **Prerequisite install banner** — When missing cards are detected, a red banner appears in the Settings view listing each missing card with its purpose and a direct "Install via HACS" button linking to the correct HACS repository page via [my.home-assistant.io](https://my.home-assistant.io) redirect. Includes dismiss and re-check controls.
+- **Backend notifications** — Missing cards trigger a persistent notification in Home Assistant with clickable install links and a Repair issue in Settings → System → Repairs.
+- **Direct HACS install links** — All prerequisite install buttons use the official `my.home-assistant.io/redirect/hacs_repository/` mechanism, which works regardless of the user's HA domain or port configuration.
+- **HACS install button in README** — Added the blue "Open your Home Assistant instance" HACS badge to the README for one-click integration installation.
 
 ### v2.3.0
 - **Sankey graph threshold** — Entities below 0.1 kWh are automatically hidden (`min_state: 0.1`), preventing near-zero entries (e.g., `0.001 kWh`) from cluttering the chart. Values rounded to 1 decimal place.

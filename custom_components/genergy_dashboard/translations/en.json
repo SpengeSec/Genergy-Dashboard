@@ -149,5 +149,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "missing_cards": {
+      "title": "Missing HACS Frontend Cards",
+      "description": "The following HACS frontend plugins are required for the Genergy Dashboard but are not installed: {cards}. Install them via HACS (Frontend section), then restart Home Assistant."
+    }
   }
 }
