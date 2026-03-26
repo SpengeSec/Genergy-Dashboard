@@ -78,7 +78,7 @@ const DEFAULT_CONFIG = {
     grid_import: "#e74c3c",
     grid_export: "#2ecc71",
     home: "#3498db",
-    ev: "#9b59b6",
+    ev: "#ff69b4",
     heat_pump: "#e67e22",
     cable_static: "#888888",
   },
@@ -528,7 +528,7 @@ class SigenergyHouseCard extends LitElement {
       home: '#3498db',
       battery: '#2ecc71',
       grid: '#e74c3c',
-      ev: '#9b59b6',
+      ev: '#ff69b4',
       heat_pump: '#e67e22',
     };
 
@@ -1003,7 +1003,7 @@ class SigenergyHouseCard extends LitElement {
               <button class="copy-btn" @click="${this._onCopyPaths}">Copy Paths</button>
               ${Object.keys(this._editPaths).map(name => html`
                 <span class="path-controls">
-                  <span class="path-name" style="color: ${{solar:'#f5c542',home:'#3498db',battery:'#2ecc71',grid:'#e74c3c',ev:'#9b59b6'}[name]||'#fff'}">${name}</span>
+                  <span class="path-name" style="color: ${{solar:'#f5c542',home:'#3498db',battery:'#2ecc71',grid:'#e74c3c',ev:'#ff69b4'}[name]||'#fff'}">${name}</span>
                   <button class="sm-btn" data-path="${name}" @click="${this._onAddPoint}">+pt</button>
                   <button class="sm-btn" data-path="${name}" @click="${this._onRemovePoint}">-pt</button>
                 </span>

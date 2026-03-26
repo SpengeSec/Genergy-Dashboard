@@ -96,6 +96,28 @@ CONF_EV_CHARGER_POWER = "ev_charger_power"
 CONF_EV_CHARGER_STATE = "ev_charger_state"
 CONF_HEAT_PUMP_POWER = "heat_pump_power"
 
+# EV / Heat Pump daily energy (for Sankey graph)
+CONF_EV_ENERGY_TODAY = "ev_energy_today"
+CONF_HEAT_PUMP_ENERGY_TODAY = "heat_pump_energy_today"
+CONF_EV_ENERGY_DAILY_METER = "ev_energy_daily_meter"
+CONF_HP_ENERGY_DAILY_METER = "hp_energy_daily_meter"
+CONF_FEATURE_SHOW_EV_IN_SANKEY = "show_ev_in_sankey"
+CONF_FEATURE_SHOW_HP_IN_SANKEY = "show_hp_in_sankey"
+CONF_FEATURE_EV_ENERGY_IS_CUMULATIVE = "ev_energy_is_cumulative"
+CONF_FEATURE_HP_ENERGY_IS_CUMULATIVE = "hp_energy_is_cumulative"
+
+# Dual tariff support (smart meters with low/high tariff)
+CONF_FEATURE_DUAL_TARIFF = "feature_dual_tariff"
+CONF_GRID_IMPORT_HIGH_TARIFF = "grid_import_high_tariff"
+CONF_GRID_IMPORT_LOW_TARIFF = "grid_import_low_tariff"
+CONF_GRID_EXPORT_HIGH_TARIFF = "grid_export_high_tariff"
+CONF_GRID_EXPORT_LOW_TARIFF = "grid_export_low_tariff"
+
+# 3-phase grid support
+CONF_FEATURE_THREE_PHASE = "feature_three_phase"
+CONF_GRID_VOLTAGE_L2 = "grid_voltage_l2"
+CONF_GRID_VOLTAGE_L3 = "grid_voltage_l3"
+
 # Feature toggles
 CONF_USE_SIGENERGY_DEFAULTS = "use_sigenergy_defaults"
 CONF_FEATURE_EV = "feature_ev"
@@ -169,6 +191,19 @@ PLACEHOLDER_MAP = {
     CONF_EV_CHARGER_POWER: "__ev_charger_power__",
     CONF_EV_CHARGER_STATE: "__ev_charger_state__",
     CONF_HEAT_PUMP_POWER: "__heat_pump_power__",
+    # EV / Heat Pump daily energy (Sankey)
+    CONF_EV_ENERGY_TODAY: "__ev_energy_today__",
+    CONF_HEAT_PUMP_ENERGY_TODAY: "__heat_pump_energy_today__",
+    CONF_EV_ENERGY_DAILY_METER: "__ev_energy_daily_meter__",
+    CONF_HP_ENERGY_DAILY_METER: "__hp_energy_daily_meter__",
+    # Dual tariff
+    CONF_GRID_IMPORT_HIGH_TARIFF: "__grid_import_high_tariff__",
+    CONF_GRID_IMPORT_LOW_TARIFF: "__grid_import_low_tariff__",
+    CONF_GRID_EXPORT_HIGH_TARIFF: "__grid_export_high_tariff__",
+    CONF_GRID_EXPORT_LOW_TARIFF: "__grid_export_low_tariff__",
+    # 3-phase voltage
+    CONF_GRID_VOLTAGE_L2: "__grid_voltage_l2__",
+    CONF_GRID_VOLTAGE_L3: "__grid_voltage_l3__",
 }
 
 # ---------------------------------------------------------------------------

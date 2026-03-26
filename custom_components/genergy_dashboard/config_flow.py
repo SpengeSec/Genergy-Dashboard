@@ -63,6 +63,22 @@ from .const import (
     CONF_BATTERY_CURRENT,
     CONF_INVERTER_OUTPUT_POWER,
     CONF_DC_TRANSFORMER_TEMP,
+    CONF_FEATURE_DUAL_TARIFF,
+    CONF_GRID_IMPORT_HIGH_TARIFF,
+    CONF_GRID_IMPORT_LOW_TARIFF,
+    CONF_GRID_EXPORT_HIGH_TARIFF,
+    CONF_GRID_EXPORT_LOW_TARIFF,
+    CONF_FEATURE_THREE_PHASE,
+    CONF_GRID_VOLTAGE_L2,
+    CONF_GRID_VOLTAGE_L3,
+    CONF_EV_ENERGY_TODAY,
+    CONF_HEAT_PUMP_ENERGY_TODAY,
+    CONF_EV_ENERGY_DAILY_METER,
+    CONF_HP_ENERGY_DAILY_METER,
+    CONF_FEATURE_SHOW_EV_IN_SANKEY,
+    CONF_FEATURE_SHOW_HP_IN_SANKEY,
+    CONF_FEATURE_EV_ENERGY_IS_CUMULATIVE,
+    CONF_FEATURE_HP_ENERGY_IS_CUMULATIVE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -94,6 +110,7 @@ def _core_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
 
 
 def _energy_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
+    d = defaults or {}
     return vol.Schema(
         {
             _optional_entity(CONF_SOLAR_ENERGY_TODAY, defaults): _SENSOR_SELECTOR,
@@ -102,6 +119,14 @@ def _energy_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             _optional_entity(CONF_BATTERY_DISCHARGE_TODAY, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_GRID_IMPORT_TODAY, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_GRID_EXPORT_TODAY, defaults): _SENSOR_SELECTOR,
+            vol.Optional(
+                CONF_FEATURE_DUAL_TARIFF,
+                default=d.get(CONF_FEATURE_DUAL_TARIFF, False),
+            ): BooleanSelector(),
+            _optional_entity(CONF_GRID_IMPORT_HIGH_TARIFF, defaults): _SENSOR_SELECTOR,
+            _optional_entity(CONF_GRID_IMPORT_LOW_TARIFF, defaults): _SENSOR_SELECTOR,
+            _optional_entity(CONF_GRID_EXPORT_HIGH_TARIFF, defaults): _SENSOR_SELECTOR,
+            _optional_entity(CONF_GRID_EXPORT_LOW_TARIFF, defaults): _SENSOR_SELECTOR,
         }
     )
 
@@ -122,13 +147,23 @@ def _extras_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             _optional_entity(CONF_GRID_VOLTAGE, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_GRID_FREQUENCY, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_GRID_CT_CLAMP, defaults): _SENSOR_SELECTOR,
+            vol.Optional(
+                CONF_FEATURE_THREE_PHASE,
+                default=d.get(CONF_FEATURE_THREE_PHASE, False),
+            ): BooleanSelector(),
+            _optional_entity(CONF_GRID_VOLTAGE_L2, defaults): _SENSOR_SELECTOR,
+            _optional_entity(CONF_GRID_VOLTAGE_L3, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_BATTERY_VOLTAGE, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_BATTERY_CURRENT, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_INVERTER_OUTPUT_POWER, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_DC_TRANSFORMER_TEMP, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_EV_CHARGER_POWER, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_EV_CHARGER_STATE, defaults): _SENSOR_SELECTOR,
+            _optional_entity(CONF_EV_ENERGY_TODAY, defaults): _SENSOR_SELECTOR,
+            _optional_entity(CONF_EV_ENERGY_DAILY_METER, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_HEAT_PUMP_POWER, defaults): _SENSOR_SELECTOR,
+            _optional_entity(CONF_HEAT_PUMP_ENERGY_TODAY, defaults): _SENSOR_SELECTOR,
+            _optional_entity(CONF_HP_ENERGY_DAILY_METER, defaults): _SENSOR_SELECTOR,
             vol.Optional(
                 CONF_FEATURE_EV,
                 default=d.get(CONF_FEATURE_EV, False),
@@ -136,6 +171,22 @@ def _extras_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Optional(
                 CONF_FEATURE_HEAT_PUMP,
                 default=d.get(CONF_FEATURE_HEAT_PUMP, False),
+            ): BooleanSelector(),
+            vol.Optional(
+                CONF_FEATURE_EV_ENERGY_IS_CUMULATIVE,
+                default=d.get(CONF_FEATURE_EV_ENERGY_IS_CUMULATIVE, False),
+            ): BooleanSelector(),
+            vol.Optional(
+                CONF_FEATURE_HP_ENERGY_IS_CUMULATIVE,
+                default=d.get(CONF_FEATURE_HP_ENERGY_IS_CUMULATIVE, False),
+            ): BooleanSelector(),
+            vol.Optional(
+                CONF_FEATURE_SHOW_EV_IN_SANKEY,
+                default=d.get(CONF_FEATURE_SHOW_EV_IN_SANKEY, False),
+            ): BooleanSelector(),
+            vol.Optional(
+                CONF_FEATURE_SHOW_HP_IN_SANKEY,
+                default=d.get(CONF_FEATURE_SHOW_HP_IN_SANKEY, False),
             ): BooleanSelector(),
             vol.Optional(
                 CONF_FEATURE_EMHASS,

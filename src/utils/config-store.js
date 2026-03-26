@@ -40,6 +40,8 @@ const DEFAULT_CONFIG = {
     emhass: true,
     weather_widget: true,
     sunrise_sunset: false,
+    three_phase: false,
+    dual_tariff: false,
   },
   pricing: {
     source: 'nordpool',
