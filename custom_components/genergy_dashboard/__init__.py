@@ -83,6 +83,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
+PLATFORMS: list[str] = ["sensor"]
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Genergy Dashboard from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -95,6 +98,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Run dashboard generation (contains file I/O) off the event loop
     await _create_or_update_dashboard(hass, entry)
 
+    # Set up sensor platform (e.g. dual-tariff computed sensors)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
     # Listen for options updates
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -103,6 +109,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     hass.data[DOMAIN].pop(entry.entry_id, None)
     return True
 

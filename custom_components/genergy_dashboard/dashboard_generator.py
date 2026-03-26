@@ -181,11 +181,19 @@ def _apply_feature_toggles(dashboard: dict, config: dict[str, Any]) -> dict:
     value positions with empty strings so custom cards don't try to
     look up literal placeholder text as HA entity IDs.
     """
-    from .const import CONF_FEATURE_EV, CONF_FEATURE_HEAT_PUMP, CONF_BATTERY_PACKS
+    from .const import (
+        CONF_FEATURE_EV, CONF_FEATURE_HEAT_PUMP, CONF_BATTERY_PACKS,
+        CONF_FEATURE_THREE_PHASE, CONF_GRID_VOLTAGE_L2, CONF_GRID_VOLTAGE_L3,
+        CONF_FEATURE_DUAL_TARIFF,
+        CONF_GRID_IMPORT_HIGH_TARIFF, CONF_GRID_IMPORT_LOW_TARIFF,
+        CONF_GRID_EXPORT_HIGH_TARIFF, CONF_GRID_EXPORT_LOW_TARIFF,
+    )
 
     ev_enabled = config.get(CONF_FEATURE_EV, False)
     hp_enabled = config.get(CONF_FEATURE_HEAT_PUMP, False)
     battery_packs = config.get(CONF_BATTERY_PACKS, 1)
+    three_phase = config.get(CONF_FEATURE_THREE_PHASE, False)
+    dual_tariff = config.get(CONF_FEATURE_DUAL_TARIFF, False)
 
     def _patch(obj: Any) -> Any:
         if isinstance(obj, dict):
@@ -200,6 +208,39 @@ def _apply_feature_toggles(dashboard: dict, config: dict[str, Any]) -> dict:
             # Patch device card battery packs
             if obj.get("type") == "custom:sigenergy-device-card":
                 obj["battery_packs"] = battery_packs
+
+            # Inject 3-phase and dual-tariff config into _sigenergy_config
+            if "_sigenergy_config" in obj:
+                sc = obj["_sigenergy_config"]
+                entities = sc.get("entities", {})
+
+                # 3-phase voltage: add L2/L3 entity references
+                if three_phase:
+                    entities["grid_voltage_l2"] = config.get(CONF_GRID_VOLTAGE_L2, "")
+                    entities["grid_voltage_l3"] = config.get(CONF_GRID_VOLTAGE_L3, "")
+                    sc.setdefault("features", {})["three_phase"] = True
+                else:
+                    sc.setdefault("features", {})["three_phase"] = False
+
+                # Dual tariff: add individual tariff entity references
+                if dual_tariff:
+                    entities["grid_import_high_tariff"] = config.get(
+                        CONF_GRID_IMPORT_HIGH_TARIFF, ""
+                    )
+                    entities["grid_import_low_tariff"] = config.get(
+                        CONF_GRID_IMPORT_LOW_TARIFF, ""
+                    )
+                    entities["grid_export_high_tariff"] = config.get(
+                        CONF_GRID_EXPORT_HIGH_TARIFF, ""
+                    )
+                    entities["grid_export_low_tariff"] = config.get(
+                        CONF_GRID_EXPORT_LOW_TARIFF, ""
+                    )
+                    sc.setdefault("features", {})["dual_tariff"] = True
+                else:
+                    sc.setdefault("features", {})["dual_tariff"] = False
+
+                sc["entities"] = entities
 
             # Clean unresolved placeholders in entity value dicts
             if "entities" in obj and isinstance(obj["entities"], dict):
@@ -222,6 +263,34 @@ def generate_dashboard(config: dict[str, Any]) -> dict:
 
     Returns a dict suitable for storing via LovelaceStorage.async_save().
     """
+    from .const import (
+        CONF_FEATURE_DUAL_TARIFF,
+        CONF_GRID_IMPORT_HIGH_TARIFF,
+        CONF_GRID_IMPORT_LOW_TARIFF,
+        CONF_GRID_EXPORT_HIGH_TARIFF,
+        CONF_GRID_EXPORT_LOW_TARIFF,
+        CONF_GRID_IMPORT_TODAY,
+        CONF_GRID_EXPORT_TODAY,
+        CONF_FEATURE_THREE_PHASE,
+        CONF_GRID_VOLTAGE_L2,
+        CONF_GRID_VOLTAGE_L3,
+    )
+
+    # Pre-process: auto-wire dual-tariff computed sensors
+    config = dict(config)  # don't mutate the original
+    if config.get(CONF_FEATURE_DUAL_TARIFF):
+        import_high = config.get(CONF_GRID_IMPORT_HIGH_TARIFF, "")
+        import_low = config.get(CONF_GRID_IMPORT_LOW_TARIFF, "")
+        export_high = config.get(CONF_GRID_EXPORT_HIGH_TARIFF, "")
+        export_low = config.get(CONF_GRID_EXPORT_LOW_TARIFF, "")
+
+        # If user hasn't set a single grid_import_today entity but has tariff
+        # entities, point to the computed sensor
+        if not config.get(CONF_GRID_IMPORT_TODAY) and import_high and import_low:
+            config[CONF_GRID_IMPORT_TODAY] = "sensor.genergy_grid_import_total"
+        if not config.get(CONF_GRID_EXPORT_TODAY) and export_high and export_low:
+            config[CONF_GRID_EXPORT_TODAY] = "sensor.genergy_grid_export_total"
+
     template = _load_template()
     dashboard = copy.deepcopy(template)
 

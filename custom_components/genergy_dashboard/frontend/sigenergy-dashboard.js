@@ -37,6 +37,10 @@ const DEFAULT_ENTITIES = {
   battery_discharge_today: 'sensor.deyeinvertermaster_summary_day_battery_discharge',
   grid_import_today: 'sensor.deyeinvertermaster_summary_day_grid_import_buy',
   grid_export_today: 'sensor.deyeinvertermaster_summary_day_grid_export_sell',
+  grid_import_high_tariff: '',
+  grid_import_low_tariff: '',
+  grid_export_high_tariff: '',
+  grid_export_low_tariff: '',
   weather: 'weather.forecast_home',
   ev_charger_power: '',
   ev_charger_state: '',
@@ -64,6 +68,8 @@ const DEFAULT_ENTITIES = {
   inverter_temp: 'sensor.deyeinvertermaster_temperature_dc_transformer',
   battery_temp: 'sensor.deyeinvertermaster_battery_temperature',
   grid_voltage: 'sensor.deyeinvertermaster_grid_voltage_l1',
+  grid_voltage_l2: '',
+  grid_voltage_l3: '',
   grid_frequency: 'sensor.deyeinvertermaster_grid_frequency',
   // Additional system entities
   grid_power_ct: 'sensor.deyeinvertermaster_grid_power_ct_clamp',
@@ -109,6 +115,12 @@ const DEFAULT_ENTITIES = {
   emhass_import_cost_daily: '',
   emhass_grid_only_cost_daily: '',
   emhass_projected_bill_without_opt: '',
+  // EV / Heat Pump daily energy (for Sankey)
+  ev_energy_today: '',
+  heat_pump_energy_today: '',
+  // Utility meter entities (auto-created for cumulative sensors)
+  ev_energy_daily_meter: '',
+  hp_energy_daily_meter: '',
 };
 
 const DEFAULT_CONFIG = {
@@ -127,6 +139,12 @@ const DEFAULT_CONFIG = {
     solar_forecast: false,
     weather_widget: true,
     sunrise_sunset: false,
+    three_phase: false,
+    dual_tariff: false,
+    show_ev_in_sankey: false,
+    show_hp_in_sankey: false,
+    ev_energy_is_cumulative: false,
+    hp_energy_is_cumulative: false,
   },
   pricing: {
     source: 'nordpool',
@@ -301,6 +319,7 @@ class SigenergySettingsCard extends HTMLElement {
   }
 
   set hass(hass) {
+    const firstHass = !this._hass;
     this._hass = hass;
     // Provide hass to the config store for permanent HA-based storage
     const store = window.SigenergyConfig;
@@ -316,12 +335,26 @@ class SigenergySettingsCard extends HTMLElement {
       this._pathEditorChecked = true;
       this._checkPathEditorState();
     }
-    // Don't re-render if user is actively editing an input — prevents flicker/deselect
-    const active = this.shadowRoot?.activeElement;
-    if (active && (active.tagName === 'INPUT' || active.tagName === 'SELECT')) {
-      return;
+    // First hass → full render. Subsequent hass updates → only update state badges inline.
+    // This prevents full DOM teardown/rebuild on every HA state push, which was
+    // destroying event listeners mid-click and causing sluggish/missed toggles.
+    if (firstHass) {
+      this._render();
+    } else {
+      this._updateStateBadges();
     }
-    this._render();
+  }
+
+  _updateStateBadges() {
+    if (!this.shadowRoot) return;
+    this.shadowRoot.querySelectorAll('.row-state[data-entity]').forEach(badge => {
+      const entityId = badge.dataset.entity;
+      const state = this._getState(entityId);
+      if (badge.textContent !== state) {
+        badge.textContent = state;
+        badge.className = 'row-state' + (state.startsWith('❌') ? ' err' : '');
+      }
+    });
   }
 
   setConfig(config) {
@@ -346,6 +379,77 @@ class SigenergySettingsCard extends HTMLElement {
     const store = window.SigenergyConfig;
     if (typeof store.save === 'function') { store.save(data); }
     else { store._save(data); store._notify(); }
+  }
+
+  /**
+   * Check if an entity is cumulative (total_increasing with large state),
+   * and if so, create a daily utility_meter helper via HA config flow API.
+   * Returns { isCumulative, dailyEntity } where dailyEntity is the utility meter entity_id.
+   */
+  async _ensureDailyMeter(sourceEntityId, meterName) {
+    if (!this._hass || !sourceEntityId) return { isCumulative: false, dailyEntity: sourceEntityId };
+
+    const stateObj = this._hass.states[sourceEntityId];
+    if (!stateObj) return { isCumulative: false, dailyEntity: sourceEntityId };
+
+    const stateClass = stateObj.attributes?.state_class;
+    const stateVal = parseFloat(stateObj.state);
+    const unit = stateObj.attributes?.unit_of_measurement;
+
+    // Only act on total_increasing energy sensors with high cumulative values
+    // Daily-resetting sensors (like Deye summary_day) typically have state < 100.
+    // True cumulative sensors have state in the hundreds/thousands.
+    const isCumulative = stateClass === 'total_increasing' && unit === 'kWh' && stateVal > 100;
+
+    if (!isCumulative) return { isCumulative: false, dailyEntity: sourceEntityId };
+
+    // Check if a daily utility meter already exists for this source
+    const expectedPrefix = 'sensor.genergy_' + meterName + '_daily';
+    const existingMeter = Object.keys(this._hass.states).find(k => k.startsWith(expectedPrefix) || k === expectedPrefix);
+    if (existingMeter) {
+      return { isCumulative: true, dailyEntity: existingMeter };
+    }
+
+    // Create utility_meter via config_entries flow (HA helper, using REST API)
+    try {
+      const friendlyName = 'Genergy ' + meterName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) + ' Daily';
+
+      // Step 1: Start the config flow for utility_meter
+      const flowResult = await this._hass.callApi('POST', 'config/config_entries/flow', {
+        handler: 'utility_meter',
+        show_advanced_options: false
+      });
+
+      if (flowResult && flowResult.flow_id) {
+        // Step 2: Submit the form with utility meter config
+        const createResult = await this._hass.callApi('POST', 'config/config_entries/flow/' + flowResult.flow_id, {
+          name: friendlyName,
+          source: sourceEntityId,
+          cycle: 'daily',
+          offset: 0,
+          net_consumption: false,
+          tariffs: [],
+          always_available: true,
+          periodically_resetting: false,
+        });
+
+        if (createResult && createResult.type === 'create_entry') {
+          console.log('Created utility meter:', friendlyName, 'from', sourceEntityId);
+          // Wait a moment for HA to register the new entity
+          await new Promise(r => setTimeout(r, 3000));
+          // Find the newly created entity
+          const newMeter = Object.keys(this._hass.states).find(k =>
+            k.includes('genergy_' + meterName) && k.includes('daily')
+          );
+          return { isCumulative: true, dailyEntity: newMeter || expectedPrefix };
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to create utility meter for', sourceEntityId, err);
+    }
+
+    // Fallback: return the source entity with cumulative flag
+    return { isCumulative: true, dailyEntity: sourceEntityId };
   }
 
   _render() {
@@ -494,7 +598,7 @@ class SigenergySettingsCard extends HTMLElement {
       <div class="row">
         <span class="row-label">${label}</span>
         <input class="row-input" value="${this._esc(id)}" placeholder="sensor.entity_id" data-key="${key}" />
-        <span class="row-state ${isErr?'err':''}">${state}</span>
+        <span class="row-state ${isErr?'err':''}" data-entity="${this._esc(id)}">${state}</span>
       </div>`;
   }
 
@@ -583,11 +687,12 @@ class SigenergySettingsCard extends HTMLElement {
     } catch (e) { console.error('Sync feature to dashboard failed:', e); }
   }
 
-  async _syncEntityToDashboard(entityKey, entityId) {
+  async _syncEntityToDashboard(entityKey, entityId, previousEntityId) {
     if (!this._hass) return;
     try {
       const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
-      const oldId = DEFAULT_ENTITIES[entityKey];
+      // Use the previous stored value for find-and-replace, falling back to default
+      const oldId = previousEntityId || DEFAULT_ENTITIES[entityKey];
       let changed = false;
 
       // 1. Sync to house card entities
@@ -631,6 +736,16 @@ class SigenergySettingsCard extends HTMLElement {
     const e = cfg.entities || {};
     const emhassOn = cfg.features?.emhass !== false;
     el.innerHTML = `
+      <div style="margin-bottom:16px;padding:12px;background:rgba(0,212,184,0.08);border:1px solid rgba(0,212,184,0.25);border-radius:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#00d4b8;">🔍 Auto-Detect from HA Energy Dashboard</div>
+            <div style="font-size:11px;color:#8892a4;margin-top:2px;">Automatically detect energy sources, solar forecasts (Solcast/forecast.solar), EV chargers, and heat pumps from your HA configuration</div>
+          </div>
+          <button class="auto-detect-btn" data-key="auto_detect_energy" style="flex-shrink:0;margin-left:12px;padding:8px 16px;background:#00d4b8;color:#1a1f2e;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">Detect</button>
+        </div>
+        <div class="auto-detect-status" style="margin-top:6px;font-size:11px;color:#8892a4;display:none;"></div>
+      </div>
       <div class="section">
         <div class="section-title">☀️ Core Power</div>
         ${this._entityRow('Solar Power', 'solar_power', e)}
@@ -641,12 +756,36 @@ class SigenergySettingsCard extends HTMLElement {
       </div>
       <div class="section">
         <div class="section-title">📊 Daily Energy</div>
-        ${this._entityRow('Solar Today', 'solar_energy_today', e)}
-        ${this._entityRow('Load Today', 'load_energy_today', e)}
-        ${this._entityRow('Batt Charge', 'battery_charge_today', e)}
-        ${this._entityRow('Batt Discharge', 'battery_discharge_today', e)}
-        ${this._entityRow('Grid Import', 'grid_import_today', e)}
-        ${this._entityRow('Grid Export', 'grid_export_today', e)}
+        ${this._entityRow('Solar Energy Today', 'solar_energy_today', e)}
+        ${this._entityRow('Load Energy Today', 'load_energy_today', e)}
+        ${this._entityRow('Battery Charge Today', 'battery_charge_today', e)}
+        ${this._entityRow('Battery Discharge Today', 'battery_discharge_today', e)}
+      </div>
+      <div class="section" style="border:1px solid ${cfg.features?.dual_tariff ? '#6b7fd4' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${cfg.features?.dual_tariff ? '12' : '0'}px;">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:${cfg.features?.dual_tariff ? '#6b7fd4' : '#8892a4'};">⚡ Grid Energy Metering</div>
+            <div style="font-size:11px;color:#8892a4;margin-top:2px;">Toggle dual tariff if your smart meter reports separate high/low tariff readings</div>
+          </div>
+          <div class="switch ${cfg.features?.dual_tariff ? 'on' : 'off'}" data-key="dual_tariff_toggle" style="flex-shrink:0;margin-left:12px;"></div>
+        </div>
+        ${cfg.features?.dual_tariff ? `
+          <div style="border-top:1px solid rgba(107,127,212,0.2);padding-top:10px;">
+            <div class="toggle-desc" style="margin-bottom:8px;color:#8892a4;font-size:11px;">Your smart meter provides separate high and low tariff counters. The dashboard will automatically sum them for daily totals.</div>
+            <div class="section-title" style="font-size:11px;">Import (Grid → Home)</div>
+            ${this._entityRow('Import High Tariff', 'grid_import_high_tariff', e)}
+            ${this._entityRow('Import Low Tariff', 'grid_import_low_tariff', e)}
+            <div class="section-title" style="font-size:11px;margin-top:8px;">Export (Home → Grid)</div>
+            ${this._entityRow('Export High Tariff', 'grid_export_high_tariff', e)}
+            ${this._entityRow('Export Low Tariff', 'grid_export_low_tariff', e)}
+          </div>
+        ` : `
+          <div style="border-top:1px solid rgba(45,52,81,0.5);padding-top:10px;">
+            <div class="toggle-desc" style="margin-bottom:8px;color:#8892a4;font-size:11px;">Single entity for daily grid import and export totals.</div>
+            ${this._entityRow('Grid Import Today', 'grid_import_today', e)}
+            ${this._entityRow('Grid Export Today', 'grid_export_today', e)}
+          </div>
+        `}
       </div>
       <div class="section">
         <div class="section-title">💰 Price Entities</div>
@@ -722,16 +861,68 @@ class SigenergySettingsCard extends HTMLElement {
           ` : ''}
         ` : ''}
       </div>
-      <div class="section">
+      <div class="section" style="border:1px solid ${cfg.features?.show_ev_in_sankey ? '#ff69b4' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
         <div class="section-title">🔌 EV / Charger</div>
         ${this._entityRow('Charger Power', 'ev_charger_power', e)}
         ${this._entityRow('Charger State', 'ev_charger_state', e)}
         ${this._entityRow('EV SoC', 'ev_soc', e)}
         ${this._entityRow('EV Range', 'ev_range', e)}
+        <div style="margin-top:8px;border-top:1px solid rgba(155,89,182,0.2);padding-top:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <div style="font-size:12px;font-weight:600;color:${cfg.features?.show_ev_in_sankey ? '#ff69b4' : '#8892a4'};">📊 Show EV in Sankey Graph</div>
+              <div style="font-size:10px;color:#8892a4;margin-top:1px;">Add EV consumption as a destination node in the energy flow chart</div>
+            </div>
+            <div class="switch ${cfg.features?.show_ev_in_sankey ? 'on' : 'off'}" data-key="show_ev_in_sankey_toggle" style="flex-shrink:0;margin-left:12px;"></div>
+          </div>
+          ${cfg.features?.show_ev_in_sankey ? `
+            <div style="margin-top:8px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                <div style="flex:1;">${this._entityRow('EV Energy Today', 'ev_energy_today', e)}</div>
+                <button class="auto-detect-btn" data-key="auto_detect_ev" style="flex-shrink:0;padding:6px 12px;background:#ff69b4;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;" title="Auto-detect from HA Energy Dashboard device list">🔍 Detect</button>
+              </div>
+              <div class="ev-detect-status" style="font-size:10px;color:#8892a4;display:none;margin-bottom:4px;"></div>
+              ${cfg.features?.ev_energy_is_cumulative ? `
+                <div style="background:rgba(155,89,182,0.1);border:1px solid rgba(155,89,182,0.3);border-radius:8px;padding:8px;margin-bottom:6px;">
+                  <div style="font-size:10px;font-weight:600;color:#ff69b4;">📊 Cumulative sensor detected</div>
+                  <div style="font-size:10px;color:#8892a4;margin-top:2px;">Source entity tracks lifetime total. ${e.ev_energy_daily_meter ? 'Using daily utility meter: <b>' + e.ev_energy_daily_meter + '</b>' : 'No daily meter configured yet — click Detect to auto-create one.'}</div>
+                  ${e.ev_energy_daily_meter ? this._entityRow('Daily Meter', 'ev_energy_daily_meter', e) : ''}
+                </div>
+              ` : ''}
+              <div class="toggle-desc" style="color:#8892a4;font-size:10px;">Daily EV charging energy (kWh). Click Detect to scan your HA Energy Dashboard — if a cumulative sensor is found, a daily utility meter will be auto-created.</div>
+            </div>
+          ` : ''}
+        </div>
       </div>
-      <div class="section">
-        <div class="section-title">♨️ Heat Pump</div>
+      <div class="section" style="border:1px solid ${cfg.features?.show_hp_in_sankey ? '#e67e22' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
+        <div class="section-title">♨️ Heat Pump / HVAC</div>
         ${this._entityRow('HP Power', 'heat_pump_power', e)}
+        <div style="margin-top:8px;border-top:1px solid rgba(230,126,34,0.2);padding-top:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <div style="font-size:12px;font-weight:600;color:${cfg.features?.show_hp_in_sankey ? '#e67e22' : '#8892a4'};">📊 Show Heat Pump in Sankey Graph</div>
+              <div style="font-size:10px;color:#8892a4;margin-top:1px;">Add heat pump/HVAC consumption as a destination node in the energy flow chart</div>
+            </div>
+            <div class="switch ${cfg.features?.show_hp_in_sankey ? 'on' : 'off'}" data-key="show_hp_in_sankey_toggle" style="flex-shrink:0;margin-left:12px;"></div>
+          </div>
+          ${cfg.features?.show_hp_in_sankey ? `
+            <div style="margin-top:8px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                <div style="flex:1;">${this._entityRow('HP Energy Today', 'heat_pump_energy_today', e)}</div>
+                <button class="auto-detect-btn" data-key="auto_detect_hp" style="flex-shrink:0;padding:6px 12px;background:#e67e22;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;" title="Auto-detect from HA Energy Dashboard device list">🔍 Detect</button>
+              </div>
+              <div class="hp-detect-status" style="font-size:10px;color:#8892a4;display:none;margin-bottom:4px;"></div>
+              ${cfg.features?.hp_energy_is_cumulative ? `
+                <div style="background:rgba(230,126,34,0.1);border:1px solid rgba(230,126,34,0.3);border-radius:8px;padding:8px;margin-bottom:6px;">
+                  <div style="font-size:10px;font-weight:600;color:#e67e22;">📊 Cumulative sensor detected</div>
+                  <div style="font-size:10px;color:#8892a4;margin-top:2px;">Source entity tracks lifetime total. ${e.hp_energy_daily_meter ? 'Using daily utility meter: <b>' + e.hp_energy_daily_meter + '</b>' : 'No daily meter configured yet — click Detect to auto-create one.'}</div>
+                  ${e.hp_energy_daily_meter ? this._entityRow('Daily Meter', 'hp_energy_daily_meter', e) : ''}
+                </div>
+              ` : ''}
+              <div class="toggle-desc" style="color:#8892a4;font-size:10px;">Daily heat pump energy (kWh). Click Detect to scan your HA Energy Dashboard — if a cumulative sensor is found, a daily utility meter will be auto-created.</div>
+            </div>
+          ` : ''}
+        </div>
       </div>
       <div class="section" style="border:1px solid ${cfg.features?.solar_forecast ? '#FFA500' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${cfg.features?.solar_forecast ? '12' : '0'}px;">
@@ -759,7 +950,26 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Inverter Temp', 'inverter_temp', e)}
         ${this._entityRow('Inv Internal Temp', 'inverter_internal_temp', e)}
         ${this._entityRow('Battery Temp', 'battery_temp', e)}
-        ${this._entityRow('Grid Voltage', 'grid_voltage', e)}
+        <div style="border:1px solid ${cfg.features?.three_phase ? '#c8b84a' : '#2d3451'};border-radius:10px;padding:10px;margin:8px 0;transition:all 0.3s;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${cfg.features?.three_phase ? '8' : '0'}px;">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:${cfg.features?.three_phase ? '#c8b84a' : '#8892a4'};">⚡ Grid Voltage</div>
+              <div style="font-size:10px;color:#8892a4;margin-top:1px;">Enable 3-phase to configure per-phase voltage sensors</div>
+            </div>
+            <div class="switch ${cfg.features?.three_phase ? 'on' : 'off'}" data-key="three_phase_toggle" style="flex-shrink:0;margin-left:12px;"></div>
+          </div>
+          ${cfg.features?.three_phase ? `
+            <div style="border-top:1px solid rgba(200,184,74,0.2);padding-top:8px;">
+              ${this._entityRow('Voltage L1', 'grid_voltage', e)}
+              ${this._entityRow('Voltage L2', 'grid_voltage_l2', e)}
+              ${this._entityRow('Voltage L3', 'grid_voltage_l3', e)}
+            </div>
+          ` : `
+            <div style="border-top:1px solid rgba(45,52,81,0.5);padding-top:8px;">
+              ${this._entityRow('Grid Voltage', 'grid_voltage', e)}
+            </div>
+          `}
+        </div>
         ${this._entityRow('Grid Frequency', 'grid_frequency', e)}
         ${this._entityRow('Grid CT Clamp', 'grid_power_ct', e)}
         ${this._entityRow('Net Grid Power', 'grid_active_power', e)}
@@ -818,12 +1028,314 @@ class SigenergySettingsCard extends HTMLElement {
       });
     }
 
+    // Dual tariff toggle handler
+    const dualTariffToggle = el.querySelector('[data-key="dual_tariff_toggle"]');
+    if (dualTariffToggle) {
+      dualTariffToggle.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        cfg2.features.dual_tariff = !cfg2.features.dual_tariff;
+        this._storeSave(cfg2);
+        this._render();
+      });
+    }
+
+    // 3-phase toggle handler
+    const threePhaseToggle = el.querySelector('[data-key="three_phase_toggle"]');
+    if (threePhaseToggle) {
+      threePhaseToggle.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        cfg2.features.three_phase = !cfg2.features.three_phase;
+        this._storeSave(cfg2);
+        this._syncFeatureToDashboard('three_phase', cfg2.features.three_phase);
+        this._render();
+      });
+    }
+
+    // EV in Sankey toggle handler
+    const evSankeyToggle = el.querySelector('[data-key="show_ev_in_sankey_toggle"]');
+    if (evSankeyToggle) {
+      evSankeyToggle.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        cfg2.features.show_ev_in_sankey = !cfg2.features.show_ev_in_sankey;
+        this._storeSave(cfg2);
+        if (this._hass) {
+          this._buildDashboard().then(ok => {
+            if (ok) console.log('Dashboard rebuilt after toggling EV Sankey');
+            this._render();
+          }).catch(() => this._render());
+        } else { this._render(); }
+      });
+    }
+
+    // Heat Pump in Sankey toggle handler
+    const hpSankeyToggle = el.querySelector('[data-key="show_hp_in_sankey_toggle"]');
+    if (hpSankeyToggle) {
+      hpSankeyToggle.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        cfg2.features.show_hp_in_sankey = !cfg2.features.show_hp_in_sankey;
+        this._storeSave(cfg2);
+        if (this._hass) {
+          this._buildDashboard().then(ok => {
+            if (ok) console.log('Dashboard rebuilt after toggling HP Sankey');
+            this._render();
+          }).catch(() => this._render());
+        } else { this._render(); }
+      });
+    }
+
+    // EV Energy auto-detect button
+    const evDetectBtn = el.querySelector('[data-key="auto_detect_ev"]');
+    if (evDetectBtn) {
+      evDetectBtn.addEventListener('click', async () => {
+        const statusEl = el.querySelector('.ev-detect-status');
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '⏳ Scanning HA Energy Dashboard for EV devices...'; }
+        try {
+          const prefs = await this._hass.callWS({ type: 'energy/get_prefs' });
+          const devs = prefs?.device_consumption || [];
+          const evPatterns = ['ev', 'charger', 'wallbox', 'laadpaal', 'tesla', 'charging', 'zaptec', 'easee', 'ocpp', 'juicebox', 'grizzl-e', 'chargepoint', 'emporia', 'openevse', 'zappi', 'myenergi', 'go-e', 'keba', 'fronius_wattpilot', 'pulsar', 'copper', 'evnex', 'podpoint', 'rolec', 'ohme', 'hypervolt', 'alfen', 'evbox', 'schneider_evlink', 'siemens_versicharge', 'nrgkick', 'warp'];
+          let foundEntity = null;
+          const evDevices = devs.filter(d => {
+            const name = (d.name || '').toLowerCase();
+            const entity = (d.stat_consumption || '').toLowerCase();
+            return evPatterns.some(p => name.includes(p) || entity.includes(p));
+          });
+          if (evDevices.length > 0) {
+            foundEntity = evDevices[0].stat_consumption;
+            const list = evDevices.map(d => '• ' + d.name + ' → ' + d.stat_consumption).join('<br>');
+            if (statusEl) statusEl.innerHTML = '✅ Found ' + evDevices.length + ' EV device(s):<br>' + list;
+          } else {
+            // Fallback: scan all HA states for EV-related energy sensors
+            const evStates = Object.keys(this._hass.states).filter(k =>
+              k.includes('sensor.') && (k.includes('ev_') || k.includes('charger_energy') || k.includes('wallbox') || k.includes('charging_energy') || k.includes('zappi') || k.includes('easee') || k.includes('ocpp') || k.includes('tesla_') || k.includes('juicebox'))
+              && (this._hass.states[k].attributes?.unit_of_measurement === 'kWh' || this._hass.states[k].attributes?.device_class === 'energy')
+            );
+            if (evStates.length > 0) {
+              foundEntity = evStates[0];
+              if (statusEl) statusEl.innerHTML = '✅ Found EV energy sensor: ' + evStates[0];
+            }
+          }
+          if (foundEntity) {
+            // Check if cumulative and create utility meter if needed
+            if (statusEl) statusEl.innerHTML += '<br>⏳ Checking if sensor is cumulative...';
+            const result = await this._ensureDailyMeter(foundEntity, 'ev_energy');
+            const cfg2 = this._storeGet();
+            cfg2.entities.ev_energy_today = foundEntity;
+            cfg2.features.ev_energy_is_cumulative = result.isCumulative;
+            if (result.isCumulative && result.dailyEntity !== foundEntity) {
+              cfg2.entities.ev_energy_daily_meter = result.dailyEntity;
+              if (statusEl) statusEl.innerHTML += '<br>📊 Entity is cumulative (total: ' + this._hass.states[foundEntity]?.state + ' kWh). Created daily utility meter: <b>' + result.dailyEntity + '</b>';
+            } else if (result.isCumulative) {
+              if (statusEl) statusEl.innerHTML += '<br>⚠️ Entity is cumulative but utility meter creation failed. You can create one manually in HA Settings → Helpers.';
+            } else {
+              if (statusEl) statusEl.innerHTML += '<br>✅ Entity reports daily values — using directly.';
+            }
+            this._storeSave(cfg2);
+            setTimeout(() => this._render(), 500);
+          } else {
+            if (statusEl) statusEl.textContent = '⚠️ No EV-related device found in HA Energy Dashboard or state registry. Configure manually.';
+          }
+        } catch (err) {
+          if (statusEl) statusEl.textContent = '❌ Detection failed: ' + (err.message || 'unknown error');
+        }
+      });
+    }
+
+    // HP Energy auto-detect button
+    const hpDetectBtn = el.querySelector('[data-key="auto_detect_hp"]');
+    if (hpDetectBtn) {
+      hpDetectBtn.addEventListener('click', async () => {
+        const statusEl = el.querySelector('.hp-detect-status');
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '⏳ Scanning HA Energy Dashboard for Heat Pump/HVAC devices...'; }
+        try {
+          const prefs = await this._hass.callWS({ type: 'energy/get_prefs' });
+          const devs = prefs?.device_consumption || [];
+          const hpPatterns = ['heat pump', 'heat_pump', 'heatpump', 'warmtepomp', 'wärmepumpe', 'pompe a chaleur', 'bomba de calor', 'hvac', 'wp ', 'wp_', 'airco', 'air con', 'klimaat', 'climate', 'daikin', 'mitsubishi', 'toshiba', 'panasonic_aquarea', 'vaillant', 'viessmann', 'nibe', 'bosch', 'stiebel', 'atlantic', 'carrier', 'trane', 'lennox', 'fujitsu', 'lg_therma', 'samsung_ehs', 'alpha_innotec', 'lambda', 'thermia', 'cop_', 'compressor'];
+          let foundEntity = null;
+          const hpDevices = devs.filter(d => {
+            const name = (d.name || '').toLowerCase();
+            const entity = (d.stat_consumption || '').toLowerCase();
+            return hpPatterns.some(p => name.includes(p) || entity.includes(p)) || entity.includes('wp_kot') || entity.includes('heat_pump');
+          });
+          if (hpDevices.length > 0) {
+            foundEntity = hpDevices[0].stat_consumption;
+            const list = hpDevices.map(d => '• ' + d.name + ' → ' + d.stat_consumption).join('<br>');
+            if (statusEl) statusEl.innerHTML = '✅ Found ' + hpDevices.length + ' Heat Pump device(s):<br>' + list;
+          } else {
+            // Fallback: scan all HA states for HP-related energy sensors
+            const hpStates = Object.keys(this._hass.states).filter(k =>
+              k.includes('sensor.') && (k.includes('heat_pump') || k.includes('heatpump') || k.includes('warmtepomp') || k.includes('wp_kot') || k.includes('hvac_energy') || k.includes('daikin') || k.includes('nibe') || k.includes('aquarea') || k.includes('vaillant') || k.includes('viessmann'))
+              && (this._hass.states[k].attributes?.unit_of_measurement === 'kWh' || this._hass.states[k].attributes?.device_class === 'energy')
+            );
+            if (hpStates.length > 0) {
+              foundEntity = hpStates[0];
+              if (statusEl) statusEl.innerHTML = '✅ Found HP energy sensor: ' + hpStates[0];
+            }
+          }
+          if (foundEntity) {
+            // Check if cumulative and create utility meter if needed
+            if (statusEl) statusEl.innerHTML += '<br>⏳ Checking if sensor is cumulative...';
+            const result = await this._ensureDailyMeter(foundEntity, 'hp_energy');
+            const cfg2 = this._storeGet();
+            cfg2.entities.heat_pump_energy_today = foundEntity;
+            cfg2.features.hp_energy_is_cumulative = result.isCumulative;
+            if (result.isCumulative && result.dailyEntity !== foundEntity) {
+              cfg2.entities.hp_energy_daily_meter = result.dailyEntity;
+              if (statusEl) statusEl.innerHTML += '<br>📊 Entity is cumulative (total: ' + this._hass.states[foundEntity]?.state + ' kWh). Created daily utility meter: <b>' + result.dailyEntity + '</b>';
+            } else if (result.isCumulative) {
+              if (statusEl) statusEl.innerHTML += '<br>⚠️ Entity is cumulative but utility meter creation failed. You can create one manually in HA Settings → Helpers.';
+            } else {
+              if (statusEl) statusEl.innerHTML += '<br>✅ Entity reports daily values — using directly.';
+            }
+            this._storeSave(cfg2);
+            setTimeout(() => this._render(), 500);
+          } else {
+            if (statusEl) statusEl.textContent = '⚠️ No Heat Pump/HVAC device found in HA Energy Dashboard or state registry. Configure manually.';
+          }
+        } catch (err) {
+          if (statusEl) statusEl.textContent = '❌ Detection failed: ' + (err.message || 'unknown error');
+        }
+      });
+    }
+
+    // Auto-detect from HA Energy Dashboard
+    const autoDetectBtn = el.querySelector('[data-key="auto_detect_energy"]');
+    if (autoDetectBtn) {
+      autoDetectBtn.addEventListener('click', async () => {
+        const statusEl = el.querySelector('.auto-detect-status');
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '⏳ Fetching HA Energy Dashboard config...'; }
+        try {
+          const prefs = await this._hass.callWS({ type: 'energy/get_prefs' });
+          if (!prefs || !prefs.energy_sources) {
+            if (statusEl) statusEl.textContent = '❌ No energy sources configured in HA Energy Dashboard';
+            return;
+          }
+          const cfg2 = this._storeGet();
+          const found = [];
+
+          for (const src of prefs.energy_sources) {
+            if (src.type === 'solar' && src.stat_energy_from) {
+              cfg2.entities.solar_energy_today = src.stat_energy_from;
+              found.push('Solar: ' + src.stat_energy_from);
+            }
+            if (src.type === 'battery') {
+              if (src.stat_energy_from) {
+                cfg2.entities.battery_discharge_today = src.stat_energy_from;
+                found.push('Battery discharge: ' + src.stat_energy_from);
+              }
+              if (src.stat_energy_to) {
+                cfg2.entities.battery_charge_today = src.stat_energy_to;
+                found.push('Battery charge: ' + src.stat_energy_to);
+              }
+            }
+            if (src.type === 'grid') {
+              const flowFrom = src.flow_from || [];
+              const flowTo = src.flow_to || [];
+              if (flowFrom.length === 1 && flowFrom[0].stat_energy_from) {
+                cfg2.entities.grid_import_today = flowFrom[0].stat_energy_from;
+                cfg2.features.dual_tariff = false;
+                found.push('Grid import: ' + flowFrom[0].stat_energy_from);
+              } else if (flowFrom.length >= 2) {
+                // Multiple tariffs detected
+                cfg2.features.dual_tariff = true;
+                cfg2.entities.grid_import_high_tariff = flowFrom[0].stat_energy_from || '';
+                cfg2.entities.grid_import_low_tariff = flowFrom[1].stat_energy_from || '';
+                found.push('Grid import (dual tariff): ' + flowFrom.map(f => f.stat_energy_from).join(' + '));
+              }
+              if (flowTo.length === 1 && flowTo[0].stat_energy_to) {
+                cfg2.entities.grid_export_today = flowTo[0].stat_energy_to;
+                found.push('Grid export: ' + flowTo[0].stat_energy_to);
+              } else if (flowTo.length >= 2) {
+                cfg2.features.dual_tariff = true;
+                cfg2.entities.grid_export_high_tariff = flowTo[0].stat_energy_to || '';
+                cfg2.entities.grid_export_low_tariff = flowTo[1].stat_energy_to || '';
+                found.push('Grid export (dual tariff): ' + flowTo.map(f => f.stat_energy_to).join(' + '));
+              }
+            }
+          }
+
+          // Auto-detect Solcast entities from HA state
+          if (this._hass && this._hass.states) {
+            const solcastToday = this._hass.states['sensor.solcast_pv_forecast_forecast_today'];
+            const solcastTomorrow = this._hass.states['sensor.solcast_pv_forecast_forecast_tomorrow'];
+            const solcastRemaining = this._hass.states['sensor.solcast_pv_forecast_forecast_remaining_today'];
+            if (solcastToday) {
+              cfg2.entities.solcast_today = 'sensor.solcast_pv_forecast_forecast_today';
+              found.push('Solcast today: sensor.solcast_pv_forecast_forecast_today');
+            }
+            if (solcastTomorrow) {
+              cfg2.entities.solcast_tomorrow = 'sensor.solcast_pv_forecast_forecast_tomorrow';
+              found.push('Solcast tomorrow: sensor.solcast_pv_forecast_forecast_tomorrow');
+            }
+            if (solcastRemaining) {
+              cfg2.entities.solcast_remaining = 'sensor.solcast_pv_forecast_forecast_remaining_today';
+              found.push('Solcast remaining: sensor.solcast_pv_forecast_forecast_remaining_today');
+            }
+            // Enable solar_forecast feature if Solcast found
+            if (solcastToday || solcastTomorrow || solcastRemaining) {
+              cfg2.features.solar_forecast = true;
+              found.push('✓ Solar Forecast feature auto-enabled (Solcast detected)');
+            }
+
+            // Auto-detect forecast.solar entities
+            const fcsKeys = Object.keys(this._hass.states).filter(k => k.startsWith('sensor.energy_production_') || k.startsWith('sensor.forecast_solar'));
+            if (fcsKeys.length > 0) {
+              const todayKey = fcsKeys.find(k => k.includes('today') || k.endsWith('_energy_production'));
+              if (todayKey) {
+                cfg2.entities.forecast_solar_today = todayKey;
+                cfg2.features.solar_forecast = true;
+                found.push('Forecast.Solar: ' + todayKey);
+              }
+            }
+          }
+
+          // Auto-detect device consumption entities for EV and Heat Pump
+          if (prefs.device_consumption && prefs.device_consumption.length > 0) {
+            const evKw = ['ev', 'charger', 'wallbox', 'laadpaal', 'tesla', 'charging', 'zaptec', 'easee', 'ocpp', 'juicebox', 'chargepoint', 'zappi', 'myenergi', 'go-e', 'keba', 'openevse', 'emporia', 'pulsar', 'ohme', 'hypervolt', 'alfen', 'evbox'];
+            const hpKw = ['heat pump', 'heat_pump', 'heatpump', 'warmtepomp', 'wärmepumpe', 'hvac', 'wp ', 'wp_', 'airco', 'klimaat', 'climate', 'daikin', 'mitsubishi', 'nibe', 'vaillant', 'viessmann', 'panasonic_aquarea', 'stiebel', 'bosch', 'toshiba', 'fujitsu', 'lg_therma', 'samsung_ehs', 'compressor'];
+            for (const dev of prefs.device_consumption) {
+              const name = (dev.name || '').toLowerCase();
+              const entity = (dev.stat_consumption || '').toLowerCase();
+              // EV / charger detection
+              if (evKw.some(p => name.includes(p) || entity.includes(p))) {
+                if (!cfg2.entities.ev_energy_today) {
+                  cfg2.entities.ev_energy_today = dev.stat_consumption;
+                  cfg2.features.show_ev_in_sankey = true;
+                  found.push('EV energy (from devices): ' + dev.stat_consumption + ' (' + dev.name + ')');
+                }
+              }
+              // Heat pump / HVAC detection
+              if (hpKw.some(p => name.includes(p) || entity.includes(p)) || entity.includes('wp_kot')) {
+                if (!cfg2.entities.heat_pump_energy_today) {
+                  cfg2.entities.heat_pump_energy_today = dev.stat_consumption;
+                  cfg2.features.show_hp_in_sankey = true;
+                  found.push('Heat Pump energy (from devices): ' + dev.stat_consumption + ' (' + dev.name + ')');
+                }
+              }
+            }
+          }
+
+          if (found.length > 0) {
+            this._storeSave(cfg2);
+            if (statusEl) statusEl.innerHTML = '✅ Detected ' + found.length + ' entities:<br>' + found.map(f => '• ' + f).join('<br>');
+            // Re-render to show detected entities
+            setTimeout(() => this._render(), 500);
+          } else {
+            if (statusEl) statusEl.textContent = '⚠️ No matching entities found in your HA Energy Dashboard';
+          }
+        } catch (err) {
+          console.error('Auto-detect failed:', err);
+          if (statusEl) statusEl.textContent = '❌ Failed to fetch Energy Dashboard config: ' + (err.message || 'unknown error');
+        }
+      });
+    }
+
     // Bind entity input changes — update state badge inline, no full re-render
     el.querySelectorAll('.row-input').forEach(input => {
       input.addEventListener('change', () => {
         const key = input.dataset.key;
         const value = input.value.trim();
         const cfg2 = this._storeGet();
+        const previousValue = cfg2.entities[key] || '';
         cfg2.entities[key] = value;
         this._storeSave(cfg2);
         // Update state badge inline without destroying the DOM
@@ -835,7 +1347,7 @@ class SigenergySettingsCard extends HTMLElement {
         }
         // Sync entity to house card dashboard config
         if (SYNCED_ENTITIES.has(key)) {
-          this._syncEntityToDashboard(key, value);
+          this._syncEntityToDashboard(key, value, previousValue);
         }
       });
     });
@@ -886,6 +1398,9 @@ class SigenergySettingsCard extends HTMLElement {
       <div class="section">
         <div class="section-title">\u{1F527} Developer</div>
         ${this._toggleHtml('Cable Path Editor', 'Drag-to-position cable routing overlay on house card', 'path_editor', this._pathEditorOn)}
+      </div>
+      <div style="margin-top:12px;padding:10px;background:rgba(0,212,184,0.08);border-radius:8px;font-size:11px;color:#8892a4;">
+        <b>ℹ️</b> Grid configuration (3-phase, dual tariff), Sankey graph nodes (EV, heat pump), and auto-detect are in the <b>⚡ Entities</b> tab.
       </div>
     `;
 
@@ -1466,26 +1981,58 @@ class SigenergySettingsCard extends HTMLElement {
         card_mod: { style: { 'ha-tile-info$': '.primary { font-size: 20px !important; font-weight: bold !important; color: white !important; letter-spacing: 0.5px; }', '.': 'ha-card { background-color: transparent !important; border: none !important; }' } }
       };
       const sankeyOld = mainLayout.cards[1]?.cards?.[1] || {};
+      // Resolve EV/HP entity IDs — use utility meter if cumulative, otherwise direct entity
+      const evSankeyEntity = (f.ev_energy_is_cumulative && e.ev_energy_daily_meter) ? e.ev_energy_daily_meter : e.ev_energy_today;
+      const hpSankeyEntity = (f.hp_energy_is_cumulative && e.hp_energy_daily_meter) ? e.hp_energy_daily_meter : e.heat_pump_energy_today;
+      // Build Sankey destinations list (Load is always present, EV/HP are optional)
+      const sankeyLoadChildren = [];
+      if (e.load_energy_today) sankeyLoadChildren.push(e.load_energy_today);
+      if (f.show_ev_in_sankey && evSankeyEntity) sankeyLoadChildren.push(evSankeyEntity);
+      if (f.show_hp_in_sankey && hpSankeyEntity) sankeyLoadChildren.push(hpSankeyEntity);
+
+      // Build destination entities for section 2
+      const sankeyDest = [];
+      if (e.load_energy_today) sankeyDest.push({ entity_id: e.load_energy_today, name: 'Home', color: '#e8337f' });
+      if (f.show_ev_in_sankey && evSankeyEntity) sankeyDest.push({ entity_id: evSankeyEntity, name: 'EV', color: '#ff69b4' });
+      if (f.show_hp_in_sankey && hpSankeyEntity) sankeyDest.push({ entity_id: hpSankeyEntity, name: 'HP', color: '#e67e22' });
+      if (e.battery_charge_today) sankeyDest.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
+      if (e.grid_export_today) sankeyDest.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf' });
+
+      // Build source children arrays — sources can flow to all destinations
+      const allDestIds = sankeyDest.map(d => d.entity_id).filter(Boolean);
+      const battDischargeChildren = [e.grid_export_today, e.load_energy_today].filter(Boolean);
+      const solarChildren = [e.battery_charge_today, e.grid_export_today, e.load_energy_today].filter(Boolean);
+      const gridImportChildren = [e.load_energy_today].filter(Boolean);
+
+      // Add EV/HP as potential children of all sources (energy can flow from any source)
+      if (f.show_ev_in_sankey && evSankeyEntity) {
+        battDischargeChildren.push(evSankeyEntity);
+        solarChildren.push(evSankeyEntity);
+        gridImportChildren.push(evSankeyEntity);
+      }
+      if (f.show_hp_in_sankey && hpSankeyEntity) {
+        battDischargeChildren.push(hpSankeyEntity);
+        solarChildren.push(hpSankeyEntity);
+        gridImportChildren.push(hpSankeyEntity);
+      }
+
       const sankeyChart = {
         type: 'custom:sankey-chart',
         show_names: true, show_states: true, show_units: true, show_icons: false,
-        round: 2, height: 480, wide: true,
+        round: 1, height: 480, wide: true,
         min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
+        min_state: 0.1,
         energy_date_selection: false,
         sections: [
           {
             entities: [
-              { entity_id: e.battery_discharge_today, name: 'Battery', color: '#00d4b8', children: [e.grid_export_today, e.load_energy_today].filter(Boolean) },
-              { entity_id: e.solar_energy_today, name: 'Solar', color: '#c8b84a', children: [e.battery_charge_today, e.grid_export_today, e.load_energy_today].filter(Boolean) },
-              { entity_id: e.grid_import_today, name: 'Grid', color: '#6b7fd4', children: [e.load_energy_today].filter(Boolean) }
+              { entity_id: e.battery_discharge_today, name: 'Battery', color: '#00d4b8', children: battDischargeChildren },
+              { entity_id: e.solar_energy_today, name: 'Solar', color: '#c8b84a', children: solarChildren },
+              { entity_id: e.grid_import_today, name: 'Grid', color: '#6b7fd4', children: gridImportChildren }
             ].filter(x => x.entity_id)
           },
           {
-            entities: [
-              { entity_id: e.load_energy_today, name: 'Load', color: '#e8337f' },
-              { entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' },
-              { entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf' }
-            ].filter(x => x.entity_id)
+            entities: sankeyDest.filter(x => x.entity_id)
           }
         ],
         card_mod: sankeyOld.card_mod || {}
@@ -1527,6 +2074,23 @@ class SigenergySettingsCard extends HTMLElement {
           css += '.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n';
           css += '@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } }\n';
         }
+        // Add EV/HP pill border colors if not already present
+        if (!css.includes('title*="EV"')) {
+          css += '.box > div[title*="EV"] ~ .label .name { border-color: #ff69b4 !important; }\n';
+        }
+        if (!css.includes('title*="HP"')) {
+          css += '.box > div[title*="HP"] ~ .label .name { border-color: #e67e22 !important; }\n';
+        }
+        // Also support "Home" label (renamed from "Load")
+        if (!css.includes('title*="Home"')) {
+          css += '.box > div[title*="Home"] ~ .label .name { border-color: #e8337f !important; }\n';
+        }
+        // EV/HP destination percentage CSS variables
+        if (!css.includes('pct-dst-ev')) {
+          css += '.section:last-of-type .box > div[title*="EV"] ~ .label::after { content: var(--pct-dst-ev); }\n';
+          css += '.section:last-of-type .box > div[title*="HP"] ~ .label::after { content: var(--pct-dst-hp); }\n';
+          css += '.section:last-of-type .box > div[title*="Home"] ~ .label::after { content: var(--pct-dst-load); }\n';
+        }
         sankeyChart.card_mod.style['sankey-chart-base$'] = css;
       }
       newCards.push({ type: 'vertical-stack', cards: [sankeyTitle, sankeyChart] });
@@ -1555,10 +2119,10 @@ class SigenergySettingsCard extends HTMLElement {
       if (selfSuffCard) chartStack.push(selfSuffCard);
       newCards.push({ type: 'vertical-stack', cards: chartStack });
 
-      // Preserve persistent config on the layout card
-      const existingConfig = mainLayout._sigenergy_config;
+      // Preserve persistent config on the layout card — use current store state
+      // (not the version from disk, which may be stale due to async save race)
       mainLayout.cards = newCards;
-      if (existingConfig) mainLayout._sigenergy_config = existingConfig;
+      mainLayout._sigenergy_config = store.get();
 
       await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
 
@@ -1926,6 +2490,9 @@ class SigenergyDeviceCard extends HTMLElement {
       var pvTwo = store ? store.getEntity('pv2_power') : 'sensor.deyeinvertermaster_pv2_power';
       var gridV = store ? store.getEntity('grid_voltage') : 'sensor.deyeinvertermaster_grid_voltage_l1';
       var gridHz = store ? store.getEntity('grid_frequency') : 'sensor.deyeinvertermaster_grid_frequency';
+      var gridVL2 = store ? store.getEntity('grid_voltage_l2') : '';
+      var gridVL3 = store ? store.getEntity('grid_voltage_l3') : '';
+      var threePhase = store ? (store.getFeature && store.getFeature('three_phase')) : false;
       panels += '<div style="' + panelStyle + '">';
       panels += '<div style="' + headerStyle + '">⚡ Inverter Details</div>';
       panels += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
@@ -1934,7 +2501,13 @@ class SigenergyDeviceCard extends HTMLElement {
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + (invRated && fmtEntity(invRated, 0, '') !== '—' ? (parseFloat(self._hass.states[invRated]?.state || 0) / 1000).toFixed(1) + 'kW' : '—') + '</span><span style="' + statLbl + '">Rated</span></div>';
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(pvOne, 0, 'W') + '</span><span style="' + statLbl + '">PV1</span></div>';
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(pvTwo, 0, 'W') + '</span><span style="' + statLbl + '">PV2</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridV, 1, 'V') + '</span><span style="' + statLbl + '">Grid V</span></div>';
+      if (threePhase && gridVL2 && gridVL3) {
+        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridV, 1, 'V') + '</span><span style="' + statLbl + '">Grid L1</span></div>';
+        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridVL2, 1, 'V') + '</span><span style="' + statLbl + '">Grid L2</span></div>';
+        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridVL3, 1, 'V') + '</span><span style="' + statLbl + '">Grid L3</span></div>';
+      } else {
+        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridV, 1, 'V') + '</span><span style="' + statLbl + '">Grid V</span></div>';
+      }
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridHz, 1, 'Hz') + '</span><span style="' + statLbl + '">Grid Hz</span></div>';
       panels += '</div></div>';
     }

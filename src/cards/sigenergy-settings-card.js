@@ -493,6 +493,8 @@ class SigenergySettingsCard extends LitElement {
         ${this._renderEntityRow('Inverter Temp', 'inverter_temp')}
         ${this._renderEntityRow('Battery Temp', 'battery_temp')}
         ${this._renderEntityRow('Grid Voltage', 'grid_voltage')}
+        ${this._renderEntityRow('Grid Voltage L2', 'grid_voltage_l2')}
+        ${this._renderEntityRow('Grid Voltage L3', 'grid_voltage_l3')}
         ${this._renderEntityRow('Grid Frequency', 'grid_frequency')}
         ${this._renderEntityRow('Nordpool', 'nordpool')}
       </div>

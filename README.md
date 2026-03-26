@@ -73,7 +73,7 @@ Built-in visual cable path editor for customizing the animated power flow routes
 - **Animated House Card** — Isometric 3D house with real-time animated power flow "comets" showing solar generation, battery charge/discharge, grid import/export, EV charging, and heat pump usage
 - **Responsive House Design** — Toggle EV charger/heat pump in settings and the house card updates dynamically: garage gate opens to show EV charging, heat pump unit appears on the house exterior
 - **Cable Path Editor** — Built-in visual editor for customizing animated power flow cable routes with drag-to-reposition control points and snap-to-grid
-- **Sankey Energy Flow** — Visual energy flow diagram showing power distribution from sources (Solar, Grid, Battery) to sinks (Home, Battery, Grid)
+- **Sankey Energy Flow** — Visual energy flow diagram showing power distribution from sources (Solar, Grid, Battery) to sinks (Home, Battery, Grid, EV, Heat Pump). Entities below 0.1 kWh are automatically hidden for a cleaner chart. Rounded to 1 decimal place
 - **Battery System Card** — SVG-based battery stack visualization with expandable detail panels for each inverter and battery pack (SoC, SoH, voltage, current, cycles, cell voltages, temperatures)
 - **Status Cards** — Real-time power values (Solar, Home, Battery, Grid) and daily energy totals (kWh)
 
@@ -86,9 +86,13 @@ Built-in visual cable path editor for customizing the animated power flow routes
 ### Settings UI (No YAML Required)
 - **4-tab configuration card** with live entity validation
 - **Entity Configuration** — Map your HA entities to ~70 dashboard slots with real-time state badges
+- **Auto-Detect from HA Energy Dashboard** — One-click detection of grid sources, solar, battery, Solcast, EV chargers, and heat pumps from your HA Energy Dashboard configuration. Supports broadened keyword matching for 30+ EV charger brands (Tesla, Zappi, Easee, Wallbox, ChargePoint, etc.) and 20+ heat pump brands (Daikin, Nibe, Vaillant, Viessmann, etc.)
+- **Cumulative Sensor Support** — Automatically detects cumulative (lifetime total) energy sensors and creates HA utility_meter helpers for daily tracking. Works with both daily-resetting and always-increasing sensor types
+- **EV & Heat Pump in Sankey** — Add EV and/or heat pump energy as destination nodes in the Sankey flow chart, with auto-detect and daily meter auto-creation for cumulative sensors
 - **Feature Toggles** — Enable/disable EV charger, heat pump, EMHASS, solar forecast, financial tracking
 - **Pricing Setup** — Configure price entities, thresholds, currency
 - **Display Preferences** — Decimal places, chart range, SoC ring thresholds, power auto-scaling
+- **Responsive Toggle UI** — Optimized event handling prevents missed clicks and lag; hass state updates no longer trigger full DOM rebuilds
 
 ### Theme & Responsiveness
 - **Bundled dark theme** (`sigenergy_dark`) — consistent appearance regardless of your HA theme
@@ -247,12 +251,16 @@ Settings auto-sync between browsers on the same HA instance.
 | `ev_charger_status` | Charger status (charging/idle/etc.) |
 | `ev_soc` | Electric vehicle battery state of charge (%) |
 | `ev_charger_energy_today` | EV energy charged today (kWh) |
+| `ev_energy_today` | Daily EV energy sensor for Sankey graph (kWh) — auto-detected from HA Energy Dashboard |
+| `ev_energy_daily_meter` | Auto-created utility_meter entity for cumulative EV sensors (read-only) |
 
 ### Heat Pump Entity (Optional — Enable in Features)
 
 | Settings Field | Description |
 |---|---|
 | `heat_pump_power` | Heat pump power consumption (W) |
+| `heat_pump_energy_today` | Daily heat pump energy for Sankey graph (kWh) — auto-detected from HA Energy Dashboard |
+| `hp_energy_daily_meter` | Auto-created utility_meter entity for cumulative HP sensors (read-only) |
 
 ### EMHASS MPC Entities (Optional — Enable EMHASS in Features)
 
@@ -336,6 +344,8 @@ Configure in Settings → **🔧 Features** tab:
 | **EV Charger** | Off | Shows EV charger power flow on house card, adds EV comet animation path |
 | **EV Vehicle** | Off | Shows car in garage illustration on house card |
 | **Heat Pump** | Off | Shows heat pump power flow on house card |
+| **EV in Sankey** | Off | Adds EV consumption as a destination node in the Sankey energy flow chart (configure in ⚡ Entities tab) |
+| **HP in Sankey** | Off | Adds heat pump/HVAC energy as a destination node in the Sankey chart (configure in ⚡ Entities tab) |
 | **Grid Connection** | On | Turn **off** for off-grid systems — hides grid cable and animation |
 | **Hide Cables** | Off | Hides static cable lines, shows only animated power flow comets |
 | **Battery Packs** | 2 | Number of battery modules (1–8) — controls device card layout and entity slots |
@@ -397,7 +407,7 @@ colors:
   grid_import: "#e74c3c"
   grid_export: "#2ecc71"
   home: "#3498db"
-  ev: "#9b59b6"
+  ev: "#ff69b4"
   heat_pump: "#e67e22"
 ```
 
@@ -514,6 +524,22 @@ genergy-dashboard/
 ---
 
 ## Changelog
+
+### v2.3.0
+- **Sankey graph threshold** — Entities below 0.1 kWh are automatically hidden (`min_state: 0.1`), preventing near-zero entries (e.g., `0.001 kWh`) from cluttering the chart. Values rounded to 1 decimal place.
+- **Compact Sankey labels** — Heat Pump node renamed to "HP" for better fit in narrow chart columns.
+- **EV color changed to pink** — EV nodes in Sankey, house card flow animation, and settings UI now use hot pink (`#ff69b4`) instead of purple, to differentiate from the Grid which uses purple/blue.
+- **Broadened auto-detect keywords** — EV detection now covers 30+ brands/models (Tesla, Zappi, Easee, Wallbox, ChargePoint, Emporia, Pulsar, Ohme, Hypervolt, Alfen, EVBox, etc.). Heat pump detection covers 20+ brands (Daikin, Nibe, Vaillant, Viessmann, Mitsubishi, Panasonic Aquarea, Stiebel, Bosch, Toshiba, Fujitsu, LG, Samsung, etc.).
+- **Responsive settings UI** — Fixed sluggish toggle/button clicks. Home Assistant `hass` state updates now only refresh entity state badges inline instead of rebuilding the full DOM, preventing missed clicks and input deselection.
+- **Removed duplicate feature toggles** — Grid configuration (3-phase, dual tariff) and Sankey node toggles (EV, HP) are now exclusively in the ⚡ Entities tab. The 🔧 Features tab shows a redirect hint. This eliminates conflicting toggle locations.
+- **Cumulative sensor support** — Auto-detects lifetime-total energy sensors (state > 100 kWh) and creates HA utility_meter helpers for daily tracking. Supports both daily-resetting and always-increasing sensor types.
+
+### v2.2.0
+- **Dual tariff + 3-phase support** — Added separate high/low tariff import/export entities with automatic sum sensor (`DualTariffSumSensor`). Per-phase voltage monitoring (L1/L2/L3) with dedicated entity slots.
+- **Conditional toggle UI** — Grid Energy Metering, Grid Voltage, EMHASS, and Solar sections in the Entities tab expand inline when toggled. No page reload required.
+- **EV & Heat Pump in Sankey** — Toggle to add EV and/or Heat Pump as destination nodes in the Sankey energy flow chart. Supports auto-detection from HA Energy Dashboard device consumption list.
+- **Weather entity reset fix** — Fixed bug where changing the weather entity would fail because find-and-replace used default value instead of previous value.
+- **Dashboard builder fix** — Fixed stale config usage during dashboard rebuild by reading from config store instead of cached value.
 
 ### v2.1.0
 - **Robust custom element registration** — Multi-attempt registration with queueMicrotask, requestAnimationFrame, and setTimeout fallbacks. Watchdog monitors element health and triggers re-registration if elements are lost.
