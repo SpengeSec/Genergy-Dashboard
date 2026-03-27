@@ -2582,7 +2582,7 @@ class SigenergyDeviceCard extends HTMLElement {
     var P = 4, PW = 150, PH = 58, PR = 16, CR = 28, CL = 8, G = 3;
     var IW = 300;  // image width in SVG units
     // Image pixel heights: 1=552, 2=750, 3=963, 4=1170, 5=1398, 6=1602 (all 795px wide)
-    var imgHs = [342, 552, 750, 963, 1170, 1398, 1602, 1810, 2020];
+    var imgHs = [342, 552, 750, 963, 1170, 1398, 1602, 1602, 1602];
     var np = Math.max(1, Math.min(packs, 8));
     var imgH = imgHs[np] || imgHs[6];
     var IH = IW * imgH / 795;
