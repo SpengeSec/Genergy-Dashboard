@@ -2,7 +2,7 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](LICENSE)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=SpengeSec&repository=Genergy-Dashboard&category=integration)
+<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=SpengeSec&repository=Genergy-Dashboard&category=integration" target="_blank" rel="noopener"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store." /></a>
 
 > **⚠️ Active Development**
 >
@@ -572,6 +572,14 @@ genergy-dashboard/
 ---
 
 ## Changelog
+
+### v2.5.2
+- **Missing cards notification on Overview** — The Device Card overview now shows an amber warning banner when required HACS frontend plugins (Layout Card, ApexCharts, Sankey Chart, Mushroom Cards, Card Mod) are not installed. Includes direct HACS install links and a dismiss button. Complements the existing Settings-view detection.
+- **HACS integration icon** — Added `icon.png` (48×48 green "G" logo) to the integration directory, shown in the HACS store listing.
+- **HACS install button opens in new tab** — The README HACS badge now opens in a new browser tab (`target="_blank"`) and includes the `&category=integration` parameter for reliable one-click installation.
+
+### v2.5.1
+- **Battery image height fix** — Corrected battery stack image heights for 7-pack and 8-pack layouts in the device card.
 
 ### v2.5.0
 - **Sigenergy auto-detect** — Comprehensive entity auto-detection for Sigenergy inverter systems. Scans `sensor.sigen_*` entities and automatically maps plant-level power/energy sensors and inverter-level entities (temperature, PV strings). Sets `battery_positive_charging: true` and detects PV string count.
