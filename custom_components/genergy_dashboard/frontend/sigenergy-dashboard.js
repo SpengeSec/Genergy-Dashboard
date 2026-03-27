@@ -65,6 +65,10 @@ const DEFAULT_ENTITIES = {
   battery_pack2_soc: 'sensor.battery_monitor_pack_02_view_soc',
   battery_pack3_soc: 'sensor.battery_monitor_pack_03_view_soc',
   battery_pack4_soc: '',
+  battery_pack5_soc: '',
+  battery_pack6_soc: '',
+  battery_pack7_soc: '',
+  battery_pack8_soc: '',
   inverter_temp: 'sensor.deyeinvertermaster_temperature_dc_transformer',
   battery_temp: 'sensor.deyeinvertermaster_battery_temperature',
   grid_voltage: 'sensor.deyeinvertermaster_grid_voltage_l1',
@@ -80,6 +84,10 @@ const DEFAULT_ENTITIES = {
   battery_current: 'sensor.deyeinvertermaster_battery_output_current',
   pv1_power: 'sensor.deyeinvertermaster_pv1_power',
   pv2_power: 'sensor.deyeinvertermaster_pv2_power',
+  pv3_power: '',
+  pv4_power: '',
+  pv5_power: '',
+  pv6_power: '',
   inverter_rated_power: 'sensor.deyeinvertermaster_inverter_rated_power',
   inverter_output_power: 'sensor.deyeinvertermaster_inverter_output_power',
   inverter_internal_temp: 'sensor.deyeinvertermaster_inverter_internal_temperature',
@@ -145,6 +153,8 @@ const DEFAULT_CONFIG = {
     show_hp_in_sankey: false,
     ev_energy_is_cumulative: false,
     hp_energy_is_cumulative: false,
+    battery_positive_charging: true,
+    pv_strings: 2,
   },
   pricing: {
     source: 'nordpool',
@@ -462,7 +472,7 @@ class SigenergySettingsCard extends HTMLElement {
       { name: 'ApexCharts Card', tag: 'apexcharts-card', hacs: 'apexcharts-card', repo: 'RomRider/apexcharts-card', hacsId: '331701152', owner: 'RomRider', repository: 'apexcharts-card', purpose: 'Energy time-series charts' },
       { name: 'Sankey Chart Card', tag: 'sankey-chart', hacs: 'ha-sankey-chart', repo: 'MindFreeze/ha-sankey-chart', hacsId: '455846088', owner: 'MindFreeze', repository: 'ha-sankey-chart', purpose: 'Energy flow diagram' },
       { name: 'Mushroom Cards', tag: 'mushroom-template-card', hacs: 'mushroom', repo: 'piitaya/lovelace-mushroom', hacsId: '444350375', owner: 'piitaya', repository: 'lovelace-mushroom', purpose: 'Status pills and cards' },
-      { name: 'Card Mod', tag: 'card-mod', hacs: 'lovelace-card-mod', repo: 'thomasloven/lovelace-card-mod', hacsId: '190927524', owner: 'thomasloven', repository: 'lovelace-card-mod', purpose: 'CSS styling injection' },
+      { name: 'Card Mod', tag: 'mod-card', hacs: 'lovelace-card-mod', repo: 'thomasloven/lovelace-card-mod', hacsId: '190927524', owner: 'thomasloven', repository: 'lovelace-card-mod', purpose: 'CSS styling injection' },
     ];
     const missing = [];
     for (const card of REQUIRED_CARDS) {
@@ -1083,18 +1093,20 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Inverter Output', 'inverter_output_power', e)}
         ${this._entityRow('Inverter Rated', 'inverter_rated_power', e)}
         ${this._entityRow('Rated Power', 'rated_power', e)}
-        ${this._entityRow('PV1 Power', 'pv1_power', e)}
-        ${this._entityRow('PV2 Power', 'pv2_power', e)}
+        <div style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;">
+          <span style="font-size:12px;font-weight:600;color:#c8b84a;">☀️ PV Strings</span>
+          <select class="pv-strings-select" data-key="pv_strings" style="background:#1a1f2e;color:#e0e6f0;border:1px solid #2d3451;border-radius:6px;padding:3px 8px;font-size:11px;">
+            ${[1,2,3,4,5,6].map(n => `<option value="${n}" ${(cfg.features?.pv_strings || 2) == n ? 'selected' : ''}>${n} string${n > 1 ? 's' : ''}</option>`).join('')}
+          </select>
+        </div>
+        ${Array.from({length: cfg.features?.pv_strings || 2}, (_, i) => this._entityRow('PV' + (i+1) + ' Power', 'pv' + (i+1) + '_power', e)).join('\n        ')}
         ${this._entityRow('Battery Voltage', 'battery_voltage', e)}
         ${this._entityRow('Battery Current', 'battery_current', e)}
       </div>
       <div class="section">
         <div class="section-title">🔋 Battery Pack SoC</div>
         <div class="toggle-desc" style="margin-bottom:8px;color:#8892a4;font-size:11px;">Individual SoC sensors for each battery pack. Leave blank to use the main Battery SoC entity as fallback.</div>
-        ${this._entityRow('Pack 1 SoC', 'battery_pack1_soc', e)}
-        ${this._entityRow('Pack 2 SoC', 'battery_pack2_soc', e)}
-        ${this._entityRow('Pack 3 SoC', 'battery_pack3_soc', e)}
-        ${this._entityRow('Pack 4 SoC', 'battery_pack4_soc', e)}
+        ${Array.from({length: Math.min(cfg.features?.battery_packs || 2, 8)}, (_, i) => this._entityRow('Pack ' + (i+1) + ' SoC', 'battery_pack' + (i+1) + '_soc', e)).join('\n        ')}
       </div>
     `;
 
@@ -1417,6 +1429,66 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
+          // ── Sigenergy Modbus auto-detect ──────────────────────────────
+          if (this._hass && this._hass.states) {
+            const allKeys = Object.keys(this._hass.states);
+            const sigenKeys = allKeys.filter(k => k.startsWith('sensor.sigen_'));
+            if (sigenKeys.length > 0) {
+              const has = (suffix) => sigenKeys.find(k => k.endsWith(suffix));
+
+              // Plant-level power/energy entities
+              const map = {
+                solar_power:             has('_pv_power') && has('_pv_power').includes('plant') ? has('_pv_power') : sigenKeys.find(k => k.includes('plant') && k.includes('pv_power')),
+                load_power:              sigenKeys.find(k => k.includes('plant_total_load_power')),
+                battery_power:           sigenKeys.find(k => k.includes('plant_battery_power')),
+                battery_soc:             sigenKeys.find(k => k.includes('plant_battery_state_of_charge')),
+                grid_power:              sigenKeys.find(k => k.includes('plant_grid_active_power')),
+                grid_active_power:       sigenKeys.find(k => k.includes('plant_grid_active_power')),
+                // Daily energy
+                solar_energy_today:      sigenKeys.find(k => k.includes('plant_daily_pv_energy')),
+                load_energy_today:       sigenKeys.find(k => k.includes('plant_daily_load_consumption')),
+                battery_charge_today:    sigenKeys.find(k => k.includes('plant_daily_battery_charge_energy')),
+                battery_discharge_today: sigenKeys.find(k => k.includes('plant_daily_battery_discharge_energy')),
+                grid_import_today:       sigenKeys.find(k => k.includes('plant_daily_grid_import_energy')),
+                grid_export_today:       sigenKeys.find(k => k.includes('plant_daily_grid_export_energy')),
+                // Inverter-level
+                inverter_temp:           sigenKeys.find(k => k.includes('inverter_pcs_internal_temperature')),
+                battery_temp:            sigenKeys.find(k => k.includes('inverter_battery_average_cell_temperature')),
+                // PV strings (up to 6)
+                pv1_power:               sigenKeys.find(k => k.includes('inverter_pv1_power')),
+                pv2_power:               sigenKeys.find(k => k.includes('inverter_pv2_power')),
+                pv3_power:               sigenKeys.find(k => k.includes('inverter_pv3_power')),
+                pv4_power:               sigenKeys.find(k => k.includes('inverter_pv4_power')),
+                pv5_power:               sigenKeys.find(k => k.includes('inverter_pv5_power')),
+                pv6_power:               sigenKeys.find(k => k.includes('inverter_pv6_power')),
+              };
+
+              let sigenCount = 0;
+              for (const [key, eid] of Object.entries(map)) {
+                if (eid && !cfg2.entities[key]) {
+                  cfg2.entities[key] = eid;
+                  found.push('Sigenergy ' + key + ': ' + eid);
+                  sigenCount++;
+                }
+              }
+
+              // Auto-detect PV string count from available pv*_power entities
+              if (sigenCount > 0) {
+                let pvCount = 0;
+                for (let i = 1; i <= 6; i++) {
+                  if (sigenKeys.find(k => k.includes('inverter_pv' + i + '_power'))) pvCount = i;
+                }
+                if (pvCount > 0) {
+                  cfg2.features.pv_strings = pvCount;
+                  found.push('Sigenergy PV strings detected: ' + pvCount);
+                }
+                // Sigenergy uses positive = charging convention
+                cfg2.features.battery_positive_charging = true;
+                found.push('✓ Battery sign convention set to Sigenergy (positive = charging)');
+              }
+            }
+          }
+
           if (found.length > 0) {
             this._storeSave(cfg2);
             if (statusEl) statusEl.innerHTML = '✅ Detected ' + found.length + ' entities:<br>' + found.map(f => '• ' + f).join('<br>');
@@ -1429,6 +1501,17 @@ class SigenergySettingsCard extends HTMLElement {
           console.error('Auto-detect failed:', err);
           if (statusEl) statusEl.textContent = '❌ Failed to fetch Energy Dashboard config: ' + (err.message || 'unknown error');
         }
+      });
+    }
+
+    // PV strings selector handler
+    const pvStringsSelect = el.querySelector('.pv-strings-select');
+    if (pvStringsSelect) {
+      pvStringsSelect.addEventListener('change', () => {
+        const cfg2 = this._storeGet();
+        cfg2.features.pv_strings = parseInt(pvStringsSelect.value) || 2;
+        this._storeSave(cfg2);
+        this._render();
       });
     }
 
@@ -1493,6 +1576,7 @@ class SigenergySettingsCard extends HTMLElement {
           <span class="row-label">Battery Packs</span>
           <input class="row-input" type="number" min="1" max="8" value="${f.battery_packs || 2}" data-key="battery_packs" />
         </div>
+        ${this._toggleHtml('Positive = Charging', 'Enable if your inverter reports positive battery power when charging (most brands). Disable if positive means discharging.', 'battery_positive_charging', f.battery_positive_charging !== false)}
       </div>
       <div class="section">
         <div class="section-title">Charts</div>
@@ -1953,19 +2037,26 @@ class SigenergySettingsCard extends HTMLElement {
       ];
 
       // Build status mushroom cards
+      // Helper: build Jinja template that shows value + unit from the sensor itself
+      const _powerTpl = (eid) => {
+        return "{% set u = state_attr('" + eid + "', 'unit_of_measurement') | default('W') %}" +
+               "{% set v = states('" + eid + "') | float(0) %}" +
+               "{% if u == 'kW' %}{{ v | round(2) }} kW{% else %}{{ v | round(0) }} W{% endif %}";
+      };
+
       const statusCards = [
         {
           type: 'custom:mushroom-template-card',
           entity: e.solar_power || 'sensor.solar_production',
           primary: 'Solar', icon: 'mdi:solar-power', icon_color: 'orange',
-          secondary: "{{ states('" + (e.solar_power || 'sensor.solar_production') + "') | round(0) }} W",
+          secondary: _powerTpl(e.solar_power || 'sensor.solar_production'),
           card_mod: { style: 'ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }' }
         },
         {
           type: 'custom:mushroom-template-card',
           entity: e.load_power || 'sensor.home_consumption',
           primary: 'Home', icon: 'mdi:home-lightning-bolt', icon_color: 'deep-purple',
-          secondary: "{{ states('" + (e.load_power || 'sensor.home_consumption') + "') | round(0) }} W",
+          secondary: _powerTpl(e.load_power || 'sensor.home_consumption'),
           card_mod: { style: 'ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }' }
         },
         {
@@ -1979,7 +2070,7 @@ class SigenergySettingsCard extends HTMLElement {
           type: 'custom:mushroom-template-card',
           entity: e.grid_active_power || e.grid_power || 'sensor.net_grid_power',
           primary: 'Grid', icon: 'mdi:transmission-tower', icon_color: 'red',
-          secondary: "{{ states('" + (e.grid_active_power || e.grid_power || 'sensor.net_grid_power') + "') | round(0) }} W",
+          secondary: _powerTpl(e.grid_active_power || e.grid_power || 'sensor.net_grid_power'),
           card_mod: { style: 'ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }' }
         }
       ];
@@ -2070,6 +2161,8 @@ class SigenergySettingsCard extends HTMLElement {
       houseCardOrig.features.heat_pump = f.heat_pump || false;
       houseCardOrig.features.grid = f.grid_connection !== false;
       houseCardOrig.features.hide_cables = f.hide_cables || false;
+      // Sigenergy convention: positive battery_power = charging
+      houseCardOrig.battery_positive_charging = (f.battery_positive_charging !== false);
       if (!houseCardOrig.card_mod) houseCardOrig.card_mod = {};
       houseCardOrig.card_mod.style = 'ha-card { overflow: hidden !important; }\n.house-container { width: 100% !important; overflow: hidden !important; }\n.house-container img { width: 100% !important; height: auto !important; }\n.house-container svg { width: 100% !important; height: auto !important; }';
       const houseStack = [houseCardOrig];
@@ -2467,7 +2560,7 @@ class SigenergyDeviceCard extends HTMLElement {
 
     /* ── Compact layout for narrow cards ── */
     if (this._cardWidth < 380) {
-      var np = Math.max(1, Math.min(packs, 6));
+      var np = Math.max(1, Math.min(packs, 8));
       var imgSrc = _SIGENERGY_SCRIPT_DIR + 'images/1inverter' + np + 'battery.png';
       var html = '<style>:host{display:block}.card{background:#1a1f2e;border-radius:16px;padding:12px;overflow:hidden;text-align:center}.img{max-width:100%;height:auto;margin:0 auto 12px;display:block}.labels{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}.pill{background:rgba(30,35,54,0.94);border:1px solid;border-radius:14px;padding:8px 14px;display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}.pill-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.pill-name{font-size:15px;font-weight:600;color:#e0e4ec;white-space:nowrap}.pill-val{font-size:16px;font-weight:700;color:#fff;white-space:nowrap}</style>';
       html += '<div class="card">';
@@ -2489,9 +2582,9 @@ class SigenergyDeviceCard extends HTMLElement {
     var P = 4, PW = 150, PH = 58, PR = 16, CR = 28, CL = 8, G = 3;
     var IW = 300;  // image width in SVG units
     // Image pixel heights: 1=552, 2=750, 3=963, 4=1170, 5=1398, 6=1602 (all 795px wide)
-    var imgHs = [342, 552, 750, 963, 1170, 1398, 1602];
-    var np = Math.max(1, Math.min(packs, 6));
-    var imgH = imgHs[np];
+    var imgHs = [342, 552, 750, 963, 1170, 1398, 1602, 1810, 2020];
+    var np = Math.max(1, Math.min(packs, 8));
+    var imgH = imgHs[np] || imgHs[6];
     var IH = IW * imgH / 795;
     var colW = P + PW + G + CR * 2 + G + CL;
     var IX = colW;

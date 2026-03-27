@@ -99,7 +99,7 @@ async def _check_prerequisites(hass: HomeAssistant) -> None:
     """Check if required HACS frontend cards are installed and notify user if not."""
     from homeassistant.components.persistent_notification import async_create as pn_create
 
-    missing: list[str] = []
+    missing: list = []
 
     try:
         # Try to read Lovelace resource list to check for installed cards
@@ -114,12 +114,23 @@ async def _check_prerequisites(hass: HomeAssistant) -> None:
         resources = lovelace_data.resources
         if resources is None:
             _LOGGER.debug("Genergy Dashboard: No Lovelace resources found")
-            missing = [name for _, name, _, _, _ in REQUIRED_HACS_CARDS]
+            missing = [(name, owner, repo) for _, name, _, owner, repo in REQUIRED_HACS_CARDS]
         else:
+            # Ensure resources are loaded from storage
+            if hasattr(resources, "async_load") and not getattr(resources, "loaded", True):
+                await resources.async_load()
+
             items = resources.async_items() if hasattr(resources, "async_items") else []
             loaded_urls = [
                 (item.get("url") or "").lower() for item in items
             ]
+
+            if not loaded_urls:
+                _LOGGER.debug(
+                    "Genergy Dashboard: Lovelace resources empty (may not be loaded yet), "
+                    "skipping prereq check"
+                )
+                return
 
             for keyword, display_name, _, owner, repository in REQUIRED_HACS_CARDS:
                 if not any(keyword in url for url in loaded_urls):
@@ -186,8 +197,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
 
-    # Check for missing HACS frontend prerequisites
-    await _check_prerequisites(hass)
+    # Check for missing HACS frontend prerequisites after HA is fully started
+    # (Lovelace resources aren't loaded yet during async_setup_entry)
+    async def _delayed_prereq_check(_event=None) -> None:
+        await _check_prerequisites(hass)
+
+    if hass.is_running:
+        # HA already started (e.g. config entry reloaded) — check after short delay
+        from homeassistant.helpers.event import async_call_later
+        async_call_later(hass, 5, lambda _now: hass.async_create_task(_delayed_prereq_check()))
+    else:
+        from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _delayed_prereq_check)
 
     # Install bundled theme
     await hass.async_add_executor_job(_install_theme, hass)

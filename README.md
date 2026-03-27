@@ -255,6 +255,17 @@ Your settings are stored in two places for reliability:
 
 Settings auto-sync between browsers on the same HA instance.
 
+### Sigenergy Auto-Detect
+
+If you have a **Sigenergy** inverter system, the integration includes a comprehensive auto-detect feature that scans for `sensor.sigen_*` entities in your Home Assistant instance and automatically maps:
+
+- **Plant-level**: solar power, load power, battery power, battery SoC, grid active power, and all daily energy totals
+- **Inverter-level**: inverter temperature, battery temperature, and PV string power (PV1–PV6)
+- **Battery sign convention**: Automatically sets `battery_positive_charging: true` (Sigenergy uses positive values for charging)
+- **PV string count**: Detects how many PV strings are connected and sets the count accordingly
+
+To use: check the "**Use Sigenergy defaults**" checkbox on the first step of the config flow. Or in the Settings tab, click **Auto-Detect** and the Sigenergy entities will be mapped automatically.
+
 ---
 
 ## Entity Reference
@@ -333,7 +344,7 @@ Settings auto-sync between browsers on the same HA instance.
 
 | Settings Field | Description |
 |---|---|
-| `battery_pack1_soc` – `battery_pack4_soc` | Individual pack SoC sensors |
+| `battery_pack1_soc` – `battery_pack8_soc` | Individual pack SoC sensors (up to 8 packs) |
 | `battery_pack_prefix` | BMS entity prefix (e.g., `sensor.battery_monitor_pack_`) for expandable detail panels showing cell voltages, temperatures, SoH, and cycle count |
 
 ### Inverter & System Detail Entities (Optional)
@@ -343,7 +354,7 @@ Settings auto-sync between browsers on the same HA instance.
 | `inverter_temp` | Inverter temperature |
 | `inverter_output_power` | Inverter output power (W) |
 | `rated_power` | Inverter rated power (W) |
-| `pv1_power` / `pv2_power` | Individual PV string power |
+| `pv1_power` – `pv6_power` | Individual PV string power (up to 6 strings) |
 | `grid_voltage` | Grid voltage (V) |
 | `grid_frequency` | Grid frequency (Hz) |
 
@@ -386,6 +397,7 @@ Configure in Settings → **🔧 Features** tab:
 | **Grid Connection** | On | Turn **off** for off-grid systems — hides grid cable and animation |
 | **Hide Cables** | Off | Hides static cable lines, shows only animated power flow comets |
 | **Battery Packs** | 2 | Number of battery modules (1–8) — controls device card layout and entity slots |
+| **PV Strings** | 2 | Number of PV strings (1–6) — controls individual PV string entity slots in Settings |
 | **EMHASS** | On | Enables EMHASS status card, forecast overlays on chart, and financial tracking |
 | **EMHASS Forecasts** | On | Adds MPC forecast dashed lines to energy chart |
 | **Deferrable Loads** | Off | Enables 3 deferrable load entity slots and schedule display |
@@ -529,7 +541,7 @@ genergy-dashboard/
 │       │   ├── sigenergy-dashboard.js # Bundle: settings card + device card + dashboard builder
 │       │   ├── sigenergy-house-card.js# Animated house card (Lit Element)
 │       │   └── images/               # Runtime images (battery renders, house card assets)
-│       │       ├── 1inverter[1-6]battery.png
+│       │       ├── 1inverter[1-8]battery.png
 │       │       ├── home_has_solar_has_car.png
 │       │       ├── dark_home_has_solar_has_car.png
 │       │       ├── home_has_solar_no_car.png
@@ -561,6 +573,14 @@ genergy-dashboard/
 ---
 
 ## Changelog
+
+### v2.5.0
+- **Sigenergy auto-detect** — Comprehensive entity auto-detection for Sigenergy inverter systems. Scans `sensor.sigen_*` entities and automatically maps plant-level power/energy sensors and inverter-level entities (temperature, PV strings). Sets `battery_positive_charging: true` and detects PV string count.
+- **Dynamic PV strings (1–6)** — New "PV Strings" dropdown in Settings → Inverter & PV. Configures how many individual PV string power entity slots (PV1–PV6) appear in the entity mapping section.
+- **Battery packs extended to 8** — Battery pack support increased from 6 to 8 modules. Device card renders battery stack images for all pack counts. Battery Pack SoC section in Settings dynamically shows entity slots matching the configured pack count.
+- **Unit-aware power templates** — Mushroom status cards now use a smart Jinja template that checks `state_attr('unit_of_measurement')` and formats values correctly: kW with 2 decimal places, W with 0 decimal places. Fixes display issues like "2W" instead of "1.96 kW".
+- **Battery sign convention** — Added `battery_positive_charging` configuration (default: `true`) with a **Settings toggle** in Features → Battery section. Enable if your inverter reports positive battery power when charging (most brands including Sigenergy, Deye, SunSynk, Huawei). Disable for inverters where positive means discharging.
+- **Prerequisite detection race condition fix** — Fixed false positives in backend prerequisite detection where all cards showed as "not installed" on startup. Root cause: `ResourceStorageCollection` wasn't loaded yet when checked during `async_setup_entry()`. Now defers the check using `EVENT_HOMEASSISTANT_STARTED` during boot or `async_call_later` on reloads.
 
 ### v2.4.0
 - **Automated prerequisite detection** — Two-layer detection system that checks for required HACS frontend plugins (Layout Card, ApexCharts Card, Sankey Chart Card, Mushroom Cards, Card Mod) both on backend startup and in the frontend Settings view.
