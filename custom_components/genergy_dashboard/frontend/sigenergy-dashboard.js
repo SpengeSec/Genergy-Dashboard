@@ -2471,6 +2471,27 @@ class SigenergyDeviceCard extends HTMLElement {
     this._ro = null;
   }
 
+  /**
+   * Check which required HACS frontend cards are missing.
+   * Returns an array of { name, tag, hacs, purpose, owner, repository } objects.
+   */
+  _checkPrerequisites() {
+    const REQUIRED_CARDS = [
+      { name: 'Layout Card', tag: 'layout-card', hacs: 'layout-card', owner: 'thomasloven', repository: 'lovelace-layout-card', purpose: 'Responsive grid layout' },
+      { name: 'ApexCharts Card', tag: 'apexcharts-card', hacs: 'apexcharts-card', owner: 'RomRider', repository: 'apexcharts-card', purpose: 'Energy time-series charts' },
+      { name: 'Sankey Chart Card', tag: 'sankey-chart', hacs: 'ha-sankey-chart', owner: 'MindFreeze', repository: 'ha-sankey-chart', purpose: 'Energy flow diagram' },
+      { name: 'Mushroom Cards', tag: 'mushroom-template-card', hacs: 'mushroom', owner: 'piitaya', repository: 'lovelace-mushroom', purpose: 'Status pills and cards' },
+      { name: 'Card Mod', tag: 'mod-card', hacs: 'lovelace-card-mod', owner: 'thomasloven', repository: 'lovelace-card-mod', purpose: 'CSS styling injection' },
+    ];
+    const missing = [];
+    for (const card of REQUIRED_CARDS) {
+      if (!customElements.get(card.tag)) {
+        missing.push(card);
+      }
+    }
+    return missing;
+  }
+
   connectedCallback() {
     if (!this._ro) {
       this._ro = new ResizeObserver(entries => {
@@ -2558,12 +2579,33 @@ class SigenergyDeviceCard extends HTMLElement {
     }
     const invFmt = this._fmtPower(invPower);
 
+    // Check for missing prerequisite cards
+    const missingCards = this._checkPrerequisites();
+    const prereqDismissed = localStorage.getItem('genergy_prereq_dismissed_overview') === 'true';
+    var prereqBanner = '';
+    if (missingCards.length > 0 && !prereqDismissed) {
+      prereqBanner = '<div style="background:linear-gradient(135deg,#1a2332,#1e2a3a);border:1px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:12px;font-family:var(--ha-card-header-font-family,inherit)">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:18px">⚠️</span><span style="font-size:14px;font-weight:600;color:#f59e0b">Missing Required Cards</span></div>' +
+        '<p style="font-size:12px;color:#8892a4;margin:0 0 8px;line-height:1.4">Install these HACS plugins for the dashboard to work properly, then hard-refresh (Ctrl+Shift+R).</p>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">' +
+        missingCards.map(function(c) {
+          return '<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=' + c.owner + '&repository=' + c.repository + '&category=plugin" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:4px 10px;text-decoration:none;font-size:11px;color:#f59e0b;white-space:nowrap">' +
+            '<span>' + c.name + '</span><span style="font-size:9px;opacity:0.7">↗</span></a>';
+        }).join('') +
+        '</div>' +
+        '<div style="display:flex;gap:8px">' +
+        '<button class="prereq-dismiss-overview" style="background:none;border:1px solid #4a4e5866;border-radius:8px;padding:4px 12px;font-size:11px;color:#8892a4;cursor:pointer">Dismiss</button>' +
+        '<a href="/dashboard-sigenergy/settings" style="display:inline-flex;align-items:center;gap:4px;background:rgba(0,212,184,0.1);border:1px solid rgba(0,212,184,0.3);border-radius:8px;padding:4px 12px;text-decoration:none;font-size:11px;color:#00d4b8">Open Settings ↗</a>' +
+        '</div></div>';
+    }
+
     /* ── Compact layout for narrow cards ── */
     if (this._cardWidth < 380) {
       var np = Math.max(1, Math.min(packs, 8));
       var imgSrc = _SIGENERGY_SCRIPT_DIR + 'images/1inverter' + np + 'battery.png';
       var html = '<style>:host{display:block}.card{background:#1a1f2e;border-radius:16px;padding:12px;overflow:hidden;text-align:center}.img{max-width:100%;height:auto;margin:0 auto 12px;display:block}.labels{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}.pill{background:rgba(30,35,54,0.94);border:1px solid;border-radius:14px;padding:8px 14px;display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}.pill-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.pill-name{font-size:15px;font-weight:600;color:#e0e4ec;white-space:nowrap}.pill-val{font-size:16px;font-weight:700;color:#fff;white-space:nowrap}</style>';
       html += '<div class="card">';
+      html += prereqBanner;
       html += '<img class="img" src="' + imgSrc + '" alt="Battery System"/>';
       html += '<div class="labels">';
       html += '<div class="pill" style="border-color:rgba(46,204,113,0.35)"><span class="pill-dot" style="background:#2ecc71"></span><span class="pill-name">Inverter</span><span class="pill-val">' + invFmt + '</span></div>';
@@ -2744,7 +2786,7 @@ class SigenergyDeviceCard extends HTMLElement {
 
     this.shadowRoot.innerHTML =
       '<style>:host{display:block}.card{background:#1a1f2e;border-radius:16px;padding:12px 4px;overflow:hidden} .chevron{cursor:pointer;pointer-events:all;-webkit-tap-highlight-color:transparent;touch-action:manipulation} .chevron *{pointer-events:all} .chevron:hover circle,.chevron:active circle{fill:#3a3e48}</style>' +
-      '<div class="card">' +
+      '<div class="card">' + prereqBanner +
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + TW + ' ' + TH + '" width="100%" style="display:block">' +
       b + '</svg>' + panels + '</div>';
 
@@ -2768,6 +2810,15 @@ class SigenergyDeviceCard extends HTMLElement {
         chevrons[c].addEventListener('touchend', handler);
         chevrons[c].style.pointerEvents = 'all';
       }
+    }
+
+    // Wire up dismiss button for prerequisite banner
+    var dismissBtn = this.shadowRoot.querySelector('.prereq-dismiss-overview');
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', function() {
+        localStorage.setItem('genergy_prereq_dismissed_overview', 'true');
+        self._render();
+      });
     }
   }
 }
