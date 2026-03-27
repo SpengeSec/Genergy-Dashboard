@@ -189,10 +189,15 @@ class SigConfigStore {
       this._haLoaded = true;
       this._loadFromHA().then(cfg => {
         if (cfg) {
-          this._config = cfg;
-          // Also update localStorage cache
-          try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...cfg, _version: 1, _saved: new Date().toISOString() })); } catch(e) {}
-          this._notify();
+          // Only overwrite if HA config is newer than localStorage config
+          const localTs = this._config?._ts || 0;
+          const haTs = cfg._ts || 0;
+          if (haTs >= localTs) {
+            this._config = cfg;
+            // Also update localStorage cache
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...cfg, _version: 1, _saved: new Date().toISOString() })); } catch(e) {}
+            this._notify();
+          }
         }
       });
     }
@@ -260,6 +265,8 @@ class SigConfigStore {
   }
 
   _save(config) {
+    // Stamp config with a timestamp for conflict resolution
+    config._ts = Date.now();
     this._config = config;
     // Write to localStorage (fast cache)
     try {
@@ -267,8 +274,8 @@ class SigConfigStore {
         ...config, _version: 1, _saved: new Date().toISOString(),
       }));
     } catch (e) { /* ignore */ }
-    // Write to HA dashboard config (permanent storage)
-    this._saveToHA(config);
+    // Write to HA dashboard config (permanent storage) — awaited to prevent stale reads on refresh
+    this._saveToHAPromise = this._saveToHA(config);
   }
 
   async _saveToHA(config) {
@@ -380,7 +387,19 @@ class SigenergySettingsCard extends HTMLElement {
     const s = this._hass.states[entityId];
     if (!s) return '❌ Not found';
     const u = s.attributes.unit_of_measurement || '';
-    return `${s.state}${u ? ' ' + u : ''}`;
+    // Round numeric values to reasonable precision for the settings view
+    const raw = s.state;
+    const num = parseFloat(raw);
+    if (!isNaN(num) && isFinite(num) && String(num) === raw.trim()) {
+      let decimals;
+      if (u === 'V' || u === 'W' || u === 'VA') decimals = 1;
+      else if (u === 'kW' || u === 'kWh' || u === 'MWh') decimals = 2;
+      else if (u === '%') decimals = 0;
+      else if (u === '°C' || u === '°F') decimals = 1;
+      else decimals = Math.abs(num) >= 100 ? 1 : 2;
+      return `${num.toFixed(decimals)}${u ? ' ' + u : ''}`;
+    }
+    return `${raw}${u ? ' ' + u : ''}`;
   }
 
   _storeGet() { return window.SigenergyConfig.get(); }
@@ -1425,6 +1444,28 @@ class SigenergySettingsCard extends HTMLElement {
                   cfg2.features.show_hp_in_sankey = true;
                   found.push('Heat Pump energy (from devices): ' + dev.stat_consumption + ' (' + dev.name + ')');
                 }
+                // Also try to find the HP power entity (W/kW) for the HVAC section
+                if (!cfg2.entities.heat_pump_power && this._hass?.states) {
+                  // Derive device prefix from the energy entity (e.g. sensor.hp_energy → sensor.hp_)
+                  const energyId = dev.stat_consumption || '';
+                  const prefix = energyId.replace(/energy.*$|consumption.*$|verbrauch.*$/i, '');
+                  const hpPowerKeys = Object.keys(this._hass.states).filter(k => {
+                    if (!k.startsWith('sensor.')) return false;
+                    const st = this._hass.states[k];
+                    const unit = st?.attributes?.unit_of_measurement || '';
+                    if (unit !== 'W' && unit !== 'kW') return false;
+                    const lower = k.toLowerCase();
+                    // Match by prefix or by HP keywords in the entity name
+                    return (prefix && lower.startsWith(prefix)) ||
+                           hpKw.some(kw => lower.includes(kw.replace(/\s+/g, '_')));
+                  });
+                  // Pick the most likely power entity (prefer ones with 'power' or 'leistung' in name)
+                  const bestHpPower = hpPowerKeys.find(k => k.includes('power') || k.includes('leistung')) || hpPowerKeys[0];
+                  if (bestHpPower) {
+                    cfg2.entities.heat_pump_power = bestHpPower;
+                    found.push('Heat Pump power: ' + bestHpPower);
+                  }
+                }
               }
             }
           }
@@ -1489,9 +1530,91 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
+          // ── Auto-detect 3-phase voltage sensors ──────────────────────
+          if (this._hass && this._hass.states && !cfg2.features.three_phase) {
+            const allKeys = Object.keys(this._hass.states);
+            // Common patterns for phase 2/3 voltage entities across brands
+            const phase2Patterns = [/_l2_voltage/, /_voltage_l2/, /_phase_2.*voltage/, /voltage.*_l2$/, /voltage.*phase_2/, /spanning.*l2/, /spannung.*l2/];
+            const phase2Key = allKeys.find(k => {
+              if (!k.startsWith('sensor.')) return false;
+              const st = this._hass.states[k];
+              const unit = st?.attributes?.unit_of_measurement || '';
+              if (unit !== 'V') return false;
+              const lower = k.toLowerCase();
+              return phase2Patterns.some(p => p.test(lower));
+            });
+            if (phase2Key) {
+              cfg2.features.three_phase = true;
+              found.push('✓ 3-phase grid detected: ' + phase2Key);
+              // Try to auto-populate L1/L2/L3 voltage entities
+              const baseL2 = phase2Key;
+              const l1Guess = baseL2.replace(/_l2/g, '_l1').replace(/phase_2/g, 'phase_1');
+              const l3Guess = baseL2.replace(/_l2/g, '_l3').replace(/phase_2/g, 'phase_3');
+              if (this._hass.states[l1Guess]) {
+                cfg2.entities.grid_voltage_l1 = l1Guess;
+                found.push('Grid Voltage L1: ' + l1Guess);
+              }
+              cfg2.entities.grid_voltage_l2 = baseL2;
+              found.push('Grid Voltage L2: ' + baseL2);
+              if (this._hass.states[l3Guess]) {
+                cfg2.entities.grid_voltage_l3 = l3Guess;
+                found.push('Grid Voltage L3: ' + l3Guess);
+              }
+            }
+          }
+
+          // ── Check all energy entities for lifetime/cumulative values ──
+          // If an entity has state_class='total_increasing' and value > 100 kWh,
+          // auto-create a daily utility_meter helper and use that instead.
+          const energyKeys = [
+            ['solar_energy_today', 'solar_energy'],
+            ['load_energy_today', 'load_energy'],
+            ['battery_charge_today', 'battery_charge'],
+            ['battery_discharge_today', 'battery_discharge'],
+            ['grid_import_today', 'grid_import'],
+            ['grid_export_today', 'grid_export'],
+          ];
+          for (const [cfgKey, meterName] of energyKeys) {
+            if (cfg2.entities[cfgKey] && cfg2.entities[cfgKey] !== 'sensor.entity_id') {
+              const result = await this._ensureDailyMeter(cfg2.entities[cfgKey], meterName);
+              if (result.isCumulative) {
+                const origEntity = cfg2.entities[cfgKey];
+                cfg2.entities[cfgKey] = result.dailyEntity;
+                found.push('⚡ ' + meterName + ': converted lifetime entity → daily meter (' + origEntity + ' → ' + result.dailyEntity + ')');
+              }
+            }
+          }
+          // Also check dual tariff entities
+          if (cfg2.features.dual_tariff) {
+            const dualKeys = [
+              ['grid_import_high_tariff', 'grid_import_high'],
+              ['grid_import_low_tariff', 'grid_import_low'],
+              ['grid_export_high_tariff', 'grid_export_high'],
+              ['grid_export_low_tariff', 'grid_export_low'],
+            ];
+            for (const [cfgKey, meterName] of dualKeys) {
+              if (cfg2.entities[cfgKey] && cfg2.entities[cfgKey] !== 'sensor.entity_id') {
+                const result = await this._ensureDailyMeter(cfg2.entities[cfgKey], meterName);
+                if (result.isCumulative) {
+                  const origEntity = cfg2.entities[cfgKey];
+                  cfg2.entities[cfgKey] = result.dailyEntity;
+                  found.push('⚡ ' + meterName + ': converted lifetime → daily (' + origEntity + ' → ' + result.dailyEntity + ')');
+                }
+              }
+            }
+          }
+
           if (found.length > 0) {
             this._storeSave(cfg2);
             if (statusEl) statusEl.innerHTML = '✅ Detected ' + found.length + ' entities:<br>' + found.map(f => '• ' + f).join('<br>');
+            // Auto-apply detected entities to dashboard so house card and overview immediately work
+            try {
+              await this._buildDashboard();
+              if (statusEl) statusEl.innerHTML += '<br><br>✅ Dashboard auto-rebuilt with detected entities. <b>Refresh the page</b> to see changes.';
+            } catch (buildErr) {
+              if (statusEl) statusEl.innerHTML += '<br><br>⚠️ Auto-rebuild failed — click "Apply Settings to Dashboard" manually.';
+              console.warn('Auto-build after detect failed:', buildErr);
+            }
             // Re-render to show detected entities
             setTimeout(() => this._render(), 500);
           } else {
@@ -2152,7 +2275,7 @@ class SigenergySettingsCard extends HTMLElement {
         ev_charger_power: e.ev_charger_power || '',
         ev_charger_state: e.ev_charger_state || '',
         weather: e.weather || '',
-        heat_pump_power: e.deferrable0_power || ''
+        heat_pump_power: e.heat_pump_power || e.deferrable0_power || ''
       };
       // Sync ALL features from config store to house card
       if (!houseCardOrig.features) houseCardOrig.features = {};

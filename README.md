@@ -573,6 +573,15 @@ genergy-dashboard/
 
 ## Changelog
 
+### v2.5.3
+- **Lifetime→daily auto-conversion** — Auto-detect now checks all core energy entities (solar, load, battery charge/discharge, grid import/export) for cumulative/lifetime values. If state > 100 kWh with `state_class: total_increasing`, automatically creates a HA daily `utility_meter` helper and uses that in the Sankey chart and stats. Fixes broken Sankey displaying thousands of kWh.
+- **Config versioning (anti-overwrite)** — Settings now include a timestamp (`_ts`). On page refresh, the dashboard config only overwrites localStorage if it has a newer timestamp, preventing the issue where manually entered entities were reverted.
+- **Heat pump power auto-detect** — When a heat pump is found via HA Energy Dashboard device consumption, the auto-detect now also scans for matching power entities (W/kW) and populates the HP Power field in the HVAC section.
+- **House card HP entity fix** — Dashboard builder now uses the explicit `heat_pump_power` entity (from HVAC settings) instead of always falling back to EMHASS `deferrable0_power`.
+- **3-phase voltage auto-detect** — Auto-detect now scans for phase 2/3 voltage entities (L2/L3 patterns) and auto-enables 3-phase mode with populated voltage entity fields.
+- **Auto-rebuild after detect** — After successful auto-detect, the dashboard is automatically rebuilt so the house card and Sankey immediately reflect the detected entities. No more manual "Apply Settings to Dashboard" needed.
+- **Settings view decimal cleanup** — Entity state badges in Settings now display rounded values (V: 1 decimal, W: 1 decimal, kW/kWh: 2 decimals, %: 0 decimals) instead of raw float precision like `240.39990518540688 V`.
+
 ### v2.5.2
 - **Missing cards notification on Overview** — The Device Card overview now shows an amber warning banner when required HACS frontend plugins (Layout Card, ApexCharts, Sankey Chart, Mushroom Cards, Card Mod) are not installed. Includes direct HACS install links and a dismiss button. Complements the existing Settings-view detection.
 - **HACS integration icon** — Added `icon.png` (48×48 green "G" logo) to the integration directory, shown in the HACS store listing.
