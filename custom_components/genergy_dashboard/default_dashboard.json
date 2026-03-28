@@ -119,7 +119,7 @@
                     }
                   ],
                   "card_mod": {
-                    "style": "ha-card { background: transparent !important; box-shadow: none !important; }"
+                    "style": "ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; box-shadow: none !important; }"
                   }
                 }
               ]
@@ -135,7 +135,7 @@
                   "card_mod": {
                     "style": {
                       "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: white !important; letter-spacing: 0.5px; }",
-                      ".": "ha-card { background-color: transparent !important; border: none !important; }"
+                      ".": "ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; border: none !important; }"
                     }
                   }
                 },
@@ -206,7 +206,7 @@
                   ],
                   "card_mod": {
                     "style": {
-                      "sankey-chart-base$": "{% set pv = states('__solar_energy_today__') | float(0) %}\n{% set bat_d = states('__battery_discharge_today__') | float(0) %}\n{% set grid_i = states('__grid_import_today__') | float(0) %}\n{% set bat_c = states('__battery_charge_today__') | float(0) %}\n{% set load = states('__load_energy_today__') | float(0) %}\n{% set grid_e = states('__grid_export_today__') | float(0) %}\n{% set src = pv + bat_d + grid_i %}\n{% set dst = bat_c + load + grid_e %}\n:host {\n  --pct-src-solar: \"{{ '%0.2f' | format((pv/src*100) if src > 0 else 0) }}%\";\n  --pct-src-bat: \"{{ '%0.2f' | format((bat_d/src*100) if src > 0 else 0) }}%\";\n  --pct-src-grid: \"{{ '%0.2f' | format((grid_i/src*100) if src > 0 else 0) }}%\";\n  --pct-dst-bat: \"{{ '%0.2f' | format((bat_c/dst*100) if dst > 0 else 0) }}%\";\n  --pct-dst-load: \"{{ '%0.2f' | format((load/dst*100) if dst > 0 else 0) }}%\";\n  --pct-dst-grid: \"{{ '%0.2f' | format((grid_e/dst*100) if dst > 0 else 0) }}%\";\n}\nha-card {\n  background: #1a1f2e !important;\n  border: none !important;\n  border-radius: 4px !important;\n  overflow: hidden !important;\n  padding: 2px !important;\n  max-width: 100% !important;\n}\npath[fill-opacity] {\n  fill-opacity: 0.55 !important;\n}\n.container, .section {\n  overflow: visible !important;\n}\n\n.box {\n  overflow: hidden !important;\n  position: relative !important;\n}\n/* Source side: wide bars */\n.section:first-of-type .box > div:first-child {\n  min-width: 90px !important;\n  border-radius: 8px 0 0 8px !important;\n}\n/* Destination side: reverse flex, bar at right edge */\n\n.section:last-of-type .box > div:first-child {\n  min-width: 90px !important;\n  border-radius: 0 8px 8px 0 !important;\n}\n/* Labels: positioned top-to-bottom inside bar */\n.box .label {\n  position: absolute !important;\n  top: 2px !important;\n  bottom: 2px !important;\n  transform: none !important;\n  display: flex !important;\n  flex-direction: column !important;\n  justify-content: flex-start !important;\n  gap: 0px !important;\n  line-height: normal !important;\n  z-index: 2 !important;\n  width: auto !important;\n  max-width: 160px !important;\n  overflow: visible !important;\n  padding: 0 6px !important;\n  background: transparent !important;\n  margin: 0 !important;\n}\n/* Source labels: left-aligned */\n.section:first-of-type .box .label {\n  left: 6px !important;\n  align-items: flex-start !important;\n  text-align: left !important;\n}\n/* Destination labels: right-aligned */\n.section:last-of-type .box .label {\n  right: 6px !important;\n  align-items: flex-end !important;\n  text-align: right !important;\n}\n/* Name pill badge */\n.box .label .name {\n  order: -2 !important;\n  background: rgba(0,0,0,0.45) !important;\n  border: 1.5px solid rgba(255,255,255,0.3) !important;\n  border-radius: 10px !important;\n  padding: 1px 8px !important;\n  font-size: 7.5px !important;\n  font-weight: 700 !important;\n  letter-spacing: 1px !important;\n  text-transform: uppercase !important;\n  margin-bottom: 2px !important;\n  white-space: nowrap !important;\n  color: #fff !important;\n  width: fit-content !important;\n}\n/* Color-coded pill borders */\n.box > div[title*=\"Solar\"] ~ .label .name { border-color: #c8b84a !important; }\n.box > div[title*=\"Battery\"] ~ .label .name { border-color: #00d4b8 !important; }\n.section:first-of-type .box > div[title*=\"Grid\"] ~ .label .name { border-color: #6b7fd4 !important; }\n.section:last-of-type .box > div[title*=\"Grid\"] ~ .label .name { border-color: #7c5cbf !important; }\n.box > div[title*=\"Load\"] ~ .label .name { border-color: #e8337f !important; }\n/* State value container */\n.box .label > span:first-child {\n  order: -1 !important;\n  display: flex !important;\n  flex-direction: column !important;\n}\n.box {\n  min-height: 30px !important;\n}\n.box .label .state {\n  font-size: 22px !important;\n  font-weight: 800 !important;\n  color: #fff !important;\n  line-height: 1.1 !important;\n  text-shadow: 0 1px 4px rgba(0,0,0,0.7) !important;\n}\n.box .label .unit {\n  font-size: 10px !important;\n  font-weight: 500 !important;\n  color: rgba(255,255,255,0.65) !important;\n  text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;\n}\n/* Percentage labels - pushed to bottom */\n.box .label::after {\n  font-size: 9px !important;\n  font-weight: 600 !important;\n  color: rgba(255,255,255,0.55) !important;\n  margin-top: auto !important;\n  text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;\n  white-space: nowrap !important;\n}\n/* Source percentages */\n.section:first-of-type .box > div[title*=\"Solar\"] ~ .label::after { content: var(--pct-src-solar); }\n.section:first-of-type .box > div[title*=\"Battery\"] ~ .label::after { content: var(--pct-src-bat); }\n.section:first-of-type .box > div[title*=\"Grid\"] ~ .label::after { content: var(--pct-src-grid); }\n/* Destination percentages */\n.section:last-of-type .box > div[title*=\"Battery\"] ~ .label::after { content: var(--pct-dst-bat); }\n.section:last-of-type .box > div[title*=\"Load\"] ~ .label::after { content: var(--pct-dst-load); }\n.section:last-of-type .box > div[title*=\"Grid\"] ~ .label::after { content: var(--pct-dst-grid); }\n/* Mobile-responsive sankey */\n@media (max-width: 800px) {\n  .section:first-of-type .box > div:first-child { min-width: 65px !important; }\n  .section:last-of-type .box > div:first-child { min-width: 65px !important; }\n  \n  .box .label .state { font-size: 16px !important; }\n  .box .label .name { font-size: 6px !important; padding: 0 4px !important; }\n  .box .label .unit { font-size: 8px !important; }\n  .box .label::after { font-size: 7px !important; }\n}\n\n@media (max-width: 800px) {\n  }\n\n@media (max-width: 800px) {  }\n\n/* Sankey layout fix */\n.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n.section:last-of-type .box { flex-direction: row-reverse !important; }\n.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } }\n"
+                      "sankey-chart-base$": "{% set pv = states('__solar_energy_today__') | float(0) %}\n{% set bat_d = states('__battery_discharge_today__') | float(0) %}\n{% set grid_i = states('__grid_import_today__') | float(0) %}\n{% set bat_c = states('__battery_charge_today__') | float(0) %}\n{% set load = states('__load_energy_today__') | float(0) %}\n{% set grid_e = states('__grid_export_today__') | float(0) %}\n{% set src = pv + bat_d + grid_i %}\n{% set dst = bat_c + load + grid_e %}\n:host {\n  --pct-src-solar: \"{{ '%0.2f' | format((pv/src*100) if src > 0 else 0) }}%\";\n  --pct-src-bat: \"{{ '%0.2f' | format((bat_d/src*100) if src > 0 else 0) }}%\";\n  --pct-src-grid: \"{{ '%0.2f' | format((grid_i/src*100) if src > 0 else 0) }}%\";\n  --pct-dst-bat: \"{{ '%0.2f' | format((bat_c/dst*100) if dst > 0 else 0) }}%\";\n  --pct-dst-load: \"{{ '%0.2f' | format((load/dst*100) if dst > 0 else 0) }}%\";\n  --pct-dst-grid: \"{{ '%0.2f' | format((grid_e/dst*100) if dst > 0 else 0) }}%\";\n}\nha-card {\n  --ha-card-background: transparent !important; --card-background-color: transparent !important;\n  border: none !important;\n  border-radius: 4px !important;\n  overflow: hidden !important;\n  padding: 2px !important;\n  max-width: 100% !important;\n}\npath[fill-opacity] {\n  fill-opacity: 0.55 !important;\n}\n.container, .section {\n  overflow: visible !important;\n}\n\n.box {\n  overflow: hidden !important;\n  position: relative !important;\n}\n/* Source side: wide bars */\n.section:first-of-type .box > div:first-child {\n  min-width: 90px !important;\n  border-radius: 8px 0 0 8px !important;\n}\n/* Destination side: reverse flex, bar at right edge */\n\n.section:last-of-type .box > div:first-child {\n  min-width: 90px !important;\n  border-radius: 0 8px 8px 0 !important;\n}\n/* Labels: positioned top-to-bottom inside bar */\n.box .label {\n  position: absolute !important;\n  top: 2px !important;\n  bottom: 2px !important;\n  transform: none !important;\n  display: flex !important;\n  flex-direction: column !important;\n  justify-content: flex-start !important;\n  gap: 0px !important;\n  line-height: normal !important;\n  z-index: 2 !important;\n  width: auto !important;\n  max-width: 160px !important;\n  overflow: visible !important;\n  padding: 0 6px !important;\n  background: transparent !important;\n  margin: 0 !important;\n}\n/* Source labels: left-aligned */\n.section:first-of-type .box .label {\n  left: 6px !important;\n  align-items: flex-start !important;\n  text-align: left !important;\n}\n/* Destination labels: right-aligned */\n.section:last-of-type .box .label {\n  right: 6px !important;\n  align-items: flex-end !important;\n  text-align: right !important;\n}\n/* Name pill badge */\n.box .label .name {\n  order: -2 !important;\n  background: rgba(0,0,0,0.45) !important;\n  border: 1.5px solid rgba(255,255,255,0.3) !important;\n  border-radius: 10px !important;\n  padding: 1px 8px !important;\n  font-size: 7.5px !important;\n  font-weight: 700 !important;\n  letter-spacing: 1px !important;\n  text-transform: uppercase !important;\n  margin-bottom: 2px !important;\n  white-space: nowrap !important;\n  color: #fff !important;\n  width: fit-content !important;\n}\n/* Color-coded pill borders */\n.box > div[title*=\"Solar\"] ~ .label .name { border-color: #c8b84a !important; }\n.box > div[title*=\"Battery\"] ~ .label .name { border-color: #00d4b8 !important; }\n.section:first-of-type .box > div[title*=\"Grid\"] ~ .label .name { border-color: #6b7fd4 !important; }\n.section:last-of-type .box > div[title*=\"Grid\"] ~ .label .name { border-color: #7c5cbf !important; }\n.box > div[title*=\"Load\"] ~ .label .name { border-color: #e8337f !important; }\n/* State value container */\n.box .label > span:first-child {\n  order: -1 !important;\n  display: flex !important;\n  flex-direction: column !important;\n}\n.box {\n  min-height: 30px !important;\n}\n.box .label .state {\n  font-size: 22px !important;\n  font-weight: 800 !important;\n  color: #fff !important;\n  line-height: 1.1 !important;\n  text-shadow: 0 1px 4px rgba(0,0,0,0.7) !important;\n}\n.box .label .unit {\n  font-size: 10px !important;\n  font-weight: 500 !important;\n  color: rgba(255,255,255,0.65) !important;\n  text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;\n}\n/* Percentage labels - pushed to bottom */\n.box .label::after {\n  font-size: 9px !important;\n  font-weight: 600 !important;\n  color: rgba(255,255,255,0.55) !important;\n  margin-top: auto !important;\n  text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;\n  white-space: nowrap !important;\n}\n/* Source percentages */\n.section:first-of-type .box > div[title*=\"Solar\"] ~ .label::after { content: var(--pct-src-solar); }\n.section:first-of-type .box > div[title*=\"Battery\"] ~ .label::after { content: var(--pct-src-bat); }\n.section:first-of-type .box > div[title*=\"Grid\"] ~ .label::after { content: var(--pct-src-grid); }\n/* Destination percentages */\n.section:last-of-type .box > div[title*=\"Battery\"] ~ .label::after { content: var(--pct-dst-bat); }\n.section:last-of-type .box > div[title*=\"Load\"] ~ .label::after { content: var(--pct-dst-load); }\n.section:last-of-type .box > div[title*=\"Grid\"] ~ .label::after { content: var(--pct-dst-grid); }\n/* Mobile-responsive sankey */\n@media (max-width: 800px) {\n  .section:first-of-type .box > div:first-child { min-width: 65px !important; }\n  .section:last-of-type .box > div:first-child { min-width: 65px !important; }\n  \n  .box .label .state { font-size: 16px !important; }\n  .box .label .name { font-size: 6px !important; padding: 0 4px !important; }\n  .box .label .unit { font-size: 8px !important; }\n  .box .label::after { font-size: 7px !important; }\n}\n\n@media (max-width: 800px) {\n  }\n\n@media (max-width: 800px) {  }\n\n/* Sankey layout fix */\n.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n.section:last-of-type .box { flex-direction: row-reverse !important; }\n.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } }\n"
                     }
                   }
                 }
@@ -223,7 +223,7 @@
                   "card_mod": {
                     "style": {
                       "ha-tile-info$": ".primary { font-size: 20px !important; font-weight: bold !important; color: white !important; letter-spacing: 0.5px; }",
-                      ".": "ha-card { background-color: transparent !important; border: none !important; }"
+                      ".": "ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; border: none !important; }"
                     }
                   }
                 },
@@ -1001,7 +1001,7 @@
               "source": "nordpool",
               "cheap_threshold": 0.1,
               "expensive_threshold": 0.25,
-              "currency": "€",
+              "currency": "\u20ac",
               "show_price_overlay": true,
               "show_price_badge": true,
               "show_color_coding": true
@@ -1053,7 +1053,7 @@
                 {
                   "type": "custom:mushroom-template-card",
                   "primary": "{{ states('__buy_price__') | float(0) | round(4) }}",
-                  "secondary": "Buy Price (€/kWh)",
+                  "secondary": "Buy Price (\u20ac/kWh)",
                   "icon": "mdi:cash-plus",
                   "icon_color": "red",
                   "card_mod": {
@@ -1066,7 +1066,7 @@
                 {
                   "type": "custom:mushroom-template-card",
                   "primary": "{{ states('__sell_price__') | float(0) | round(4) }}",
-                  "secondary": "Sell Price (€/kWh)",
+                  "secondary": "Sell Price (\u20ac/kWh)",
                   "icon": "mdi:cash-minus",
                   "icon_color": "green",
                   "card_mod": {
@@ -1078,7 +1078,7 @@
                 },
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_savings_today__') | float(0) | round(2) }}€",
+                  "primary": "{{ states('__emhass_savings_today__') | float(0) | round(2) }}\u20ac",
                   "secondary": "Savings Today",
                   "icon": "mdi:piggy-bank",
                   "icon_color": "amber",
@@ -1099,7 +1099,7 @@
               "cards": [
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_net_cost_month__') | float(0) | round(2) }}€",
+                  "primary": "{{ states('__emhass_net_cost_month__') | float(0) | round(2) }}\u20ac",
                   "secondary": "Net Cost This Month",
                   "icon": "mdi:currency-eur",
                   "icon_color": "{% if states('__emhass_net_cost_month__') | float(0) < 0 %}green{% else %}red{% endif %}",
@@ -1113,7 +1113,7 @@
                 },
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_savings_monthly__') | float(0) | round(2) }}€",
+                  "primary": "{{ states('__emhass_savings_monthly__') | float(0) | round(2) }}\u20ac",
                   "secondary": "Savings This Month",
                   "icon": "mdi:cash-check",
                   "icon_color": "green",
@@ -1127,7 +1127,7 @@
                 },
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_projected_bill__') | float(0) | round(2) }}€",
+                  "primary": "{{ states('__emhass_projected_bill__') | float(0) | round(2) }}\u20ac",
                   "secondary": "Projected Monthly Bill",
                   "icon": "mdi:receipt-text",
                   "icon_color": "blue",
@@ -1141,7 +1141,7 @@
                 },
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_projected_savings__') | float(0) | round(2) }}€",
+                  "primary": "{{ states('__emhass_projected_savings__') | float(0) | round(2) }}\u20ac",
                   "secondary": "Projected Monthly Savings",
                   "icon": "mdi:hand-coin",
                   "icon_color": "teal",
@@ -1235,7 +1235,7 @@
             {
               "type": "custom:mushroom-template-card",
               "primary": "Deye SUN-SG05LP1-EU",
-              "secondary": "Rated: {{ states('__inverter_rated_power__') | default('5000') }}W | Temp: {{ states('__inverter_temp__') | default('?') }}°C",
+              "secondary": "Rated: {{ states('__inverter_rated_power__') | default('5000') }}W | Temp: {{ states('__inverter_temp__') | default('?') }}\u00b0C",
               "icon": "mdi:solar-power-variant",
               "icon_color": "amber",
               "multiline_secondary": true,

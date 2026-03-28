@@ -2,6 +2,15 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.7.3] - 2025-07-25
+
+### Fixed
+- **Transparent card backgrounds** — House card, Sankey chart, and Battery device card backgrounds are now transparent so they blend seamlessly with the dashboard background color instead of showing a contrasting `#1a1f2e` / `#22273a` background.
+  - House card: `.house-container` background set to `transparent`
+  - Battery device card: `.card` background set to `transparent` (both compact and full layouts)
+  - Settings card: `.card` background set to `transparent`
+  - Sankey chart: Runtime patch replaces ha-card's adopted stylesheet `:host` background with `transparent !important` (required because ha-card uses adopted stylesheets that cannot be overridden from outside its shadow DOM)
+
 ## [2.7.0] - 2025-07-25
 
 ### Fixed
