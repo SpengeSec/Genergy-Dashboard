@@ -72,6 +72,8 @@ const DEFAULT_CONFIG = {
     ev_range: "",
     heat_pump_power: "",
     battery_capacity: "",
+    battery_max_soc: "",
+    battery_min_soc: "",
   },
   colors: {
     solar: "#f5c542",
@@ -295,12 +297,39 @@ class SigenergyHouseCard extends LitElement {
   get _isDischarging() { return this._batteryPower < 0; }
 
   get _batteryCapacityKwh() {
+    // Manual capacity override takes precedence
+    const manual = parseFloat(this._config.battery_capacity_kwh);
+    if (manual > 0) return manual;
     const entity = this._config.entities.battery_capacity;
     if (!entity) return 0;
     const val = this._stateNum(entity);
+    if (val <= 0) return 0;
     const unit = this._stateUnit(entity);
     if (unit === 'Wh') return val / 1000;
+    if (unit === 'Ah') {
+      // Convert Ah to kWh using nominal voltage (51.2V typical for LFP battery banks)
+      const nomVolt = parseFloat(this._config.battery_nominal_voltage) || 51.2;
+      return (val * nomVolt) / 1000;
+    }
     return val; // assume kWh
+  }
+
+  get _batteryMaxSoc() {
+    const entity = this._config.entities.battery_max_soc;
+    if (entity) {
+      const val = this._stateNum(entity);
+      if (val > 0 && val <= 100) return val;
+    }
+    return 100;
+  }
+
+  get _batteryMinSoc() {
+    const entity = this._config.entities.battery_min_soc;
+    if (entity) {
+      const val = this._stateNum(entity);
+      if (val >= 0 && val < 100) return val;
+    }
+    return 0;
   }
 
   get _batteryRuntime() {
@@ -312,12 +341,12 @@ class SigenergyHouseCard extends LitElement {
     const absPowerKw = Math.abs(pwr) / 1000;
     if (absPowerKw < 0.01) return null; // idle
     let remainingKwh, targetSoc;
-    if (pwr > 0) { // charging
-      targetSoc = 100;
+    if (pwr > 0) { // charging → target is max SoC (charge cutoff)
+      targetSoc = this._batteryMaxSoc;
       remainingKwh = (targetSoc - soc) / 100 * capacity;
-    } else { // discharging
-      targetSoc = 0;
-      remainingKwh = soc / 100 * capacity;
+    } else { // discharging → target is min SoC (reserve/discharge cutoff)
+      targetSoc = this._batteryMinSoc;
+      remainingKwh = (soc - targetSoc) / 100 * capacity;
     }
     if (remainingKwh <= 0) return null;
     const hours = remainingKwh / absPowerKw;
@@ -909,6 +938,7 @@ class SigenergyHouseCard extends LitElement {
     let primary = "";
     let secondary = def.label;
     let statusLine = "";
+    let runtimeLine = "";
     let color = this._config.colors[def.color] || "#fff";
 
     switch (key) {
@@ -928,10 +958,12 @@ class SigenergyHouseCard extends LitElement {
         }
         const rt = this._batteryRuntime;
         if (this._isDischarging) {
-          statusLine = rt ? `Discharging \u00b7 ${rt.timeStr} to ${rt.targetSoc}%` : "Discharging";
+          statusLine = "Discharging";
+          if (rt) runtimeLine = `${rt.timeStr} to ${rt.targetSoc}%`;
           color = this._config.colors.battery_discharge;
         } else if (this._isCharging) {
-          statusLine = rt ? `Charging \u00b7 ${rt.timeStr} to ${rt.targetSoc}%` : "Charging";
+          statusLine = "Charging";
+          if (rt) runtimeLine = `${rt.timeStr} to ${rt.targetSoc}%`;
           color = this._config.colors.battery_charge;
         }
         break;
@@ -964,6 +996,7 @@ class SigenergyHouseCard extends LitElement {
         <div class="label-primary" style="color: ${color}">${primary}</div>
         <div class="label-secondary">${secondary}</div>
         ${statusLine ? html`<div class="label-status" style="color: ${color}">${statusLine}</div>` : ""}
+        ${runtimeLine ? html`<div class="label-runtime" style="color: ${color}">${runtimeLine}</div>` : ""}
       </div>
     `;
   }
@@ -1264,6 +1297,14 @@ class SigenergyHouseCard extends LitElement {
         line-height: 1.3;
       }
 
+      .label-runtime {
+        font-size: 9px;
+        font-weight: 500;
+        opacity: 0.85;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+        line-height: 1.3;
+      }
+
       .weather-badge {
         position: absolute;
         top: 8px;
@@ -1298,6 +1339,7 @@ class SigenergyHouseCard extends LitElement {
         .label-primary { font-size: 11px; }
         .label-secondary { font-size: 8px; }
         .label-status { font-size: 8px; }
+        .label-runtime { font-size: 7px; }
         .label { min-width: 60px; }
       }
     `;

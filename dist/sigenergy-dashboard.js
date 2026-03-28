@@ -107,8 +107,10 @@ const DEFAULT_ENTITIES = {
   solcast_remaining: '',
   solcast_forecast_power: '',
   forecast_solar_today: '',
-  // Battery capacity
+  // Battery capacity & SoC limits (for runtime estimate)
   battery_capacity: '',
+  battery_max_soc: '',
+  battery_min_soc: '',
   // EMHASS Deferrable Loads
   mpc_deferrable0: '',
   mpc_deferrable1: '',
@@ -895,6 +897,8 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Battery Power', 'battery_power', e)}
         ${this._entityRow('Battery SoC', 'battery_soc', e)}
         ${this._entityRow('Battery Capacity', 'battery_capacity', e)}
+        ${this._entityRow('Battery Max SoC', 'battery_max_soc', e)}
+        ${this._entityRow('Battery Min SoC', 'battery_min_soc', e)}
         ${this._entityRow('Grid Power', 'grid_power', e)}
       </div>
       <div class="section">
@@ -1148,7 +1152,7 @@ class SigenergySettingsCard extends HTMLElement {
       'grid_import', 'grid_export', 'grid_active',
       'sun', 'weather',
       'ev_charger_power', 'ev_charger_state', 'ev_soc', 'ev_range',
-      'heat_pump_power', 'battery_capacity',
+      'heat_pump_power', 'battery_capacity', 'battery_max_soc', 'battery_min_soc',
     ]);
 
     // EMHASS toggle handler
@@ -1428,15 +1432,54 @@ class SigenergySettingsCard extends HTMLElement {
               found.push('Solcast power: sensor.solcast_pv_forecast_power_now');
             }
 
-            // Auto-detect battery capacity entity
+            // Auto-detect battery capacity entity (kWh, Wh, or Ah — house card handles unit conversion)
             const capKeys = Object.keys(this._hass.states).filter(k => {
               const lower = k.toLowerCase();
-              return lower.includes('battery') && (lower.includes('rated_capacity') || lower.includes('rated_energy') || lower.includes('battery_capacity_kwh'));
+              return lower.includes('battery') && (lower.includes('rated_capacity') || lower.includes('rated_energy') || lower.includes('battery_capacity_kwh') || lower.includes('capacity_ah') || lower.includes('capacity_kwh'));
             });
             if (capKeys.length > 0) {
-              const capKey = capKeys.find(k => k.includes('kwh') || k.includes('capacity')) || capKeys[0];
+              // Prefer kWh entities, then Wh, then Ah
+              const capKey = capKeys.find(k => k.includes('kwh')) || capKeys.find(k => k.includes('capacity') && !k.includes('_ah')) || capKeys[0];
               cfg2.entities.battery_capacity = capKey;
               found.push('Battery capacity: ' + capKey);
+            }
+
+            // Auto-detect battery max SoC (charge cutoff) entity
+            const maxSocKeys = Object.keys(this._hass.states).filter(k => {
+              const lower = k.toLowerCase();
+              const st = this._hass.states[k];
+              const uom = st?.attributes?.unit_of_measurement || '';
+              // Must be a % entity related to charging limits
+              return uom === '%' && (
+                (lower.includes('charge') && lower.includes('cut_off') && lower.includes('soc')) ||
+                (lower.includes('charge_cutoff') && lower.includes('soc')) ||
+                (lower.includes('max_soc') && !lower.includes('emhass')) ||
+                (lower.includes('charge') && lower.includes('limit') && lower.includes('soc'))
+              );
+            });
+            if (maxSocKeys.length > 0) {
+              cfg2.entities.battery_max_soc = maxSocKeys[0];
+              found.push('Battery max SoC: ' + maxSocKeys[0]);
+            }
+
+            // Auto-detect battery min SoC (discharge cutoff / reserve) entity
+            const minSocKeys = Object.keys(this._hass.states).filter(k => {
+              const lower = k.toLowerCase();
+              const st = this._hass.states[k];
+              const uom = st?.attributes?.unit_of_measurement || '';
+              // Must be a % entity related to discharge limits / reserve
+              return uom === '%' && (
+                (lower.includes('discharge') && lower.includes('cut_off') && lower.includes('soc')) ||
+                (lower.includes('discharge_cutoff') && lower.includes('soc')) ||
+                (lower.includes('min_soc') && !lower.includes('emhass')) ||
+                (lower.includes('backup') && lower.includes('soc')) ||
+                (lower.includes('battery_shutdown') && !lower.includes('voltage')) ||
+                (lower.includes('reserve') && lower.includes('soc'))
+              );
+            });
+            if (minSocKeys.length > 0) {
+              cfg2.entities.battery_min_soc = minSocKeys[0];
+              found.push('Battery min SoC: ' + minSocKeys[0]);
             }
 
             // Auto-detect forecast.solar entities
@@ -1748,7 +1791,12 @@ class SigenergySettingsCard extends HTMLElement {
           <input class="row-input" type="number" min="1" max="8" value="${f.battery_packs || 2}" data-key="battery_packs" />
         </div>
         ${this._toggleHtml('Positive = Charging', 'Enable if your inverter reports positive battery power when charging (most brands). Disable if positive means discharging.', 'battery_positive_charging', f.battery_positive_charging !== false)}
-        ${this._toggleHtml('Battery Runtime', 'Show estimated time to charge/discharge on house card (requires Battery Capacity entity)', 'battery_runtime', f.battery_runtime !== false)}
+        ${this._toggleHtml('Battery Runtime', 'Show estimated time to charge/discharge on house card (requires Battery Capacity entity or manual kWh value)', 'battery_runtime', f.battery_runtime !== false)}
+        <div class="row" style="margin-top:4px;">
+          <span class="row-label" style="font-size:12px;color:#8892a4;">Manual Capacity (kWh)</span>
+          <input class="row-input" type="number" min="0" max="500" step="0.1" value="${e.battery_capacity_kwh || ''}" data-key="battery_capacity_kwh" placeholder="auto" style="width:80px;" />
+        </div>
+        <div style="font-size:10px;color:#666;padding:2px 0 0 4px;">Leave blank to auto-read from Battery Capacity entity. Set manually if no capacity entity exists.</div>
       </div>
       <div class="section">
         <div class="section-title">Charts</div>
@@ -1803,6 +1851,42 @@ class SigenergySettingsCard extends HTMLElement {
         this._render();
       });
     }
+
+    // Bind manual battery capacity kWh input
+    const capInput = el.querySelector('input[data-key="battery_capacity_kwh"]');
+    if (capInput) {
+      capInput.addEventListener('change', () => {
+        const cfg2 = this._storeGet();
+        const val = parseFloat(capInput.value);
+        cfg2.entities.battery_capacity_kwh = (val > 0) ? val.toString() : '';
+        this._storeSave(cfg2);
+        // Sync to house card directly (battery_capacity_kwh is a top-level config, not an entity)
+        this._syncBatteryCapacityKwhToDashboard(cfg2.entities.battery_capacity_kwh);
+      });
+    }
+  }
+
+  async _syncBatteryCapacityKwhToDashboard(value) {
+    if (!this._hass) return;
+    try {
+      const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+      const patchHouse = (obj) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (obj.type === 'custom:sigenergy-house-card') {
+          obj.battery_capacity_kwh = value ? parseFloat(value) : undefined;
+          if (!obj.battery_capacity_kwh) delete obj.battery_capacity_kwh;
+          return true;
+        }
+        for (const v of Object.values(obj)) {
+          if (Array.isArray(v)) { for (const item of v) { if (patchHouse(item)) return true; } }
+          else if (typeof v === 'object' && v !== null) { if (patchHouse(v)) return true; }
+        }
+        return false;
+      };
+      if (patchHouse(config)) {
+        await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+      }
+    } catch (e) { console.error('Sync battery_capacity_kwh to dashboard failed:', e); }
   }
 
   _renderPricing(el, cfg) {
@@ -2362,8 +2446,12 @@ return forecast.map(function(d) {
         ev_charger_state: e.ev_charger_state || '',
         weather: e.weather || '',
         heat_pump_power: e.heat_pump_power || e.deferrable0_power || '',
-        battery_capacity: e.battery_capacity || ''
+        battery_capacity: e.battery_capacity || '',
+        battery_max_soc: e.battery_max_soc || '',
+        battery_min_soc: e.battery_min_soc || ''
       };
+      // Sync manual battery capacity override if set
+      if (e.battery_capacity_kwh) houseCardOrig.battery_capacity_kwh = parseFloat(e.battery_capacity_kwh) || 0;
       // Sync ALL features from config store to house card
       if (!houseCardOrig.features) houseCardOrig.features = {};
       // Remove stale image_path from old configs — house card auto-detects the correct path
