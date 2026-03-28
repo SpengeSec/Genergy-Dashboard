@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.6.0 — Bundled Distribution
+ * Genergy Dashboard v2.6.1 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -424,11 +424,17 @@ class SigenergySettingsCard extends HTMLElement {
     const stateClass = stateObj.attributes?.state_class;
     const stateVal = parseFloat(stateObj.state);
     const unit = stateObj.attributes?.unit_of_measurement;
+    const entityLower = sourceEntityId.toLowerCase();
 
-    // Only act on total_increasing energy sensors with high cumulative values
-    // Daily-resetting sensors (like Deye summary_day) typically have state < 100.
-    // True cumulative sensors have state in the hundreds/thousands.
-    const isCumulative = stateClass === 'total_increasing' && unit === 'kWh' && stateVal > 100;
+    // Skip entities that are already daily-resetting (name contains daily/today/day)
+    const looksDaily = entityLower.includes('daily') || entityLower.includes('_today') || entityLower.includes('summary_day');
+    if (looksDaily) return { isCumulative: false, dailyEntity: sourceEntityId };
+
+    // Act on cumulative energy sensors: state_class 'total_increasing' or 'total'
+    // with energy unit (kWh/MWh/Wh) and a cumulative value > 50 kWh (or equivalent)
+    const isEnergyUnit = unit === 'kWh' || unit === 'MWh' || unit === 'Wh';
+    const valInKwh = unit === 'MWh' ? stateVal * 1000 : unit === 'Wh' ? stateVal / 1000 : stateVal;
+    const isCumulative = (stateClass === 'total_increasing' || stateClass === 'total') && isEnergyUnit && valInKwh > 50;
 
     if (!isCumulative) return { isCumulative: false, dailyEntity: sourceEntityId };
 
@@ -2324,46 +2330,63 @@ class SigenergySettingsCard extends HTMLElement {
       // Resolve EV/HP entity IDs — use utility meter if cumulative, otherwise direct entity
       const evSankeyEntity = (f.ev_energy_is_cumulative && e.ev_energy_daily_meter) ? e.ev_energy_daily_meter : e.ev_energy_today;
       const hpSankeyEntity = (f.hp_energy_is_cumulative && e.hp_energy_daily_meter) ? e.hp_energy_daily_meter : e.heat_pump_energy_today;
-      // Build Sankey destinations list (Load is always present, EV/HP are optional)
-      const sankeyLoadChildren = [];
-      if (e.load_energy_today) sankeyLoadChildren.push(e.load_energy_today);
-      if (f.show_ev_in_sankey && evSankeyEntity) sankeyLoadChildren.push(evSankeyEntity);
-      if (f.show_hp_in_sankey && hpSankeyEntity) sankeyLoadChildren.push(hpSankeyEntity);
+      const hasSubConsumers = (f.show_ev_in_sankey && evSankeyEntity) || (f.show_hp_in_sankey && hpSankeyEntity);
 
-      // Build destination entities for section 2
-      const sankeyDest = [];
-      if (e.load_energy_today) sankeyDest.push({ entity_id: e.load_energy_today, name: 'Home', color: '#e8337f' });
-      if (f.show_ev_in_sankey && evSankeyEntity) sankeyDest.push({ entity_id: evSankeyEntity, name: 'EV', color: '#ff69b4' });
-      if (f.show_hp_in_sankey && hpSankeyEntity) sankeyDest.push({ entity_id: hpSankeyEntity, name: 'HP', color: '#e67e22' });
-      if (e.battery_charge_today) sankeyDest.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
-      if (e.grid_export_today) sankeyDest.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf' });
-
-      // Build source children arrays — sources can flow to all destinations
-      const allDestIds = sankeyDest.map(d => d.entity_id).filter(Boolean);
+      // Source children: always point to Home (load), Battery Charge, Grid Export
+      // EV/HP are NOT direct children of sources — they are sub-consumers of Home
       const battDischargeChildren = [e.grid_export_today, e.load_energy_today].filter(Boolean);
       const solarChildren = [e.battery_charge_today, e.grid_export_today, e.load_energy_today].filter(Boolean);
       const gridImportChildren = [e.load_energy_today].filter(Boolean);
 
-      // Add EV/HP as potential children of all sources (energy can flow from any source)
-      if (f.show_ev_in_sankey && evSankeyEntity) {
-        battDischargeChildren.push(evSankeyEntity);
-        solarChildren.push(evSankeyEntity);
-        gridImportChildren.push(evSankeyEntity);
-      }
-      if (f.show_hp_in_sankey && hpSankeyEntity) {
-        battDischargeChildren.push(hpSankeyEntity);
-        solarChildren.push(hpSankeyEntity);
-        gridImportChildren.push(hpSankeyEntity);
-      }
+      // Build Sankey sections — 3-section layout when sub-consumers (EV/HP) are present
+      let sankeySections;
+      if (hasSubConsumers) {
+        // 3-section layout: Sources → Home (+Battery Charge, Grid Export) → Sub-consumers
+        // Home's children are the sub-consumers (HP, EV)
+        const homeChildren = [];
+        if (f.show_ev_in_sankey && evSankeyEntity) homeChildren.push(evSankeyEntity);
+        if (f.show_hp_in_sankey && hpSankeyEntity) homeChildren.push(hpSankeyEntity);
 
-      const sankeyChart = {
-        type: 'custom:sankey-chart',
-        show_names: true, show_states: true, show_units: true, show_icons: false,
-        round: 1, height: 480, wide: true,
-        min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
-        min_state: 0.1,
-        energy_date_selection: false,
-        sections: [
+        // Section 1: Sources
+        const sourceSection = {
+          entities: [
+            { entity_id: e.battery_discharge_today, name: 'Battery', color: '#00d4b8', children: battDischargeChildren },
+            { entity_id: e.solar_energy_today, name: 'Solar', color: '#c8b84a', children: solarChildren },
+            { entity_id: e.grid_import_today, name: 'Grid', color: '#6b7fd4', children: gridImportChildren }
+          ].filter(x => x.entity_id)
+        };
+
+        // Section 2: Home distribution (+ passthrough for Battery Charge and Grid Export)
+        const midEntities = [];
+        if (e.load_energy_today) midEntities.push({
+          entity_id: e.load_energy_today, name: 'Home', color: '#e8337f',
+          children: homeChildren,
+          children_sum: { should_be: 'equal_or_less', reconcile_to: 'max' }
+        });
+        // Battery Charge and Grid Export pass through this section without splitting
+        if (e.battery_charge_today) midEntities.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8', type: 'passthrough' });
+        if (e.grid_export_today) midEntities.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf', type: 'passthrough' });
+
+        // Section 3: Final destinations (sub-consumers + passthrough endpoints)
+        const finalEntities = [];
+        if (f.show_ev_in_sankey && evSankeyEntity) finalEntities.push({ entity_id: evSankeyEntity, name: 'EV', color: '#ff69b4' });
+        if (f.show_hp_in_sankey && hpSankeyEntity) finalEntities.push({ entity_id: hpSankeyEntity, name: 'HP', color: '#e67e22' });
+        if (e.battery_charge_today) finalEntities.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
+        if (e.grid_export_today) finalEntities.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf' });
+
+        sankeySections = [
+          sourceSection,
+          { entities: midEntities.filter(x => x.entity_id) },
+          { entities: finalEntities.filter(x => x.entity_id) }
+        ];
+      } else {
+        // 2-section layout: Sources → Destinations (no sub-consumers)
+        const destEntities = [];
+        if (e.load_energy_today) destEntities.push({ entity_id: e.load_energy_today, name: 'Home', color: '#e8337f' });
+        if (e.battery_charge_today) destEntities.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
+        if (e.grid_export_today) destEntities.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf' });
+
+        sankeySections = [
           {
             entities: [
               { entity_id: e.battery_discharge_today, name: 'Battery', color: '#00d4b8', children: battDischargeChildren },
@@ -2371,10 +2394,18 @@ class SigenergySettingsCard extends HTMLElement {
               { entity_id: e.grid_import_today, name: 'Grid', color: '#6b7fd4', children: gridImportChildren }
             ].filter(x => x.entity_id)
           },
-          {
-            entities: sankeyDest.filter(x => x.entity_id)
-          }
-        ],
+          { entities: destEntities.filter(x => x.entity_id) }
+        ];
+      }
+
+      const sankeyChart = {
+        type: 'custom:sankey-chart',
+        show_names: true, show_states: true, show_units: true, show_icons: false,
+        round: 1, height: hasSubConsumers ? 540 : 480, wide: true,
+        min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
+        min_state: 0.1,
+        energy_date_selection: false,
+        sections: sankeySections,
         card_mod: sankeyOld.card_mod || {}
       };
       // Fix sankey CSS: narrower solid boxes, remove section width constraint
@@ -3117,7 +3148,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.6.0 ',
+  '%c GENERGY-DASHBOARD %c v2.6.1 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
