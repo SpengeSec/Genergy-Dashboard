@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.6.4 — Bundled Distribution
+ * Genergy Dashboard v2.8.0 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -105,7 +105,10 @@ const DEFAULT_ENTITIES = {
   solcast_today: '',
   solcast_tomorrow: '',
   solcast_remaining: '',
+  solcast_forecast_power: '',
   forecast_solar_today: '',
+  // Battery capacity
+  battery_capacity: '',
   // EMHASS Deferrable Loads
   mpc_deferrable0: '',
   mpc_deferrable1: '',
@@ -154,6 +157,7 @@ const DEFAULT_CONFIG = {
     ev_energy_is_cumulative: false,
     hp_energy_is_cumulative: false,
     battery_positive_charging: true,
+    battery_runtime: true,
     pv_strings: 2,
   },
   pricing: {
@@ -795,7 +799,7 @@ class SigenergySettingsCard extends HTMLElement {
 
   // Features that should be synced to the house card's dashboard config
   static get SYNCED_FEATURES() {
-    return { ev_charger: 'ev_charger', ev_vehicle: 'ev_vehicle', heat_pump: 'heat_pump', grid_connection: 'grid', hide_cables: 'hide_cables', emhass: 'emhass', solar_forecast: 'solar_forecast', emhass_forecasts: 'emhass_forecasts', deferrable_loads: 'deferrable_loads', financial_tracking: 'financial_tracking' };
+    return { ev_charger: 'ev_charger', ev_vehicle: 'ev_vehicle', heat_pump: 'heat_pump', grid_connection: 'grid', hide_cables: 'hide_cables', emhass: 'emhass', solar_forecast: 'solar_forecast', emhass_forecasts: 'emhass_forecasts', deferrable_loads: 'deferrable_loads', financial_tracking: 'financial_tracking', battery_runtime: 'battery_runtime' };
   }
 
   async _syncFeatureToDashboard(settingsKey, value) {
@@ -890,6 +894,7 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Home Load', 'load_power', e)}
         ${this._entityRow('Battery Power', 'battery_power', e)}
         ${this._entityRow('Battery SoC', 'battery_soc', e)}
+        ${this._entityRow('Battery Capacity', 'battery_capacity', e)}
         ${this._entityRow('Grid Power', 'grid_power', e)}
       </div>
       <div class="section">
@@ -1077,6 +1082,7 @@ class SigenergySettingsCard extends HTMLElement {
             ${this._entityRow('Today kWh', 'solcast_today', e)}
             ${this._entityRow('Tomorrow kWh', 'solcast_tomorrow', e)}
             ${this._entityRow('Remaining kWh', 'solcast_remaining', e)}
+            ${this._entityRow('Forecast Power', 'solcast_forecast_power', e)}
             <div style="margin-top:8px;"><div class="section-title" style="font-size:11px;">Forecast.Solar (alternative)</div></div>
             ${this._entityRow('Today kWh', 'forecast_solar_today', e)}
           </div>
@@ -1142,7 +1148,7 @@ class SigenergySettingsCard extends HTMLElement {
       'grid_import', 'grid_export', 'grid_active',
       'sun', 'weather',
       'ev_charger_power', 'ev_charger_state', 'ev_soc', 'ev_range',
-      'heat_pump_power',
+      'heat_pump_power', 'battery_capacity',
     ]);
 
     // EMHASS toggle handler
@@ -1414,6 +1420,23 @@ class SigenergySettingsCard extends HTMLElement {
             if (solcastToday || solcastTomorrow || solcastRemaining) {
               cfg2.features.solar_forecast = true;
               found.push('✓ Solar Forecast feature auto-enabled (Solcast detected)');
+            }
+            // Auto-detect Solcast power now sensor
+            const solcastPower = this._hass.states['sensor.solcast_pv_forecast_power_now'];
+            if (solcastPower) {
+              cfg2.entities.solcast_forecast_power = 'sensor.solcast_pv_forecast_power_now';
+              found.push('Solcast power: sensor.solcast_pv_forecast_power_now');
+            }
+
+            // Auto-detect battery capacity entity
+            const capKeys = Object.keys(this._hass.states).filter(k => {
+              const lower = k.toLowerCase();
+              return lower.includes('battery') && (lower.includes('rated_capacity') || lower.includes('rated_energy') || lower.includes('battery_capacity_kwh'));
+            });
+            if (capKeys.length > 0) {
+              const capKey = capKeys.find(k => k.includes('kwh') || k.includes('capacity')) || capKeys[0];
+              cfg2.entities.battery_capacity = capKey;
+              found.push('Battery capacity: ' + capKey);
             }
 
             // Auto-detect forecast.solar entities
@@ -1725,6 +1748,7 @@ class SigenergySettingsCard extends HTMLElement {
           <input class="row-input" type="number" min="1" max="8" value="${f.battery_packs || 2}" data-key="battery_packs" />
         </div>
         ${this._toggleHtml('Positive = Charging', 'Enable if your inverter reports positive battery power when charging (most brands). Disable if positive means discharging.', 'battery_positive_charging', f.battery_positive_charging !== false)}
+        ${this._toggleHtml('Battery Runtime', 'Show estimated time to charge/discharge on house card (requires Battery Capacity entity)', 'battery_runtime', f.battery_runtime !== false)}
       </div>
       <div class="section">
         <div class="section-title">Charts</div>
@@ -2006,6 +2030,53 @@ class SigenergySettingsCard extends HTMLElement {
       }
     }
 
+    // Solar forecast overlay (Solcast / forecast.solar) — separate from EMHASS
+    if (features.solar_forecast) {
+      // Solcast detailed forecast from detailedForecast attribute
+      const solcastEntity = e.solcast_today || e.solcast_remaining;
+      if (solcastEntity) {
+        series.push({
+          entity: solcastEntity,
+          name: 'Solar Forecast',
+          color: '#FFD54F',
+          type: 'area', opacity: 0.12, curve: 'smooth',
+          extend_to: false, unit: ' kW', float_precision: 1,
+          stroke_width: 1.5, stroke_dash: 5,
+          show: { in_header: false, legend_value: true },
+          data_generator: `var forecast = entity.attributes.detailedForecast || entity.attributes.detailed_forecast || [];
+if (!forecast || !forecast.length) return [];
+return forecast.map(function(d) {
+  var ts = d.period_start;
+  var t = typeof ts === 'string' ? new Date(ts).getTime() : new Date(ts).getTime();
+  var kw = parseFloat(d.pv_estimate || 0);
+  return [t, kw];
+}).filter(function(p) { return !isNaN(p[0]) && !isNaN(p[1]); });`,
+          yaxis_id: 'power'
+        });
+      }
+      // If user has a separate Solcast tomorrow entity with its own detailedForecast
+      if (e.solcast_tomorrow && e.solcast_tomorrow !== solcastEntity) {
+        series.push({
+          entity: e.solcast_tomorrow,
+          name: 'Solar Forecast (tomorrow)',
+          color: '#FFD54F',
+          type: 'area', opacity: 0.08, curve: 'smooth',
+          extend_to: false, unit: ' kW', float_precision: 1,
+          stroke_width: 1, stroke_dash: 6,
+          show: { in_header: false, legend_value: false, in_chart: true },
+          data_generator: `var forecast = entity.attributes.detailedForecast || entity.attributes.detailed_forecast || [];
+if (!forecast || !forecast.length) return [];
+return forecast.map(function(d) {
+  var ts = d.period_start;
+  var t = typeof ts === 'string' ? new Date(ts).getTime() : new Date(ts).getTime();
+  var kw = parseFloat(d.pv_estimate || 0);
+  return [t, kw];
+}).filter(function(p) { return !isNaN(p[0]) && !isNaN(p[1]); });`,
+          yaxis_id: 'power'
+        });
+      }
+    }
+
     // Deferrable loads (conditional)
     if (features.emhass && features.deferrable_loads) {
       if (e.mpc_deferrable0) {
@@ -2106,6 +2177,8 @@ class SigenergySettingsCard extends HTMLElement {
       const series = this._buildApexSeries(e, f);
       const yaxis = this._buildYAxes(f);
       const hasForecasts = f.emhass && f.emhass_forecasts;
+      const hasSolarForecast = f.solar_forecast && (e.solcast_today || e.solcast_remaining || e.forecast_solar_today);
+      const showExtendedChart = hasForecasts || hasSolarForecast;
 
       const apexChart = {
         type: 'custom:apexcharts-card',
@@ -2114,13 +2187,13 @@ class SigenergySettingsCard extends HTMLElement {
         },
         header: {
           show: true, show_states: true, colorize_states: true,
-          title: hasForecasts ? 'Energy + EMHASS Forecast' : 'Energy Overview'
+          title: hasForecasts ? 'Energy + EMHASS Forecast' : hasSolarForecast ? 'Energy + Solar Forecast' : 'Energy Overview'
         },
-        graph_span: hasForecasts ? '48h' : '24h',
+        graph_span: showExtendedChart ? '48h' : '24h',
         update_interval: '60s',
         apex_config: {
           chart: {
-            height: hasForecasts ? '500px' : '350px',
+            height: showExtendedChart ? '500px' : '350px',
             animations: { enabled: false },
             stacked: false,
             zoom: { enabled: true, type: 'x' },
@@ -2136,7 +2209,7 @@ class SigenergySettingsCard extends HTMLElement {
               style: { fontSize: '10px' },
               rotateAlways: false, hideOverlappingLabels: true
             },
-            tickAmount: hasForecasts ? 24 : 12
+            tickAmount: showExtendedChart ? 24 : 12
           },
           tooltip: { x: { format: 'HH:mm' }, shared: true, intersect: false },
           legend: {
@@ -2145,10 +2218,10 @@ class SigenergySettingsCard extends HTMLElement {
           },
           stroke: { curve: 'smooth' },
           grid: { strokeDashArray: 3 },
-          annotations: hasForecasts ? { yaxis: [{ y: 0, yAxisIndex: 0, borderColor: 'rgba(255,255,255,0.35)', strokeDashArray: 0 }] } : undefined
+          annotations: showExtendedChart ? { yaxis: [{ y: 0, yAxisIndex: 0, borderColor: 'rgba(255,255,255,0.35)', strokeDashArray: 0 }] } : undefined
         },
-        now: hasForecasts ? { show: true, label: 'Now' } : undefined,
-        span: hasForecasts ? { start: 'hour', offset: '-6h' } : undefined,
+        now: showExtendedChart ? { show: true, label: 'Now' } : undefined,
+        span: showExtendedChart ? { start: 'hour', offset: '-6h' } : undefined,
         all_series_config: { stroke_width: 2 },
         yaxis: yaxis,
         series: series
@@ -2288,7 +2361,8 @@ class SigenergySettingsCard extends HTMLElement {
         ev_charger_power: e.ev_charger_power || '',
         ev_charger_state: e.ev_charger_state || '',
         weather: e.weather || '',
-        heat_pump_power: e.heat_pump_power || e.deferrable0_power || ''
+        heat_pump_power: e.heat_pump_power || e.deferrable0_power || '',
+        battery_capacity: e.battery_capacity || ''
       };
       // Sync ALL features from config store to house card
       if (!houseCardOrig.features) houseCardOrig.features = {};
@@ -2299,6 +2373,7 @@ class SigenergySettingsCard extends HTMLElement {
       houseCardOrig.features.heat_pump = f.heat_pump || false;
       houseCardOrig.features.grid = f.grid_connection !== false;
       houseCardOrig.features.hide_cables = f.hide_cables || false;
+      houseCardOrig.features.battery_runtime = f.battery_runtime !== false;
       // Sigenergy convention: positive battery_power = charging
       houseCardOrig.battery_positive_charging = (f.battery_positive_charging !== false);
       if (!houseCardOrig.card_mod) houseCardOrig.card_mod = {};
@@ -3168,7 +3243,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.6.4 ',
+  '%c GENERGY-DASHBOARD %c v2.8.0 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );

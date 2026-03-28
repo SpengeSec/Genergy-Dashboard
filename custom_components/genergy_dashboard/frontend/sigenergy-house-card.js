@@ -54,6 +54,7 @@ const DEFAULT_CONFIG = {
     heat_pump: false,
     grid: true,
     hide_cables: false,
+    battery_runtime: true,
   },
   entities: {
     solar_power: "sensor.deyeinvertermaster_pv_power",
@@ -70,6 +71,7 @@ const DEFAULT_CONFIG = {
     ev_soc: "",
     ev_range: "",
     heat_pump_power: "",
+    battery_capacity: "",
   },
   colors: {
     solar: "#f5c542",
@@ -291,6 +293,39 @@ class SigenergyHouseCard extends LitElement {
 
   get _isCharging() { return this._batteryPower > 0; }
   get _isDischarging() { return this._batteryPower < 0; }
+
+  get _batteryCapacityKwh() {
+    const entity = this._config.entities.battery_capacity;
+    if (!entity) return 0;
+    const val = this._stateNum(entity);
+    const unit = this._stateUnit(entity);
+    if (unit === 'Wh') return val / 1000;
+    return val; // assume kWh
+  }
+
+  get _batteryRuntime() {
+    if (!this._config.features?.battery_runtime) return null;
+    const capacity = this._batteryCapacityKwh;
+    if (capacity <= 0) return null;
+    const pwr = this._batteryPower; // positive = charging, negative = discharging
+    const soc = this._batterySoc;
+    const absPowerKw = Math.abs(pwr) / 1000;
+    if (absPowerKw < 0.01) return null; // idle
+    let remainingKwh, targetSoc;
+    if (pwr > 0) { // charging
+      targetSoc = 100;
+      remainingKwh = (targetSoc - soc) / 100 * capacity;
+    } else { // discharging
+      targetSoc = 0;
+      remainingKwh = soc / 100 * capacity;
+    }
+    if (remainingKwh <= 0) return null;
+    const hours = remainingKwh / absPowerKw;
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    const timeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+    return { timeStr, targetSoc, isCharging: pwr > 0 };
+  }
   get _isImporting() { return this._gridPower > 1; }
   get _isExporting() { return this._gridPower < -1; }
   get _isSolarActive() { return this._solarPower > 5; }
@@ -891,11 +926,12 @@ class SigenergyHouseCard extends LitElement {
         } else {
           primary = `${soc.toFixed(0)}%`;
         }
+        const rt = this._batteryRuntime;
         if (this._isDischarging) {
-          statusLine = "Discharging";
+          statusLine = rt ? `Discharging \u00b7 ${rt.timeStr} to ${rt.targetSoc}%` : "Discharging";
           color = this._config.colors.battery_discharge;
         } else if (this._isCharging) {
-          statusLine = "Charging";
+          statusLine = rt ? `Charging \u00b7 ${rt.timeStr} to ${rt.targetSoc}%` : "Charging";
           color = this._config.colors.battery_charge;
         }
         break;
