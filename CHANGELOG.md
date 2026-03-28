@@ -2,6 +2,14 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.8.1] - 2026-03-28
+
+### Fixed
+- **Battery Runtime Not Showing** — Fixed runtime prediction not displaying below "Discharging"/"Charging" status. Root cause: battery_capacity entity was not populated automatically during dashboard builds, requiring manual "Auto Detect" click. Dashboard build now auto-fills the battery capacity entity when not configured.
+- **Settings Resetting After Feature Toggle** — Fixed race condition where `_buildDashboard()` could read stale dashboard config before the config store finished writing. Dashboard rebuild now awaits pending store saves before proceeding.
+- **SoC Target Persistence** — Fixed explicit set/delete logic for `battery_capacity_kwh`, `battery_max_soc_pct`, and `battery_min_soc_pct` during dashboard rebuilds. Previously, clearing a manual override had no effect because the value was only *set* (never deleted).
+- **Min SoC 0% Not Applied** — Fixed falsy check for `"0"` string in `_syncSocTargetsToDashboard()`. `parseInt("0")` is `0` which is falsy in JavaScript, causing the value to be treated as "not set". Now uses proper null/empty-string checks.
+
 ## [2.8.0] - 2026-03-28
 
 ### Added
