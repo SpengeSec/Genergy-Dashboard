@@ -86,3 +86,93 @@ All notable changes to the Genergy Dashboard are documented here.
 - **3-phase voltage detection** — Added `_phase_b_voltage` pattern for Sigenergy naming and `phase_a/phase_b/phase_c` name inference for L1/L2/L3.
 - **Disabled entity hints** — When auto-detect can't find grid_frequency, battery_temp, rated_power, or phase_voltage, a helpful message tells the user to enable these entities in HA (disabled by default in TypQxQ/Sigenergy-Local-Modbus).
 - **Plant entity fallbacks** — Added alternative entity name patterns for TypQxQ (plant_ess_power, plant_consumed_power, plant_grid_sensor_active_power, plant_daily_consumed_energy).
+
+## [2.5.3] - 2025-07-24
+
+### Added
+- **Lifetime→daily auto-conversion** — Auto-detect now checks all core energy entities for cumulative/lifetime values. If state > 100 kWh with `state_class: total_increasing`, automatically creates a HA daily `utility_meter` helper and uses that in the Sankey chart and stats.
+- **Config versioning (anti-overwrite)** — Settings now include a timestamp (`_ts`). On page refresh, the dashboard config only overwrites localStorage if it has a newer timestamp, preventing manually entered entities from being reverted.
+- **Heat pump power auto-detect** — When a heat pump is found via HA Energy Dashboard device consumption, auto-detect now also scans for matching power entities (W/kW).
+- **3-phase voltage auto-detect** — Scans for phase 2/3 voltage entities (L2/L3 patterns) and auto-enables 3-phase mode.
+- **Auto-rebuild after detect** — After successful auto-detect, the dashboard is automatically rebuilt. No more manual "Apply Settings to Dashboard" needed.
+
+### Fixed
+- **House card HP entity fix** — Dashboard builder now uses the explicit `heat_pump_power` entity instead of always falling back to EMHASS `deferrable0_power`.
+- **Settings view decimal cleanup** — Entity state badges now display rounded values instead of raw float precision.
+
+## [2.5.2] - 2025-07-24
+
+### Added
+- **Missing cards notification on Overview** — Amber warning banner when required HACS plugins are not installed, with direct HACS install links and dismiss button.
+- **HACS integration icon** — Added `icon.png` (48×48 green "G" logo) for the HACS store listing.
+- **HACS install button** — README badge now opens in a new tab with `&category=integration` parameter.
+
+## [2.5.1] - 2025-07-24
+
+### Fixed
+- **Battery image height fix** — Corrected battery stack image heights for 7-pack and 8-pack layouts in the device card.
+
+## [2.5.0] - 2025-07-24
+
+### Added
+- **Sigenergy auto-detect** — Comprehensive entity auto-detection for Sigenergy inverter systems. Scans `sensor.sigen_*` entities and automatically maps plant-level and inverter-level sensors.
+- **Dynamic PV strings (1–6)** — New "PV Strings" dropdown in Settings → Inverter & PV.
+- **Battery packs extended to 8** — Battery pack support increased from 6 to 8 modules.
+- **Unit-aware power templates** — Mushroom status cards use a smart Jinja template that checks `unit_of_measurement` and formats correctly (kW with 2dp, W with 0dp).
+- **Battery sign convention** — `battery_positive_charging` configuration with Settings toggle in Features → Battery.
+
+### Fixed
+- **Prerequisite detection race condition** — Fixed false positives by deferring check using `EVENT_HOMEASSISTANT_STARTED`.
+
+## [2.4.0] - 2025-07-23
+
+### Added
+- **Automated prerequisite detection** — Two-layer system checking for required HACS plugins on both backend startup and in the frontend Settings view.
+- **Prerequisite install banner** — Red banner in Settings with direct "Install via HACS" buttons using my.home-assistant.io redirects.
+- **Backend notifications** — Missing cards trigger persistent notifications and Repair issues.
+
+## [2.3.0] - 2025-07-22
+
+### Added
+- **Sankey graph threshold** — Entities below 0.1 kWh auto-hidden (`min_state: 0.1`).
+- **Broadened auto-detect keywords** — 30+ EV brands and 20+ heat pump brands.
+- **Cumulative sensor support** — Detects lifetime-total sensors and creates daily utility meters.
+
+### Changed
+- **Compact Sankey labels** — Heat Pump renamed to "HP" for narrow charts.
+- **EV color changed to pink** — Differentiated from Grid's purple/blue.
+
+### Fixed
+- **Responsive settings UI** — State updates now refresh badges inline instead of full DOM rebuild.
+- **Removed duplicate feature toggles** — Grid/Sankey toggles consolidated to Entities tab.
+
+## [2.2.0] - 2025-07-21
+
+### Added
+- **Dual tariff + 3-phase support** — Separate high/low tariff entities with `DualTariffSumSensor`. Per-phase voltage monitoring.
+- **Conditional toggle UI** — Grid Metering, Voltage, EMHASS, Solar sections expand inline.
+- **EV & Heat Pump in Sankey** — Toggle to add as destination nodes in the Sankey chart.
+
+### Fixed
+- **Weather entity reset** — Find-and-replace now uses previous value instead of default.
+- **Dashboard builder** — Reads from config store instead of cached value.
+
+## [2.1.0] - 2025-07-20
+
+### Changed
+- **Robust custom element registration** — Multi-attempt registration with fallbacks.
+- **No-cache JS serving** — `Cache-Control: no-store` headers prevent stale caching.
+- **Error card recovery** — Automatic detection and replacement of "Configuration error" placeholders.
+
+### Fixed
+- **Improved stability** — Class initialization order, image path resolution, and silent module failures.
+- **Config flow** — Extended Deye/SunSynk default entity mappings.
+
+## [2.0.0] - 2025-07-19
+
+### Added
+- **Converted to HA integration** — Full config flow with guided entity mapping, auto-dashboard creation, and sidebar registration.
+- **Settings card** — 4-tab UI for entity mapping, feature toggles, pricing, and display preferences.
+- **Device card** — Battery stack visualization with expandable pack details.
+- **House card** — Animated isometric house with power flow comets, cable path editor, and responsive design.
+- **Bundled theme** — Auto-installed `sigenergy_dark` theme.
