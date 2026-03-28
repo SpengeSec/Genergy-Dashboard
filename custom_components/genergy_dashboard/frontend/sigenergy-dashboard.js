@@ -2350,7 +2350,7 @@ class SigenergySettingsCard extends HTMLElement {
         show_names: true, show_states: true, show_units: true, show_icons: false,
         round: 1, height: 480, wide: true,
         min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
-        min_state: 0.1,
+        min_state: 0.01,
         energy_date_selection: false,
         sections: [
           {
@@ -2445,6 +2445,8 @@ class SigenergySettingsCard extends HTMLElement {
         css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
         // Replace hardcoded dark-theme Sankey background with theme-aware variable
         css = css.replace(/ha-card\s*\{\s*background:\s*#1a1f2e\s*!important/g, 'ha-card { background: var(--ha-card-background, #1a1f2e) !important');
+        // Update Sankey card border-radius to match other cards (16px)
+        css = css.replace(/border-radius:\s*4px\s*!important/g, 'border-radius: var(--ha-card-border-radius, 16px) !important');
         // Collapse multiple blank lines
         css = css.replace(/\n{3,}/g, '\n\n');
         // Prepend fresh Jinja :host block
