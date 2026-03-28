@@ -522,7 +522,7 @@ class SigenergySettingsCard extends HTMLElement {
         :host { display: block; }
         * { box-sizing: border-box; }
         .card {
-          background: transparent;
+          background: var(--ha-card-background, #22273a);
           border: 1px solid var(--divider-color, #2d3451);
           border-radius: 16px;
           padding: 16px;
@@ -2448,10 +2448,9 @@ class SigenergySettingsCard extends HTMLElement {
         css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="HP"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Heat"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
-        // Replace hardcoded dark-theme Sankey background with transparent
-        // ha-card uses --ha-card-background CSS variable in its :host shadow DOM rule,
-        // so we must override the variable rather than the background property directly
-        css = css.replace(/ha-card\s*\{\s*background:\s*[^;]*!important[^}]*/g, 'ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important');
+        // Replace hardcoded dark-theme Sankey background with theme-aware transparent
+        // ha-card reads --ha-card-background in its :host shadow DOM, so set the variable
+        css = css.replace(/ha-card\s*\{\s*background:\s*#1a1f2e\s*!important/g, 'ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; background: var(--ha-card-background, transparent) !important');
         // Update Sankey card border-radius to 16px.
         // ha-card has its own shadow DOM with :host { border-radius: var(--ha-card-border-radius) }
         // Parent layout-card resets --ha-card-border-radius to 0, so we override it on ha-card itself.
@@ -2814,7 +2813,7 @@ class SigenergyDeviceCard extends HTMLElement {
     if (this._cardWidth < 380) {
       var np = Math.max(1, Math.min(packs, 8));
       var imgSrc = _SIGENERGY_SCRIPT_DIR + 'images/1inverter' + np + 'battery.png';
-      var html = '<style>:host{display:block}.card{background:transparent;border-radius:16px;padding:12px;overflow:hidden;text-align:center;color:var(--primary-text-color,#fff)}.img{max-width:100%;height:auto;margin:0 auto 12px;display:block}.labels{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}.pill{background:var(--card-background-color,rgba(30,35,54,0.94));border:1px solid var(--divider-color,#2d3451);border-radius:14px;padding:8px 14px;display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}.pill-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.pill-name{font-size:15px;font-weight:600;color:var(--primary-text-color,#e0e4ec);white-space:nowrap}.pill-val{font-size:16px;font-weight:700;color:var(--primary-text-color,#fff);white-space:nowrap}</style>';
+      var html = '<style>:host{display:block}.card{background:var(--ha-card-background,#1a1f2e);border-radius:16px;padding:12px;overflow:hidden;text-align:center;color:var(--primary-text-color,#fff)}.img{max-width:100%;height:auto;margin:0 auto 12px;display:block}.labels{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}.pill{background:var(--card-background-color,rgba(30,35,54,0.94));border:1px solid var(--divider-color,#2d3451);border-radius:14px;padding:8px 14px;display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}.pill-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.pill-name{font-size:15px;font-weight:600;color:var(--primary-text-color,#e0e4ec);white-space:nowrap}.pill-val{font-size:16px;font-weight:700;color:var(--primary-text-color,#fff);white-space:nowrap}</style>';
       html += '<div class="card">';
       html += prereqBanner;
       html += '<img class="img" src="' + imgSrc + '" alt="Battery System"/>';
@@ -3016,7 +3015,7 @@ class SigenergyDeviceCard extends HTMLElement {
     }
 
     this.shadowRoot.innerHTML =
-      '<style>:host{display:block}.card{background:transparent;border-radius:16px;padding:12px 4px;overflow:hidden;color:var(--primary-text-color,#fff)} .chevron{cursor:pointer;pointer-events:all;-webkit-tap-highlight-color:transparent;touch-action:manipulation} .chevron *{pointer-events:all} .chevron:hover circle,.chevron:active circle{fill:#3a3e48}</style>' +
+      '<style>:host{display:block}.card{background:var(--ha-card-background,#1a1f2e);border-radius:16px;padding:12px 4px;overflow:hidden;color:var(--primary-text-color,#fff)} .chevron{cursor:pointer;pointer-events:all;-webkit-tap-highlight-color:transparent;touch-action:manipulation} .chevron *{pointer-events:all} .chevron:hover circle,.chevron:active circle{fill:#3a3e48}</style>' +
       '<div class="card">' + prereqBanner +
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + TW + ' ' + TH + '" width="100%" style="display:block">' +
       b + '</svg>' + panels + '</div>';
@@ -3442,16 +3441,24 @@ console.info(
         // Patch immediately
         patchDestBars(baseSr);
 
-        // Fix ha-card background: replace adopted stylesheet to make it transparent
-        // ha-card uses adopted stylesheets with :host { background: var(--ha-card-background) }
-        // which cannot be overridden from outside, so we patch the stylesheet directly
+        // Fix Sankey ha-card background: clone the adopted stylesheet and set transparent
+        // ha-card uses a SHARED adopted stylesheet with :host { background: var(--ha-card-background) }
+        // Modifying it directly would make ALL ha-cards transparent (shared CSSStyleSheet object).
+        // Instead, clone the stylesheet for THIS ha-card only.
         try {
           var haCard = baseSr.querySelector('ha-card');
           if (haCard && haCard.shadowRoot && haCard.shadowRoot.adoptedStyleSheets && haCard.shadowRoot.adoptedStyleSheets.length > 0) {
-            var sheet = haCard.shadowRoot.adoptedStyleSheets[0];
-            var hostRule = sheet.cssRules[0];
+            var origSheet = haCard.shadowRoot.adoptedStyleSheets[0];
+            var hostRule = origSheet.cssRules[0];
             if (hostRule && hostRule.selectorText === ':host' && hostRule.style.background && hostRule.style.background.indexOf('transparent') === -1) {
-              hostRule.style.setProperty('background', 'transparent', 'important');
+              // Clone by creating a new sheet and copying rules
+              var newSheet = new CSSStyleSheet();
+              for (var ri = 0; ri < origSheet.cssRules.length; ri++) {
+                newSheet.insertRule(origSheet.cssRules[ri].cssText, ri);
+              }
+              // Set transparent on the cloned sheet only
+              newSheet.cssRules[0].style.setProperty('background', 'transparent', 'important');
+              haCard.shadowRoot.adoptedStyleSheets = [newSheet];
             }
           }
         } catch(e) {}
