@@ -73,6 +73,7 @@ Built-in visual cable path editor for customizing the animated power flow routes
 
 ### Overview Dashboard
 - **Animated House Card** — Isometric 3D house with real-time animated power flow "comets" showing solar generation, battery charge/discharge, grid import/export, EV charging, and heat pump usage
+- **Battery Runtime Estimate** — Shows estimated time-to-full (charging) or time-to-empty (discharging) below the battery status on the house card. Uses configurable SoC targets from your inverter's charge cutoff and discharge reserve settings, with auto-detection for all major brands
 - **Responsive House Design** — Toggle EV charger/heat pump in settings and the house card updates dynamically: garage gate opens to show EV charging, heat pump unit appears on the house exterior
 - **Cable Path Editor** — Built-in visual editor for customizing animated power flow cable routes with drag-to-reposition control points and snap-to-grid
 - **Sankey Energy Flow** — Visual energy flow diagram showing power distribution from sources (Solar, Grid, Battery) to sinks (Home, Battery, Grid, EV, Heat Pump). Entities below 0.1 kWh are automatically hidden for a cleaner chart. Rounded to 1 decimal place
@@ -81,6 +82,7 @@ Built-in visual cable path editor for customizing the animated power flow routes
 
 ### Energy Charts
 - **ApexCharts Integration** — 24h or 48h time-series chart with Solar, Battery, Grid, and Consumption traces
+- **Solar Forecast Chart Overlay** — Overlays Solcast PV forecast as a dashed gold area series on the energy chart, using the `detailedForecast` attribute from your Solcast sensor. Chart automatically extends to 48h when enabled
 - **EMHASS Forecast Overlay** — Dashed forecast lines for planned PV, battery, grid, load, SOC, and price targets
 - **Price Overlay** — Import/export electricity price curves on secondary Y-axis
 - **Deferrable Load Tracking** — Heat pump, boiler, and other deferrable load schedules
@@ -278,6 +280,24 @@ To use: check the "**Use Sigenergy defaults**" checkbox on the first step of the
 | `battery_power` | Battery charge/discharge power (W) | `sensor.inverter_battery_power` |
 | `battery_soc` | Battery state of charge (%) | `sensor.inverter_battery_soc` |
 | `grid_power` | Grid import/export power (W) | `sensor.inverter_grid_power` |
+
+### Battery Runtime Entities (Optional — Enable Battery Runtime in Display)
+
+| Settings Field | Description | Example |
+|---|---|---|
+| `battery_capacity` | Battery rated capacity (kWh, Wh, or Ah) | `sensor.battery_rated_capacity_kwh` |
+| `battery_max_soc` | Charge cutoff / max SoC target (%) | `number.ess_charge_cut_off_soc` |
+| `battery_min_soc` | Discharge reserve / min SoC target (%) | `number.battery_shutdown` |
+
+> **Tip**: If no capacity entity is available, enter the value manually in Settings → Display → Battery → "Manual Capacity (kWh)". Ah-based entities are auto-converted using nominal battery voltage (default 51.2V for LFP).
+
+### Solcast Solar Forecast (Optional — Enable in Display)
+
+| Settings Field | Description | Example |
+|---|---|---|
+| `solcast_forecast_power` | Solcast PV forecast power sensor | `sensor.solcast_pv_forecast_power_now` |
+
+> The solar forecast overlay reads `detailedForecast` from `sensor.solcast_pv_forecast_today` (and tomorrow). The forecast power entity is used for current forecast display.
 
 ### Daily Energy Totals (Recommended)
 
