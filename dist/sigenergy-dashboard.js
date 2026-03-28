@@ -3471,8 +3471,9 @@ console.info(
   var RESPONSIVE_CSS = [
     '/* Mobile: 1 column, all items stacked */',
     '@media (max-width: 800px) {',
-    '  #root { grid-template-columns: 1fr !important; grid-template-rows: repeat(10, auto) !important; }',
-    '  #root > * { grid-column: 1 !important; grid-row: auto !important; max-width: 100% !important; }',
+    '  :host { overflow-x: hidden !important; max-width: 100vw !important; }',
+    '  #root { grid-template-columns: 1fr !important; grid-template-rows: repeat(10, auto) !important; overflow-x: hidden !important; max-width: 100% !important; box-sizing: border-box !important; }',
+    '  #root > * { grid-column: 1 !important; grid-row: auto !important; max-width: 100% !important; overflow: hidden !important; box-sizing: border-box !important; }',
     '}',
     '',
     '/* Tablet: 2 columns with explicit placement */',

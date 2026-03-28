@@ -1104,6 +1104,7 @@ class SigenergyHouseCard extends LitElement {
         margin-right: auto;
         padding: 16px 8px 0 32px;
         box-sizing: border-box;
+        overflow: hidden;
       }
 
       ha-card {
@@ -1343,6 +1344,13 @@ class SigenergyHouseCard extends LitElement {
         color: #fff;
         text-shadow: 0 1px 3px rgba(0,0,0,0.5);
         letter-spacing: -0.3px;
+      }
+
+      @media (max-width: 800px) {
+        :host {
+          padding: 8px 4px 0 4px;
+          max-width: 100%;
+        }
       }
 
       @media (max-width: 500px) {
