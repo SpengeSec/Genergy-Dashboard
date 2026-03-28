@@ -1956,8 +1956,8 @@ class SigenergySettingsCard extends HTMLElement {
     if (!this._hass) return;
     try {
       const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
-      const maxPct = cfg.entities?.battery_max_soc_pct ? parseInt(cfg.entities.battery_max_soc_pct) : undefined;
-      const minPct = cfg.entities?.battery_min_soc_pct ? parseInt(cfg.entities.battery_min_soc_pct) : undefined;
+      const maxPct = (cfg.entities?.battery_max_soc_pct != null && cfg.entities.battery_max_soc_pct !== '') ? parseInt(cfg.entities.battery_max_soc_pct) : undefined;
+      const minPct = (cfg.entities?.battery_min_soc_pct != null && cfg.entities.battery_min_soc_pct !== '') ? parseInt(cfg.entities.battery_min_soc_pct) : undefined;
       const patchHouse = (obj) => {
         if (!obj || typeof obj !== 'object') return false;
         if (obj.type === 'custom:sigenergy-house-card') {
@@ -2340,6 +2340,11 @@ return forecast.map(function(d) {
   async _buildDashboard() {
     if (!this._hass) return;
     const store = window.SigenergyConfig;
+    // Wait for any pending store save to complete before reading the dashboard config
+    // This prevents a race condition where _buildDashboard reads stale data
+    if (store._saveToHAPromise) {
+      try { await store._saveToHAPromise; } catch(e) { /* ignore */ }
+    }
     const cfg = store.get();
     const e = cfg.entities || {};
     const f = cfg.features || {};
@@ -2522,6 +2527,22 @@ return forecast.map(function(d) {
       // Card 0: House + optional EMHASS status
       // Get existing house card or create default, sync entities from store, and add min-height
       const houseCardOrig = mainLayout.cards[0]?.cards?.[0] || { type: 'custom:sigenergy-house-card' };
+      // Auto-fill battery_capacity if empty and a capacity entity exists (for runtime estimation)
+      if (!e.battery_capacity && !e.battery_capacity_kwh && this._hass) {
+        const capKeys = Object.keys(this._hass.states).filter(k => {
+          const lower = k.toLowerCase();
+          return lower.includes('battery') && (lower.includes('rated_capacity') || lower.includes('rated_energy') || lower.includes('capacity_kwh') || lower.includes('capacity_ah'));
+        });
+        if (capKeys.length > 0) {
+          const autoCapKey = capKeys.find(k => k.includes('kwh')) || capKeys.find(k => k.includes('capacity') && !k.includes('_ah')) || capKeys[0];
+          e.battery_capacity = autoCapKey;
+          // Also save to config store so it persists
+          const cfg2 = store.get();
+          cfg2.entities.battery_capacity = autoCapKey;
+          store.save(cfg2);
+          console.log('Auto-detected battery capacity entity:', autoCapKey);
+        }
+      }
       houseCardOrig.entities = {
         solar_power: e.solar_power || '',
         load_power: e.load_power || '',
@@ -2540,11 +2561,23 @@ return forecast.map(function(d) {
         battery_max_soc: e.battery_max_soc || '',
         battery_min_soc: e.battery_min_soc || ''
       };
-      // Sync manual battery capacity override if set
-      if (e.battery_capacity_kwh) houseCardOrig.battery_capacity_kwh = parseFloat(e.battery_capacity_kwh) || 0;
-      // Sync manual SoC target overrides if set
-      if (e.battery_max_soc_pct != null && e.battery_max_soc_pct !== '') houseCardOrig.battery_max_soc_pct = parseInt(e.battery_max_soc_pct);
-      if (e.battery_min_soc_pct != null && e.battery_min_soc_pct !== '') houseCardOrig.battery_min_soc_pct = parseInt(e.battery_min_soc_pct);
+      // Sync manual battery capacity override — always set or clear explicitly
+      if (e.battery_capacity_kwh) {
+        houseCardOrig.battery_capacity_kwh = parseFloat(e.battery_capacity_kwh) || 0;
+      } else {
+        delete houseCardOrig.battery_capacity_kwh;
+      }
+      // Sync manual SoC target overrides — always set or clear explicitly
+      if (e.battery_max_soc_pct != null && e.battery_max_soc_pct !== '') {
+        houseCardOrig.battery_max_soc_pct = parseInt(e.battery_max_soc_pct);
+      } else {
+        delete houseCardOrig.battery_max_soc_pct;
+      }
+      if (e.battery_min_soc_pct != null && e.battery_min_soc_pct !== '') {
+        houseCardOrig.battery_min_soc_pct = parseInt(e.battery_min_soc_pct);
+      } else {
+        delete houseCardOrig.battery_min_soc_pct;
+      }
       // Sync ALL features from config store to house card
       if (!houseCardOrig.features) houseCardOrig.features = {};
       // Remove stale image_path from old configs — house card auto-detects the correct path
