@@ -1478,30 +1478,37 @@ class SigenergySettingsCard extends HTMLElement {
               const has = (suffix) => sigenKeys.find(k => k.endsWith(suffix));
 
               // Plant-level power/energy entities
+              // Note: inverter-level entities use endsWith() because the entity_id
+              // may contain device name/number between the prefix and register key,
+              // e.g. sensor.sigen_inverter_1_active_power (not sensor.sigen_inverter_active_power)
               const map = {
                 solar_power:             has('_pv_power') && has('_pv_power').includes('plant') ? has('_pv_power') : sigenKeys.find(k => k.includes('plant') && k.includes('pv_power')),
-                load_power:              sigenKeys.find(k => k.includes('plant_total_load_power')),
-                battery_power:           sigenKeys.find(k => k.includes('plant_battery_power')),
-                battery_soc:             sigenKeys.find(k => k.includes('plant_battery_state_of_charge')),
-                grid_power:              sigenKeys.find(k => k.includes('plant_grid_active_power')),
-                grid_active_power:       sigenKeys.find(k => k.includes('plant_grid_active_power')),
+                load_power:              sigenKeys.find(k => k.includes('plant_total_load_power') || k.includes('plant_consumed_power')),
+                battery_power:           sigenKeys.find(k => k.includes('plant_battery_power') || k.includes('plant_ess_power')),
+                battery_soc:             sigenKeys.find(k => k.includes('plant_battery_state_of_charge') || k.includes('plant_ess_soc')),
+                grid_power:              sigenKeys.find(k => k.includes('plant_grid_active_power') || k.includes('plant_grid_sensor_active_power')),
+                grid_active_power:       sigenKeys.find(k => k.includes('plant_grid_active_power') || k.includes('plant_grid_sensor_active_power')),
                 // Daily energy
                 solar_energy_today:      sigenKeys.find(k => k.includes('plant_daily_pv_energy')),
-                load_energy_today:       sigenKeys.find(k => k.includes('plant_daily_load_consumption')),
+                load_energy_today:       sigenKeys.find(k => k.includes('plant_daily_load_consumption') || k.includes('plant_daily_consumed_energy')),
                 battery_charge_today:    sigenKeys.find(k => k.includes('plant_daily_battery_charge_energy')),
                 battery_discharge_today: sigenKeys.find(k => k.includes('plant_daily_battery_discharge_energy')),
                 grid_import_today:       sigenKeys.find(k => k.includes('plant_daily_grid_import_energy')),
                 grid_export_today:       sigenKeys.find(k => k.includes('plant_daily_grid_export_energy')),
-                // Inverter-level
-                inverter_temp:           sigenKeys.find(k => k.includes('inverter_pcs_internal_temperature')),
-                battery_temp:            sigenKeys.find(k => k.includes('inverter_battery_average_cell_temperature')),
-                // PV strings (up to 6)
-                pv1_power:               sigenKeys.find(k => k.includes('inverter_pv1_power')),
-                pv2_power:               sigenKeys.find(k => k.includes('inverter_pv2_power')),
-                pv3_power:               sigenKeys.find(k => k.includes('inverter_pv3_power')),
-                pv4_power:               sigenKeys.find(k => k.includes('inverter_pv4_power')),
-                pv5_power:               sigenKeys.find(k => k.includes('inverter_pv5_power')),
-                pv6_power:               sigenKeys.find(k => k.includes('inverter_pv6_power')),
+                // Inverter-level — use endsWith() to handle numbered inverters (e.g. "Inverter 1")
+                inverter_temp:           sigenKeys.find(k => k.endsWith('_pcs_internal_temperature') && !k.includes('plant')),
+                inverter_output_power:   sigenKeys.find(k => k.endsWith('_active_power') && !k.includes('plant') && !k.includes('max') && !k.includes('min') && !k.includes('adjustment') && !k.includes('feedback') && !k.includes('reactive') && !k.includes('apparent')),
+                inverter_rated_power:    sigenKeys.find(k => k.endsWith('_rated_active_power') && !k.includes('plant')),
+                battery_temp:            sigenKeys.find(k => k.endsWith('_ess_average_cell_temperature') || k.endsWith('_battery_average_cell_temperature')),
+                grid_frequency:          sigenKeys.find(k => k.endsWith('_grid_frequency') && !k.includes('rated') && !k.includes('plant')),
+                grid_voltage:            sigenKeys.find(k => k.endsWith('_phase_a_voltage') && !k.includes('plant')),
+                // PV strings (up to 6) — use endsWith() for numbered inverters
+                pv1_power:               sigenKeys.find(k => k.endsWith('_pv1_power')),
+                pv2_power:               sigenKeys.find(k => k.endsWith('_pv2_power')),
+                pv3_power:               sigenKeys.find(k => k.endsWith('_pv3_power')),
+                pv4_power:               sigenKeys.find(k => k.endsWith('_pv4_power')),
+                pv5_power:               sigenKeys.find(k => k.endsWith('_pv5_power')),
+                pv6_power:               sigenKeys.find(k => k.endsWith('_pv6_power')),
               };
 
               let sigenCount = 0;
@@ -1517,7 +1524,7 @@ class SigenergySettingsCard extends HTMLElement {
               if (sigenCount > 0) {
                 let pvCount = 0;
                 for (let i = 1; i <= 6; i++) {
-                  if (sigenKeys.find(k => k.includes('inverter_pv' + i + '_power'))) pvCount = i;
+                  if (sigenKeys.find(k => k.endsWith('_pv' + i + '_power'))) pvCount = i;
                 }
                 if (pvCount > 0) {
                   cfg2.features.pv_strings = pvCount;
@@ -1526,6 +1533,16 @@ class SigenergySettingsCard extends HTMLElement {
                 // Sigenergy uses positive = charging convention
                 cfg2.features.battery_positive_charging = true;
                 found.push('✓ Battery sign convention set to Sigenergy (positive = charging)');
+
+                // Hint about commonly disabled entities
+                const tips = [];
+                if (!map.grid_frequency)    tips.push('Grid Frequency');
+                if (!map.grid_voltage)      tips.push('Phase Voltage');
+                if (!map.battery_temp)      tips.push('Battery Cell Temperature');
+                if (!map.inverter_rated_power) tips.push('Inverter Rated Active Power');
+                if (tips.length > 0) {
+                  found.push('ℹ️ Not found: ' + tips.join(', ') + '. These may be disabled in HA → Settings → Devices → Sigenergy inverter → enable them, then re-run Detect.');
+                }
               }
             }
           }
@@ -1534,7 +1551,7 @@ class SigenergySettingsCard extends HTMLElement {
           if (this._hass && this._hass.states && !cfg2.features.three_phase) {
             const allKeys = Object.keys(this._hass.states);
             // Common patterns for phase 2/3 voltage entities across brands
-            const phase2Patterns = [/_l2_voltage/, /_voltage_l2/, /_phase_2.*voltage/, /voltage.*_l2$/, /voltage.*phase_2/, /spanning.*l2/, /spannung.*l2/];
+            const phase2Patterns = [/_l2_voltage/, /_voltage_l2/, /_phase_2.*voltage/, /voltage.*_l2$/, /voltage.*phase_2/, /_phase_b_voltage/, /spanning.*l2/, /spannung.*l2/];
             const phase2Key = allKeys.find(k => {
               if (!k.startsWith('sensor.')) return false;
               const st = this._hass.states[k];
@@ -1548,8 +1565,8 @@ class SigenergySettingsCard extends HTMLElement {
               found.push('✓ 3-phase grid detected: ' + phase2Key);
               // Try to auto-populate L1/L2/L3 voltage entities
               const baseL2 = phase2Key;
-              const l1Guess = baseL2.replace(/_l2/g, '_l1').replace(/phase_2/g, 'phase_1');
-              const l3Guess = baseL2.replace(/_l2/g, '_l3').replace(/phase_2/g, 'phase_3');
+              const l1Guess = baseL2.replace(/_l2/g, '_l1').replace(/phase_2/g, 'phase_1').replace(/phase_b/g, 'phase_a');
+              const l3Guess = baseL2.replace(/_l2/g, '_l3').replace(/phase_2/g, 'phase_3').replace(/phase_b/g, 'phase_c');
               if (this._hass.states[l1Guess]) {
                 cfg2.entities.grid_voltage_l1 = l1Guess;
                 found.push('Grid Voltage L1: ' + l1Guess);
@@ -2279,6 +2296,8 @@ class SigenergySettingsCard extends HTMLElement {
       };
       // Sync ALL features from config store to house card
       if (!houseCardOrig.features) houseCardOrig.features = {};
+      // Remove stale image_path from old configs — house card auto-detects the correct path
+      delete houseCardOrig.image_path;
       houseCardOrig.features.ev_charger = f.ev_charger || false;
       houseCardOrig.features.ev_vehicle = f.ev_vehicle || false;
       houseCardOrig.features.heat_pump = f.heat_pump || false;
@@ -2651,10 +2670,25 @@ class SigenergyDeviceCard extends HTMLElement {
     return parseFloat(s.state);
   }
 
+  // Get a power entity value normalized to Watts (handles sensors that report in W, kW, or MW)
+  _getPowerInWatts(entityId) {
+    if (!this._hass || !entityId) return null;
+    const s = this._hass.states[entityId];
+    if (!s || s.state === 'unavailable' || s.state === 'unknown') return null;
+    const v = parseFloat(s.state);
+    if (isNaN(v)) return null;
+    const unit = (s.attributes.unit_of_measurement || '').toLowerCase();
+    if (unit === 'kw') return v * 1000;
+    if (unit === 'mw') return v * 1000000;
+    return v;
+  }
+
   _fmtPower(w) {
     if (w === null) return '— W';
+    const store = window.SigenergyConfig;
+    const dps = store ? (store.getDisplay('decimal_places') ?? 1) : 1;
     const abs = Math.abs(w);
-    return abs >= 1000 ? (abs / 1000).toFixed(2) + ' kW' : abs.toFixed(0) + ' W';
+    return abs >= 1000 ? (abs / 1000).toFixed(Math.max(dps, 1)) + ' kW' : abs.toFixed(0) + ' W';
   }
 
   _socColor(soc) {
@@ -2692,7 +2726,7 @@ class SigenergyDeviceCard extends HTMLElement {
     const packs = store ? store.getFeature('battery_packs') : (this._config.battery_packs || 2);
     const battSocEntity = store ? store.getEntity('battery_soc') : 'sensor.deyeinvertermaster_battery_soc';
     const invPowerEntity = this._config.inverter_power || (store ? store.getEntity('inverter_output_power') : null) || 'sensor.deyeinvertermaster_inverter_output_power';
-    const invPower = this._getVal(invPowerEntity);
+    const invPower = this._getPowerInWatts(invPowerEntity);
     const battSocFallback = this._getVal(battSocEntity);
     const packSocs = [];
     for (let p = 1; p <= packs; p++) {
@@ -2831,6 +2865,7 @@ class SigenergyDeviceCard extends HTMLElement {
     var statVal = 'font-size:16px;font-weight:700;color:#fff;display:block;';
     var statLbl = 'font-size:9px;color:#8892a4;text-transform:uppercase;letter-spacing:0.5px;';
     var headerStyle = 'font-size:13px;font-weight:700;color:#e0e4ec;margin-bottom:8px;letter-spacing:1px;';
+    var dps = store ? (store.getDisplay('decimal_places') ?? 1) : 1; // user-configurable decimal places
 
     var fmtEntity = function(eid, decimals, unit) {
       if (!self._hass || !eid) return '—';
@@ -2838,6 +2873,12 @@ class SigenergyDeviceCard extends HTMLElement {
       if (!s || s.state === 'unavailable' || s.state === 'unknown') return '—';
       var v = parseFloat(s.state);
       if (isNaN(v)) return s.state;
+      // Unit-aware: if caller expects W but entity reports kW, convert
+      var entityUnit = (s.attributes.unit_of_measurement || '').toLowerCase();
+      if (unit === 'W' || unit === 'w') {
+        if (entityUnit === 'kw') { v = v * 1000; }
+        else if (entityUnit === 'mw') { v = v * 1000000; }
+      }
       return v.toFixed(decimals !== undefined ? decimals : 1) + (unit || '');
     };
 
@@ -2849,6 +2890,7 @@ class SigenergyDeviceCard extends HTMLElement {
       var invRated = store ? store.getEntity('inverter_rated_power') : 'sensor.deyeinvertermaster_inverter_rated_power';
       var pvOne = store ? store.getEntity('pv1_power') : 'sensor.deyeinvertermaster_pv1_power';
       var pvTwo = store ? store.getEntity('pv2_power') : 'sensor.deyeinvertermaster_pv2_power';
+      var pvStrings = store ? (store.getFeature && store.getFeature('pv_strings')) || 2 : 2;
       var gridV = store ? store.getEntity('grid_voltage') : 'sensor.deyeinvertermaster_grid_voltage_l1';
       var gridHz = store ? store.getEntity('grid_frequency') : 'sensor.deyeinvertermaster_grid_frequency';
       var gridVL2 = store ? store.getEntity('grid_voltage_l2') : '';
@@ -2857,19 +2899,31 @@ class SigenergyDeviceCard extends HTMLElement {
       panels += '<div style="' + panelStyle + '">';
       panels += '<div style="' + headerStyle + '">⚡ Inverter Details</div>';
       panels += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(invTemp || invIntTemp, 1, '°C') + '</span><span style="' + statLbl + '">Temperature</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(invTemp || invIntTemp, dps, '°C') + '</span><span style="' + statLbl + '">Temperature</span></div>';
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(invOutput, 0, 'W') + '</span><span style="' + statLbl + '">Output</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + (invRated && fmtEntity(invRated, 0, '') !== '—' ? (parseFloat(self._hass.states[invRated]?.state || 0) / 1000).toFixed(1) + 'kW' : '—') + '</span><span style="' + statLbl + '">Rated</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(pvOne, 0, 'W') + '</span><span style="' + statLbl + '">PV1</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(pvTwo, 0, 'W') + '</span><span style="' + statLbl + '">PV2</span></div>';
-      if (threePhase && gridVL2 && gridVL3) {
-        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridV, 1, 'V') + '</span><span style="' + statLbl + '">Grid L1</span></div>';
-        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridVL2, 1, 'V') + '</span><span style="' + statLbl + '">Grid L2</span></div>';
-        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridVL3, 1, 'V') + '</span><span style="' + statLbl + '">Grid L3</span></div>';
-      } else {
-        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridV, 1, 'V') + '</span><span style="' + statLbl + '">Grid V</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + (function() {
+        if (!invRated || fmtEntity(invRated, 0, '') === '—') return '—';
+        var rs = self._hass.states[invRated]; if (!rs) return '—';
+        var rv = parseFloat(rs.state); if (isNaN(rv)) return '—';
+        var ru = (rs.attributes.unit_of_measurement || '').toLowerCase();
+        if (ru === 'kw') return rv.toFixed(dps) + 'kW';
+        if (ru === 'mw') return (rv * 1000).toFixed(dps) + 'kW';
+        return (rv / 1000).toFixed(dps) + 'kW';
+      })() + '</span><span style="' + statLbl + '">Rated</span></div>';
+      for (var pvi = 1; pvi <= pvStrings; pvi++) {
+        var pvEnt = store ? store.getEntity('pv' + pvi + '_power') : (pvi === 1 ? pvOne : pvi === 2 ? pvTwo : '');
+        if (pvEnt) {
+          panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(pvEnt, 0, 'W') + '</span><span style="' + statLbl + '">PV' + pvi + '</span></div>';
+        }
       }
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridHz, 1, 'Hz') + '</span><span style="' + statLbl + '">Grid Hz</span></div>';
+      if (threePhase && gridVL2 && gridVL3) {
+        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridV, dps, 'V') + '</span><span style="' + statLbl + '">Grid L1</span></div>';
+        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridVL2, dps, 'V') + '</span><span style="' + statLbl + '">Grid L2</span></div>';
+        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridVL3, dps, 'V') + '</span><span style="' + statLbl + '">Grid L3</span></div>';
+      } else {
+        panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridV, dps, 'V') + '</span><span style="' + statLbl + '">Grid V</span></div>';
+      }
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(gridHz, dps, 'Hz') + '</span><span style="' + statLbl + '">Grid Hz</span></div>';
       panels += '</div></div>';
     }
 
@@ -2880,14 +2934,14 @@ class SigenergyDeviceCard extends HTMLElement {
       panels += '<div style="' + panelStyle + '">';
       panels += '<div style="' + headerStyle + '">🔋 Battery ' + p + ' Details</div>';
       panels += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'soc', 1, '%') + '</span><span style="' + statLbl + '">SoC</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'soh', 1, '%') + '</span><span style="' + statLbl + '">SoH</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'voltage', 1, 'V') + '</span><span style="' + statLbl + '">Voltage</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'current', 1, 'A') + '</span><span style="' + statLbl + '">Current</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'soc', dps, '%') + '</span><span style="' + statLbl + '">SoC</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'soh', dps, '%') + '</span><span style="' + statLbl + '">SoH</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'voltage', dps, 'V') + '</span><span style="' + statLbl + '">Voltage</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'current', dps, 'A') + '</span><span style="' + statLbl + '">Current</span></div>';
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'power', 0, 'W') + '</span><span style="' + statLbl + '">Power</span></div>';
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'cycle_number', 0, '') + '</span><span style="' + statLbl + '">Cycles</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'remain_capacity', 1, 'Ah') + '</span><span style="' + statLbl + '">Remain</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'full_capacity', 1, 'Ah') + '</span><span style="' + statLbl + '">Full Cap</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'remain_capacity', dps, 'Ah') + '</span><span style="' + statLbl + '">Remain</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'full_capacity', dps, 'Ah') + '</span><span style="' + statLbl + '">Full Cap</span></div>';
       // Cell voltage spread (values are in mV, convert to V)
       var cellPrefix = 'sensor.battery_monitor_pack_' + pad + '_cell_voltage_';
       var fmtCellV = function(eid) {
@@ -2902,7 +2956,7 @@ class SigenergyDeviceCard extends HTMLElement {
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtCellV(cellPrefix + 'max') + '</span><span style="' + statLbl + '">Cell Max</span></div>';
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(cellPrefix + 'diff', 0, 'mV') + '</span><span style="' + statLbl + '">Cell Diff</span></div>';
       // Temperature
-      var temp1 = fmtEntity('sensor.battery_monitor_pack_' + pad + '_temperature_01', 1, '°C');
+      var temp1 = fmtEntity('sensor.battery_monitor_pack_' + pad + '_temperature_01', dps, '°C');
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + temp1 + '</span><span style="' + statLbl + '">Temp</span></div>';
       panels += '</div></div>';
     }
