@@ -1,5 +1,5 @@
 /**
- * Sigenergy Dashboard v2.1.0 — Bundled Distribution
+ * Genergy Dashboard v2.6.0 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -660,7 +660,7 @@ class SigenergySettingsCard extends HTMLElement {
       </style>
 
       <div class="card">
-        <h2>⚙️ Sigenergy Settings</h2>
+        <h2>⚙️ Genergy Settings</h2>
         ${showPrereqBanner ? `
         <div class="prereq-banner">
           <h3>⚠️ Missing Required Cards</h3>
@@ -1481,25 +1481,27 @@ class SigenergySettingsCard extends HTMLElement {
               // Note: inverter-level entities use endsWith() because the entity_id
               // may contain device name/number between the prefix and register key,
               // e.g. sensor.sigen_inverter_1_active_power (not sensor.sigen_inverter_active_power)
+              // Patterns support both TypQxQ (sensor.sigen_{plant}_{device}_{key})
+              // and sigenergy2mqtt (sensor.sigen_0_plant_{key} or sensor.sigen_0_{key})
               const map = {
-                solar_power:             has('_pv_power') && has('_pv_power').includes('plant') ? has('_pv_power') : sigenKeys.find(k => k.includes('plant') && k.includes('pv_power')),
-                load_power:              sigenKeys.find(k => k.includes('plant_total_load_power') || k.includes('plant_consumed_power')),
+                solar_power:             has('_pv_power') && has('_pv_power').includes('plant') ? has('_pv_power') : sigenKeys.find(k => k.includes('plant') && k.includes('pv_power')) || sigenKeys.find(k => k.endsWith('_plant_pv_power')),
+                load_power:              sigenKeys.find(k => k.includes('plant_total_load_power') || k.includes('plant_consumed_power')) || sigenKeys.find(k => k.endsWith('_consumed_power')),
                 battery_power:           sigenKeys.find(k => k.includes('plant_battery_power') || k.includes('plant_ess_power')),
-                battery_soc:             sigenKeys.find(k => k.includes('plant_battery_state_of_charge') || k.includes('plant_ess_soc')),
+                battery_soc:             sigenKeys.find(k => k.includes('plant_battery_state_of_charge') || k.includes('plant_ess_soc') || k.includes('plant_battery_soc')),
                 grid_power:              sigenKeys.find(k => k.includes('plant_grid_active_power') || k.includes('plant_grid_sensor_active_power')),
                 grid_active_power:       sigenKeys.find(k => k.includes('plant_grid_active_power') || k.includes('plant_grid_sensor_active_power')),
-                // Daily energy
-                solar_energy_today:      sigenKeys.find(k => k.includes('plant_daily_pv_energy')),
-                load_energy_today:       sigenKeys.find(k => k.includes('plant_daily_load_consumption') || k.includes('plant_daily_consumed_energy')),
-                battery_charge_today:    sigenKeys.find(k => k.includes('plant_daily_battery_charge_energy')),
-                battery_discharge_today: sigenKeys.find(k => k.includes('plant_daily_battery_discharge_energy')),
-                grid_import_today:       sigenKeys.find(k => k.includes('plant_daily_grid_import_energy')),
-                grid_export_today:       sigenKeys.find(k => k.includes('plant_daily_grid_export_energy')),
+                // Daily energy (TypQxQ uses plant_daily_*, sigenergy2mqtt uses _daily_* without plant_ prefix)
+                solar_energy_today:      sigenKeys.find(k => k.includes('plant_daily_pv_energy')) || sigenKeys.find(k => k.endsWith('_daily_pv_energy')),
+                load_energy_today:       sigenKeys.find(k => k.includes('plant_daily_load_consumption') || k.includes('plant_daily_consumed_energy')) || sigenKeys.find(k => k.endsWith('_daily_consumed_energy')),
+                battery_charge_today:    sigenKeys.find(k => k.includes('plant_daily_battery_charge_energy')) || sigenKeys.find(k => k.endsWith('_daily_charge_energy')),
+                battery_discharge_today: sigenKeys.find(k => k.includes('plant_daily_battery_discharge_energy')) || sigenKeys.find(k => k.endsWith('_daily_discharge_energy')),
+                grid_import_today:       sigenKeys.find(k => k.includes('plant_daily_grid_import_energy')) || sigenKeys.find(k => k.endsWith('_daily_imported_energy')),
+                grid_export_today:       sigenKeys.find(k => k.includes('plant_daily_grid_export_energy')) || sigenKeys.find(k => k.endsWith('_daily_exported_energy')),
                 // Inverter-level — use endsWith() to handle numbered inverters (e.g. "Inverter 1")
-                inverter_temp:           sigenKeys.find(k => k.endsWith('_pcs_internal_temperature') && !k.includes('plant')),
+                inverter_temp:           sigenKeys.find(k => k.endsWith('_pcs_internal_temperature') && !k.includes('plant')) || sigenKeys.find(k => k.endsWith('_temperature') && k.includes('inverter') && !k.includes('average') && !k.includes('max') && !k.includes('min') && !k.includes('cell') && !k.includes('battery')),
                 inverter_output_power:   sigenKeys.find(k => k.endsWith('_active_power') && !k.includes('plant') && !k.includes('max') && !k.includes('min') && !k.includes('adjustment') && !k.includes('feedback') && !k.includes('reactive') && !k.includes('apparent')),
                 inverter_rated_power:    sigenKeys.find(k => k.endsWith('_rated_active_power') && !k.includes('plant')),
-                battery_temp:            sigenKeys.find(k => k.endsWith('_ess_average_cell_temperature') || k.endsWith('_battery_average_cell_temperature')),
+                battery_temp:            sigenKeys.find(k => k.endsWith('_ess_average_cell_temperature') || k.endsWith('_battery_average_cell_temperature') || k.endsWith('_average_cell_temperature')),
                 grid_frequency:          sigenKeys.find(k => k.endsWith('_grid_frequency') && !k.includes('rated') && !k.includes('plant')),
                 grid_voltage:            sigenKeys.find(k => k.endsWith('_phase_a_voltage') && !k.includes('plant')),
                 // PV strings (up to 6) — use endsWith() for numbered inverters
@@ -1515,7 +1517,7 @@ class SigenergySettingsCard extends HTMLElement {
               for (const [key, eid] of Object.entries(map)) {
                 if (eid && !cfg2.entities[key]) {
                   cfg2.entities[key] = eid;
-                  found.push('Sigenergy ' + key + ': ' + eid);
+                  found.push('Sigenergy auto-detect ' + key + ': ' + eid);
                   sigenCount++;
                 }
               }
@@ -3102,20 +3104,20 @@ setTimeout(_sigRegisterAll, 0);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'sigenergy-settings-card',
-  name: 'Sigenergy Settings',
+  name: 'Genergy Settings',
   description: 'Dashboard configuration: entities, features, pricing, display preferences',
   preview: true,
-  documentationURL: 'https://github.com/sigenergy-dashboard',
+  documentationURL: 'https://github.com/SpengeSec/Genergy-Dashboard',
 });
 window.customCards.push({
   type: 'sigenergy-device-card',
-  name: 'Sigenergy Device Card',
+  name: 'Genergy Device Card',
   description: 'Battery stack visualization with inverter and battery modules',
   preview: true,
 });
 
 console.info(
-  '%c SIGENERGY-DASHBOARD %c v2.1.0 ',
+  '%c GENERGY-DASHBOARD %c v2.6.0 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
