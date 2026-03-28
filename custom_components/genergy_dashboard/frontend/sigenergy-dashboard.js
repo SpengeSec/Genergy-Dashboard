@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.6.2 — Bundled Distribution
+ * Genergy Dashboard v2.6.4 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -2317,63 +2317,41 @@ class SigenergySettingsCard extends HTMLElement {
       // Resolve EV/HP entity IDs — use utility meter if cumulative, otherwise direct entity
       const evSankeyEntity = (f.ev_energy_is_cumulative && e.ev_energy_daily_meter) ? e.ev_energy_daily_meter : e.ev_energy_today;
       const hpSankeyEntity = (f.hp_energy_is_cumulative && e.hp_energy_daily_meter) ? e.hp_energy_daily_meter : e.heat_pump_energy_today;
-      const hasSubConsumers = (f.show_ev_in_sankey && evSankeyEntity) || (f.show_hp_in_sankey && hpSankeyEntity);
 
-      // Source children: always point to Home (load), Battery Charge, Grid Export
-      // EV/HP are NOT direct children of sources — they are sub-consumers of Home
+      // Build Sankey destinations list (Load is always present, EV/HP are optional)
+      const sankeyDest = [];
+      if (e.load_energy_today) sankeyDest.push({ entity_id: e.load_energy_today, name: 'Home', color: '#e8337f' });
+      if (f.show_ev_in_sankey && evSankeyEntity) sankeyDest.push({ entity_id: evSankeyEntity, name: 'EV', color: '#ff69b4' });
+      if (f.show_hp_in_sankey && hpSankeyEntity) sankeyDest.push({ entity_id: hpSankeyEntity, name: 'HP', color: '#e67e22' });
+      if (e.battery_charge_today) sankeyDest.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
+      if (e.grid_export_today) sankeyDest.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf' });
+
+      // Build source children arrays — sources can flow to all destinations
       const battDischargeChildren = [e.grid_export_today, e.load_energy_today].filter(Boolean);
       const solarChildren = [e.battery_charge_today, e.grid_export_today, e.load_energy_today].filter(Boolean);
       const gridImportChildren = [e.load_energy_today].filter(Boolean);
 
-      // Build Sankey sections — 3-section layout when sub-consumers (EV/HP) are present
-      let sankeySections;
-      if (hasSubConsumers) {
-        // 3-section layout: Sources → Home (+Battery Charge, Grid Export) → Sub-consumers
-        // Home's children are the sub-consumers (HP, EV)
-        const homeChildren = [];
-        if (f.show_ev_in_sankey && evSankeyEntity) homeChildren.push(evSankeyEntity);
-        if (f.show_hp_in_sankey && hpSankeyEntity) homeChildren.push(hpSankeyEntity);
+      // Add EV/HP as potential children of all sources (energy can flow from any source)
+      if (f.show_ev_in_sankey && evSankeyEntity) {
+        battDischargeChildren.push(evSankeyEntity);
+        solarChildren.push(evSankeyEntity);
+        gridImportChildren.push(evSankeyEntity);
+      }
+      if (f.show_hp_in_sankey && hpSankeyEntity) {
+        battDischargeChildren.push(hpSankeyEntity);
+        solarChildren.push(hpSankeyEntity);
+        gridImportChildren.push(hpSankeyEntity);
+      }
 
-        // Section 1: Sources
-        const sourceSection = {
-          entities: [
-            { entity_id: e.battery_discharge_today, name: 'Battery', color: '#00d4b8', children: battDischargeChildren },
-            { entity_id: e.solar_energy_today, name: 'Solar', color: '#c8b84a', children: solarChildren },
-            { entity_id: e.grid_import_today, name: 'Grid', color: '#6b7fd4', children: gridImportChildren }
-          ].filter(x => x.entity_id)
-        };
-
-        // Section 2: Home distribution (+ passthrough for Battery Charge and Grid Export)
-        const midEntities = [];
-        if (e.load_energy_today) midEntities.push({
-          entity_id: e.load_energy_today, name: 'Home', color: '#e8337f',
-          children: homeChildren,
-          children_sum: { should_be: 'equal_or_less', reconcile_to: 'max' }
-        });
-        // Battery Charge and Grid Export pass through this section without splitting
-        if (e.battery_charge_today) midEntities.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8', type: 'passthrough' });
-        if (e.grid_export_today) midEntities.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf', type: 'passthrough' });
-
-        // Section 3: Final destinations (sub-consumers + passthrough endpoints)
-        const finalEntities = [];
-        if (f.show_ev_in_sankey && evSankeyEntity) finalEntities.push({ entity_id: evSankeyEntity, name: 'EV', color: '#ff69b4' });
-        if (f.show_hp_in_sankey && hpSankeyEntity) finalEntities.push({ entity_id: hpSankeyEntity, name: 'HP', color: '#e67e22' });
-        if (e.battery_charge_today) finalEntities.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
-        if (e.grid_export_today) finalEntities.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf' });
-
-        sankeySections = [
-          sourceSection,
-          { entities: midEntities.filter(x => x.entity_id) },
-          { entities: finalEntities.filter(x => x.entity_id) }
-        ];
-      } else {
-        // 2-section layout: Sources → Destinations (no sub-consumers)
-        const destEntities = [];
-        if (e.load_energy_today) destEntities.push({ entity_id: e.load_energy_today, name: 'Home', color: '#e8337f' });
-        if (e.battery_charge_today) destEntities.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
-        if (e.grid_export_today) destEntities.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf' });
-
-        sankeySections = [
+      const sankeyChart = {
+        type: 'custom:sankey-chart',
+        layout: 'horizontal',
+        show_names: true, show_states: true, show_units: true, show_icons: false,
+        round: 1, height: 480, wide: true,
+        min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
+        min_state: 0.1,
+        energy_date_selection: false,
+        sections: [
           {
             entities: [
               { entity_id: e.battery_discharge_today, name: 'Battery', color: '#00d4b8', children: battDischargeChildren },
@@ -2381,18 +2359,10 @@ class SigenergySettingsCard extends HTMLElement {
               { entity_id: e.grid_import_today, name: 'Grid', color: '#6b7fd4', children: gridImportChildren }
             ].filter(x => x.entity_id)
           },
-          { entities: destEntities.filter(x => x.entity_id) }
-        ];
-      }
-
-      const sankeyChart = {
-        type: 'custom:sankey-chart',
-        show_names: true, show_states: true, show_units: true, show_icons: false,
-        round: 1, height: hasSubConsumers ? 540 : 480, wide: true,
-        min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
-        min_state: 0.1,
-        energy_date_selection: false,
-        sections: sankeySections,
+          {
+            entities: sankeyDest.filter(x => x.entity_id)
+          }
+        ],
         card_mod: sankeyOld.card_mod || {}
       };
       // Fix sankey CSS: narrower solid boxes, remove section width constraint
@@ -2419,36 +2389,40 @@ class SigenergySettingsCard extends HTMLElement {
         css = css.replace(/\.connectors\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/\.connectors\s*svg\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div:first-child\s*\{\s*width:\s*100%\s*!important;\s*\}\n?/g, '');
-        // Sankey layout fix: compact dest section, connectors aligned with bar edges
+        // Remove ALL accumulated layout fix blocks and duplicates
         css = css.replace(/\/\* Sankey layout fix[^*]*\*\/\n?/g, '');
         css = css.replace(/\.section:first-of-type\s*\{[^}]*flex[^}]*\}\n?/g, '');
         css = css.replace(/\.section:last-of-type\s*\{[^}]*flex[^}]*\}\n?/g, '');
-        if (!css.includes('Sankey layout fix')) {
-          css += '\n/* Sankey layout fix */\n';
-          css += '.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n';
-          css += '.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n';
-          css += '.section:last-of-type .box { flex-direction: row-reverse !important; }\n';
-          css += '.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n';
-          css += '.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n';
-          css += '@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } }\n';
-        }
-        // Add EV/HP pill border colors if not already present
-        if (!css.includes('title*="EV"')) {
-          css += '.box > div[title*="EV"] ~ .label .name { border-color: #ff69b4 !important; }\n';
-        }
-        if (!css.includes('title*="HP"')) {
-          css += '.box > div[title*="HP"] ~ .label .name { border-color: #e67e22 !important; }\n';
-        }
-        // Also support "Home" label (renamed from "Load")
-        if (!css.includes('title*="Home"')) {
-          css += '.box > div[title*="Home"] ~ .label .name { border-color: #e8337f !important; }\n';
-        }
-        // EV/HP destination percentage CSS variables
-        if (!css.includes('pct-dst-ev')) {
-          css += '.section:last-of-type .box > div[title*="EV"] ~ .label::after { content: var(--pct-dst-ev); }\n';
-          css += '.section:last-of-type .box > div[title*="HP"] ~ .label::after { content: var(--pct-dst-hp); }\n';
-          css += '.section:last-of-type .box > div[title*="Home"] ~ .label::after { content: var(--pct-dst-load); }\n';
-        }
+        // Remove ALL accumulated duplicate rules from prior rebuilds
+        css = css.replace(/\.section:last-of-type\s*\.box\s*\{\s*flex-direction:\s*row-reverse\s*!important;\s*\}\n?/g, '');
+        css = css.replace(/@media\s*\(max-width:\s*800px\)\s*\{\s*\}\n?/g, '');
+        css = css.replace(/@media\s*\(max-width:\s*800px\)\s*\{  \}\n?/g, '');
+        // Remove accumulated EV/HP/Home duplicate rules before re-adding
+        css = css.replace(/\.box\s*>\s*div\[title\*="EV"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.box\s*>\s*div\[title\*="HP"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.box\s*>\s*div\[title\*="Heat"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="EV"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="HP"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Heat"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
+        // Collapse multiple blank lines
+        css = css.replace(/\n{3,}/g, '\n\n');
+        // Always rebuild the layout/connector/EV/HP rules fresh from scratch
+        css += '\n/* Sankey layout fix */\n';
+        css += '.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n';
+        css += '.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n';
+        css += '.section:last-of-type .box { flex-direction: row-reverse !important; }\n';
+        css += '.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n';
+        css += '.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n';
+        css += '@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } }\n';
+        // EV/HP pill border colors + destination percentages
+        css += '.box > div[title*="EV"] ~ .label .name { border-color: #ff69b4 !important; }\n';
+        css += '.box > div[title*="HP"] ~ .label .name { border-color: #e67e22 !important; }\n';
+        css += '.box > div[title*="Home"] ~ .label .name { border-color: #e8337f !important; }\n';
+        css += '.section:last-of-type .box > div[title*="EV"] ~ .label::after { content: var(--pct-dst-ev); }\n';
+        css += '.section:last-of-type .box > div[title*="HP"] ~ .label::after { content: var(--pct-dst-hp); }\n';
+        css += '.section:last-of-type .box > div[title*="Home"] ~ .label::after { content: var(--pct-dst-load); }\n';
         sankeyChart.card_mod.style['sankey-chart-base$'] = css;
       }
       newCards.push({ type: 'vertical-stack', cards: [sankeyTitle, sankeyChart] });
@@ -3135,7 +3109,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.6.3 ',
+  '%c GENERGY-DASHBOARD %c v2.6.4 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
@@ -3188,16 +3162,21 @@ console.info(
       if (!gl.shadowRoot) return;
       // Only inject into the outermost grid-layout (the main dashboard layout).
       // Skip nested grid-layouts (e.g. stat-card grids) to avoid corrupting their layout.
-      var ancestor = gl.parentElement;
-      while (ancestor) {
-        if (ancestor.tagName && ancestor.tagName.toLowerCase() === 'grid-layout') return;
-        // Also traverse up through shadow DOM boundaries
-        if (!ancestor.parentElement && ancestor.getRootNode) {
-          var root = ancestor.getRootNode();
-          ancestor = root.host || null;
-        } else {
-          ancestor = ancestor.parentElement;
+      // grid-layout lives as the root of a LAYOUT-CARD shadow DOM, so parentElement is null.
+      // Walk up the shadow host chain to check for ancestor grid-layout elements.
+      var node = gl;
+      while (true) {
+        var rootNode = node.getRootNode();
+        if (rootNode === document) break;
+        var host = rootNode.host;
+        if (!host) break;
+        if (host.tagName && host.tagName.toLowerCase() === 'grid-layout') {
+          // Nested grid — remove stale responsive CSS if previously injected, then skip
+          var stale = gl.shadowRoot.querySelector('#sigenergy-responsive-fix');
+          if (stale) stale.remove();
+          return;
         }
+        node = host;
       }
       var existing = gl.shadowRoot.querySelector('#sigenergy-responsive-fix');
       if (existing) {

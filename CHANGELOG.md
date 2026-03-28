@@ -2,10 +2,12 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
-## [2.6.3] - 2025-07-25
+## [2.6.4] - 2025-07-25
 
 ### Fixed
 - **Exported card layout** — The "Exported" energy stat card appeared on its own row instead of alongside Discharged and Imported in a 3-column grid. Root cause: the responsive CSS injection (MutationObserver) was being applied to ALL `grid-layout` shadow DOMs, including nested ones (stat cards, status cards). The desktop CSS rules (`nth-child(5): span 2`, `nth-child(6): 1 / -1`) intended for the 6 top-level dashboard cards were also hitting the 5th/6th stat card inside the inner grid, forcing "Imported" to span 2 columns and "Exported" to span the full width. Fixed by only injecting responsive CSS into the outermost grid-layout (ancestor check traverses shadow DOM boundaries to skip nested grids).
+- **Sankey chart vertical rendering** — Reverted the 3-section Sankey layout introduced in v2.6.1 back to the flat 2-section layout (Sources → Destinations). The 3-section passthrough layout caused the chart to render vertically at narrow container widths. Added `layout: 'horizontal'` to force horizontal rendering at all widths. EV and HP are now children of all source nodes (Battery/Solar/Grid) as in v2.6.0.
+- **Sankey CSS accumulation** — Added deduplication for accumulated Sankey CSS rules that were being appended on each `_buildDashboard()` call.
 
 ## [2.6.2] - 2025-07-25
 
@@ -15,7 +17,7 @@ All notable changes to the Genergy Dashboard are documented here.
 ## [2.6.1] - 2025-07-25
 
 ### Fixed
-- **Sankey HP/EV flow topology** — Heat Pump and EV energy are now correctly shown as sub-consumers of Home, not as separate direct flows from Grid/Solar/Battery. The Sankey chart now uses a 3-section layout (Sources → Home → Sub-consumers) when EV or HP are enabled, fixing the visually incorrect Grid→HP direct flow. When no sub-consumers are configured, the simpler 2-section layout is preserved.
+- **Sankey HP/EV flow topology** — *(Reverted in v2.6.3 — the 3-section layout caused vertical rendering at narrow widths.)* Originally changed to a 3-section layout showing HP/EV as sub-consumers of Home; reverted to flat 2-section layout with `layout: 'horizontal'`.
 - **Daily meter auto-creation** — The `_ensureDailyMeter` function now accepts `state_class: total` in addition to `total_increasing`, lowered the cumulative threshold from 100→50 kWh, and supports MWh/Wh unit conversions. Entities with "daily", "today", or "summary_day" in their name are now correctly skipped (already daily-resetting). This fixes auto-detect not creating daily utility meters for some integrations.
 
 ## [2.6.0] - 2025-07-25
