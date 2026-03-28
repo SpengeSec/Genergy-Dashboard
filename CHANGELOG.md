@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.6.2] - 2025-07-25
+
+### Fixed
+- **CRITICAL: Configuration Error on load** — Fixed duplicate `sankeySections` variable declaration (dead legacy code from an earlier version conflicted with the new 3-section Sankey builder). ES modules throw `SyntaxError` on duplicate `const`/`let` in the same scope, which prevented `customElements.define()` from running, causing all custom cards to show "Configuration Error". Removed the dead code block.
+
 ## [2.6.1] - 2025-07-25
 
 ### Fixed
