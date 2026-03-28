@@ -55,7 +55,6 @@
                     "grid": true,
                     "hide_cables": false
                   },
-                  "image_path": "/local/Sigenergy",
                   "edit_paths": false,
                   "paths": {
                     "solar": "M 450 135 L 610 175 L 500 320 L 505 555",
