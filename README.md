@@ -573,6 +573,21 @@ genergy-dashboard/
 
 ## Changelog
 
+### v2.6.1
+- **Sankey HP/EV flow topology fix** — Heat Pump and EV energy are now correctly shown as sub-consumers of Home (3-section layout: Sources → Home → Sub-consumers) instead of as separate direct flows from Grid/Solar/Battery. Fixes visually incorrect Grid→HP direct flow. When no sub-consumers are configured, the simpler 2-section layout is preserved.
+- **Daily meter auto-creation fix** — Accepts `state_class: total` (not just `total_increasing`), lowered detection threshold from 100→50 kWh, supports MWh/Wh units. Entities with "daily"/"today" in name are now correctly skipped (already daily-resetting).
+
+### v2.6.0
+- **sigenergy2mqtt compatibility** — Added fallback entity patterns for the [seud0nym/sigenergy2mqtt](https://github.com/seud0nym/sigenergy2mqtt) integration. 8 auto-detect patterns now have `||` fallback patterns for sigenergy2mqtt entity naming.
+- **Genergy branding** — Renamed user-facing "Sigenergy" text to "Genergy" (settings header, card names, console banner). Internal identifiers unchanged for backward compatibility.
+
+### v2.5.5
+- **Sigenergy auto-detect pattern fix** — Changed inverter-level matching from `includes()` to `endsWith()`, fixing detection on numbered inverters (e.g., `sensor.sigen_inverter_1_active_power`). Root cause of "2W" SigenStor display and wrong PV values.
+- **House card image path fix** — Removed stale `/local/Sigenergy` path from templates and existing dashboards. House card now auto-detects correct image path.
+- **Decimal places wired up** — `display.decimal_places` setting now applies to all device panel values.
+- **3-phase detection** — Added `_phase_b_voltage` pattern and `phase_a/b/c` inference for L1/L2/L3.
+- **Disabled entity hints** — Auto-detect shows helpful hints when entities like grid_frequency and battery_temp are not found (commonly disabled by default in Sigenergy-Local-Modbus).
+
 ### v2.5.3
 - **Lifetime→daily auto-conversion** — Auto-detect now checks all core energy entities (solar, load, battery charge/discharge, grid import/export) for cumulative/lifetime values. If state > 100 kWh with `state_class: total_increasing`, automatically creates a HA daily `utility_meter` helper and uses that in the Sankey chart and stats. Fixes broken Sankey displaying thousands of kWh.
 - **Config versioning (anti-overwrite)** — Settings now include a timestamp (`_ts`). On page refresh, the dashboard config only overwrites localStorage if it has a newer timestamp, preventing the issue where manually entered entities were reverted.
