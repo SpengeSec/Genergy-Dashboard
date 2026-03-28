@@ -573,6 +573,9 @@ genergy-dashboard/
 
 ## Changelog
 
+### v2.6.2
+- **CRITICAL: Fix Configuration Error** — Removed dead legacy `sankeySections` variable that conflicted with the new 3-section Sankey builder, causing a `SyntaxError` in ES module evaluation that prevented all custom cards from loading.
+
 ### v2.6.1
 - **Sankey HP/EV flow topology fix** — Heat Pump and EV energy are now correctly shown as sub-consumers of Home (3-section layout: Sources → Home → Sub-consumers) instead of as separate direct flows from Grid/Solar/Battery. Fixes visually incorrect Grid→HP direct flow. When no sub-consumers are configured, the simpler 2-section layout is preserved.
 - **Daily meter auto-creation fix** — Accepts `state_class: total` (not just `total_increasing`), lowered detection threshold from 100→50 kWh, supports MWh/Wh units. Entities with "daily"/"today" in name are now correctly skipped (already daily-resetting).

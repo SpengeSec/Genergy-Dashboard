@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.6.1 — Bundled Distribution
+ * Genergy Dashboard v2.6.2 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -2171,19 +2171,6 @@ class SigenergySettingsCard extends HTMLElement {
         }
       } : null;
 
-      // Build sankey sections based on features
-      const sankeyExclude = ['sensor.net_grid_power'];
-      const sankeySections = [
-        {
-          entities: [{ entity_id: e.solar_power || 'sensor.solar_production', name: 'Solar' }],
-          color: '#FFA500'
-        },
-        {
-          entities: [{ entity_id: e.grid_active_power || e.grid_power || 'sensor.net_grid_power', name: 'Grid', children: [e.load_power || 'sensor.home_consumption'] }],
-          color: '#9E9E9E'
-        }
-      ];
-
       // Build status mushroom cards
       // Helper: build Jinja template that shows value + unit from the sensor itself
       const _powerTpl = (eid) => {
@@ -3148,7 +3135,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.6.1 ',
+  '%c GENERGY-DASHBOARD %c v2.6.2 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
