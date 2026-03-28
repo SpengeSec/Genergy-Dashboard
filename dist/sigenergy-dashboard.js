@@ -3135,7 +3135,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.6.2 ',
+  '%c GENERGY-DASHBOARD %c v2.6.3 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
@@ -3185,16 +3185,28 @@ console.info(
 
     var gridLayouts = findDeep(document, 'grid-layout');
     gridLayouts.forEach(function(gl) {
-      if (gl.shadowRoot) {
-        var existing = gl.shadowRoot.querySelector('#sigenergy-responsive-fix');
-        if (existing) {
-          existing.textContent = RESPONSIVE_CSS;
+      if (!gl.shadowRoot) return;
+      // Only inject into the outermost grid-layout (the main dashboard layout).
+      // Skip nested grid-layouts (e.g. stat-card grids) to avoid corrupting their layout.
+      var ancestor = gl.parentElement;
+      while (ancestor) {
+        if (ancestor.tagName && ancestor.tagName.toLowerCase() === 'grid-layout') return;
+        // Also traverse up through shadow DOM boundaries
+        if (!ancestor.parentElement && ancestor.getRootNode) {
+          var root = ancestor.getRootNode();
+          ancestor = root.host || null;
         } else {
-          var style = document.createElement('style');
-          style.id = 'sigenergy-responsive-fix';
-          style.textContent = RESPONSIVE_CSS;
-          gl.shadowRoot.appendChild(style);
+          ancestor = ancestor.parentElement;
         }
+      }
+      var existing = gl.shadowRoot.querySelector('#sigenergy-responsive-fix');
+      if (existing) {
+        existing.textContent = RESPONSIVE_CSS;
+      } else {
+        var style = document.createElement('style');
+        style.id = 'sigenergy-responsive-fix';
+        style.textContent = RESPONSIVE_CSS;
+        gl.shadowRoot.appendChild(style);
       }
     });
   }

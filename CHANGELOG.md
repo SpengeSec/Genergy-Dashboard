@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.6.3] - 2025-07-25
+
+### Fixed
+- **Exported card layout** — The "Exported" energy stat card appeared on its own row instead of alongside Discharged and Imported in a 3-column grid. Root cause: the responsive CSS injection (MutationObserver) was being applied to ALL `grid-layout` shadow DOMs, including nested ones (stat cards, status cards). The desktop CSS rules (`nth-child(5): span 2`, `nth-child(6): 1 / -1`) intended for the 6 top-level dashboard cards were also hitting the 5th/6th stat card inside the inner grid, forcing "Imported" to span 2 columns and "Exported" to span the full width. Fixed by only injecting responsive CSS into the outermost grid-layout (ancestor check traverses shadow DOM boundaries to skip nested grids).
+
 ## [2.6.2] - 2025-07-25
 
 ### Fixed
