@@ -2354,10 +2354,13 @@ class SigenergySettingsCard extends HTMLElement {
         energy_date_selection: false,
         sections: [
           {
+            // Order matters! ha-sankey-chart uses greedy allocation (first source claims
+            // destinations first). Put smallest source (Grid) first so it gets visible
+            // flow lines even when larger sources would otherwise consume all destinations.
             entities: [
+              { entity_id: e.grid_import_today, name: 'Grid', color: '#6b7fd4', children: gridImportChildren },
               { entity_id: e.battery_discharge_today, name: 'Battery', color: '#00d4b8', children: battDischargeChildren },
-              { entity_id: e.solar_energy_today, name: 'Solar', color: '#c8b84a', children: solarChildren },
-              { entity_id: e.grid_import_today, name: 'Grid', color: '#6b7fd4', children: gridImportChildren }
+              { entity_id: e.solar_energy_today, name: 'Solar', color: '#c8b84a', children: solarChildren }
             ].filter(x => x.entity_id)
           },
           {
@@ -2403,8 +2406,10 @@ class SigenergySettingsCard extends HTMLElement {
       // Fix sankey CSS: strip old :host block + accumulated layout rules, then prepend fresh Jinja
       if (sankeyChart.card_mod?.style?.['sankey-chart-base$']) {
         let css = sankeyChart.card_mod.style['sankey-chart-base$'];
-        // Remove old Jinja :host block (starts with {% set and ends with closing })
-        css = css.replace(/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/m, '');
+        // Remove ALL old Jinja :host blocks (can accumulate from repeated builds)
+        while (/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/.test(css)) {
+          css = css.replace(/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/, '');
+        }
         css = css.replace(/min-width:\s*140px\s*!important/g, 'min-width: 90px !important');
         css = css.replace(/min-width:\s*70px\s*!important/g, 'min-width: 90px !important');
         // Remove the entire .section:first-of-type block (may contain broken CSS or max-width:75%)
@@ -2445,8 +2450,17 @@ class SigenergySettingsCard extends HTMLElement {
         css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
         // Replace hardcoded dark-theme Sankey background with theme-aware variable
         css = css.replace(/ha-card\s*\{\s*background:\s*#1a1f2e\s*!important/g, 'ha-card { background: var(--ha-card-background, #1a1f2e) !important');
-        // Update Sankey card border-radius to match other cards (16px)
-        css = css.replace(/border-radius:\s*4px\s*!important/g, 'border-radius: var(--ha-card-border-radius, 16px) !important');
+        // Update Sankey card border-radius to 16px.
+        // ha-card has its own shadow DOM with :host { border-radius: var(--ha-card-border-radius) }
+        // Parent layout-card resets --ha-card-border-radius to 0, so we override it on ha-card itself.
+        // Setting the CSS variable propagates into ha-card's shadow DOM :host styling.
+        css = css.replace(/border-radius:\s*4px\s*!important;?/g, '');
+        css = css.replace(/border-radius:\s*var\(--ha-card-border-radius,\s*16px\)\s*!important;?/g, '');
+        css = css.replace(/border-radius:\s*16px\s*!important;?/g, '');
+        // Remove any old --ha-card-border-radius override to avoid duplication
+        css = css.replace(/ha-card\s*\{\s*--ha-card-border-radius:[^}]*\}\n?/g, '');
+        // Set the CSS variable on ha-card so its shadow DOM :host picks up 16px
+        css += '\nha-card { --ha-card-border-radius: 16px !important; }\n';
         // Collapse multiple blank lines
         css = css.replace(/\n{3,}/g, '\n\n');
         // Prepend fresh Jinja :host block
