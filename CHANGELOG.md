@@ -7,14 +7,21 @@ All notable changes to the Genergy Dashboard are documented here.
 ### Added
 - **Solar Forecast Chart Overlay** — Reads Solcast `detailedForecast` attribute from `sensor.solcast_pv_forecast_today` (and optionally tomorrow) and overlays the forecast as a dashed gold area series on the ApexCharts energy overview. Chart span extends to 48h when solar forecast feature is enabled.
 - **Battery Runtime Estimate** — Computes estimated time-to-full or time-to-empty based on battery capacity, current SoC, charge/discharge power, and configurable SoC targets. Displayed on a separate line below the battery "Charging"/"Discharging" status on the house card.
-- **Configurable SoC Targets** — New `battery_max_soc` and `battery_min_soc` entity configs allow the runtime estimate to use your inverter's actual charge cutoff and discharge reserve instead of 0%/100%. Auto-detected for Sigenergy (ESS charge/discharge cutoff), Deye (battery_shutdown), and other brands.
-- **Manual Battery Capacity Override** — New "Manual Capacity (kWh)" input in Settings → Display → Battery. Set capacity manually when no capacity entity is available.
+- **Manual SoC Targets (%)** — New "Max SoC Target" and "Min SoC Target" numeric inputs on the Features → Battery section let you set charge/discharge cutoff percentages directly (e.g. 95% max, 10% min) without needing an entity.
+- **Manual Battery Capacity Override** — New "Manual Capacity (kWh)" input in Settings → Features → Battery. Set capacity manually when no capacity entity is available.
 - **Ah-to-kWh Conversion** — Battery capacity entities reporting in Ah are now automatically converted to kWh using nominal voltage (configurable, defaults to 51.2V for LFP).
+- **Battery Polarity Auto-Detection** — Auto-detect now identifies the correct battery sign convention from the entity name: entities containing "output" or "discharge" are set to positive = discharging (correct for Deye, Goodwe, etc.). Sigenergy entities keep positive = charging.
 - **Broadened Auto-Detection** — Battery capacity detection now matches `rated_capacity`, `rated_energy`, `capacity_kwh`, and `capacity_ah` patterns. SoC limit detection matches charge cutoff, discharge cutoff, battery_shutdown, backup_soc, reserve_soc, min_soc, and max_soc patterns across all inverter brands.
 
 ### Changed
-- **Battery Runtime Display** — Runtime prediction ("Xh Ym to N%") is now shown on a **separate line** below the "Charging"/"Discharging" status label instead of inline with a middle dot separator.
-- **New Entity Configs** — `battery_capacity`, `battery_max_soc`, `battery_min_soc`, and `solcast_forecast_power` added to Settings UI entity rows and SYNCED_ENTITIES set.
+- **Settings UI Overhaul** — All four tabs (Entities, Features, Pricing, Display) restructured with clearer sections, unit hints (W/kWh/°C/V/Hz), cross-references between tabs, and contextual help text for each entity group.
+- **Features Tab Reorganized** — Grouped into logical sections: System Components, EMHASS Optimizer, Solar Forecast, Optional Equipment, Battery, Developer. Each section includes links to relevant integrations and references to the Entities tab.
+- **Battery Runtime Display** — Runtime prediction ("Xh Ym to N%") is now shown on a **separate line** below the "Charging"/"Discharging" status label.
+- **Battery SoC Entity Rows Removed** — "Battery Max SoC" and "Battery Min SoC" entity pickers removed from the Entities tab. Replaced by simpler numeric % inputs on the Features tab. Entity-based SoC targets still work via auto-detection for supported inverters.
+
+### Fixed
+- **Features Tab Not Loading** — Fixed critical bug where the Features tab showed a blank page due to an undefined variable reference (`e` instead of `cfg.entities`).
+- **Battery Showing "Charging" When Discharging** — Fixed incorrect battery status on Deye and similar inverters where positive power = discharging. The default `battery_positive_charging` setting is now properly auto-detected based on entity naming conventions.
 
 ## [2.7.3] - 2025-07-25
 

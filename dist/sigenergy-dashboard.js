@@ -892,17 +892,18 @@ class SigenergySettingsCard extends HTMLElement {
       </div>
       <div class="section">
         <div class="section-title">☀️ Core Power</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Real-time power sensors in <b>W</b> or <b>kW</b>. Auto-detected by the Detect button above.</div>
         ${this._entityRow('Solar Power', 'solar_power', e)}
         ${this._entityRow('Home Load', 'load_power', e)}
         ${this._entityRow('Battery Power', 'battery_power', e)}
         ${this._entityRow('Battery SoC', 'battery_soc', e)}
         ${this._entityRow('Battery Capacity', 'battery_capacity', e)}
-        ${this._entityRow('Battery Max SoC', 'battery_max_soc', e)}
-        ${this._entityRow('Battery Min SoC', 'battery_min_soc', e)}
+        <div style="font-size:10px;color:#666;padding:0 0 4px 4px;">Rated capacity sensor (<b>kWh</b>, <b>Wh</b>, or <b>Ah</b>). Used for runtime estimation. Leave blank if you set manual capacity on Features tab.</div>
         ${this._entityRow('Grid Power', 'grid_power', e)}
       </div>
       <div class="section">
         <div class="section-title">📊 Daily Energy</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Daily energy counters in <b>kWh</b>. Found in <i>HA → Settings → Devices → [Your Inverter]</i>.</div>
         ${this._entityRow('Solar Energy Today', 'solar_energy_today', e)}
         ${this._entityRow('Load Energy Today', 'load_energy_today', e)}
         ${this._entityRow('Battery Charge Today', 'battery_charge_today', e)}
@@ -936,7 +937,7 @@ class SigenergySettingsCard extends HTMLElement {
       </div>
       <div class="section">
         <div class="section-title">💰 Price Entities</div>
-        <div class="toggle-desc" style="margin-bottom:8px;color:#8892a4;font-size:11px;">Configure your buy and sell price entities. These are used for price charts, overlays, and color coding across the dashboard.</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Electricity price sensors in <b>€/kWh</b> (or your local currency). Configure source integration on the Pricing tab.</div>
         ${this._entityRow('Buy Price', 'buy_price', e)}
         ${this._entityRow('Sell Price', 'sell_price', e)}
         ${this._entityRow('Nordpool', 'nordpool', e)}
@@ -1094,6 +1095,7 @@ class SigenergySettingsCard extends HTMLElement {
       </div>
       <div class="section">
         <div class="section-title">🌡️ System</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Temperature (<b>°C</b>), voltage (<b>V</b>), and frequency (<b>Hz</b>) sensors. Found in <i>HA → Settings → Devices</i>.</div>
         ${this._entityRow('Weather', 'weather', e)}
         ${this._entityRow('Inverter Temp', 'inverter_temp', e)}
         ${this._entityRow('Inv Internal Temp', 'inverter_internal_temp', e)}
@@ -1125,6 +1127,7 @@ class SigenergySettingsCard extends HTMLElement {
       </div>
       <div class="section">
         <div class="section-title">🔌 Inverter & PV</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Power sensors in <b>W</b> or <b>kW</b>. Individual PV string monitoring for detailed solar analysis.</div>
         ${this._entityRow('Inverter Output', 'inverter_output_power', e)}
         ${this._entityRow('Inverter Rated', 'inverter_rated_power', e)}
         ${this._entityRow('Rated Power', 'rated_power', e)}
@@ -1152,7 +1155,7 @@ class SigenergySettingsCard extends HTMLElement {
       'grid_import', 'grid_export', 'grid_active',
       'sun', 'weather',
       'ev_charger_power', 'ev_charger_state', 'ev_soc', 'ev_range',
-      'heat_pump_power', 'battery_capacity', 'battery_max_soc', 'battery_min_soc',
+      'heat_pump_power', 'battery_capacity',
     ]);
 
     // EMHASS toggle handler
@@ -1783,56 +1786,69 @@ class SigenergySettingsCard extends HTMLElement {
   _renderFeatures(el, cfg) {
     const f = cfg.features || {};
     el.innerHTML = `
-      <div class="section">
-        <div class="section-title">System Components</div>
-        ${this._toggleHtml('Grid Connection', 'Disable for off-grid setups', 'grid_connection', f.grid_connection)}
-        ${this._toggleHtml('EMHASS Integration', 'Show EMHASS optimizer stats', 'emhass', f.emhass)}
-        ${this._toggleHtml('EMHASS Forecasts', 'Show MPC forecast overlays on graphs (requires EMHASS)', 'emhass_forecasts', f.emhass_forecasts)}
-        ${this._toggleHtml('Deferrable Loads', 'Show heat pump/boiler schedules from EMHASS', 'deferrable_loads', f.deferrable_loads)}
-        ${this._toggleHtml('Financial Tracking', 'Show EMHASS cost/savings cards', 'financial_tracking', f.financial_tracking)}
-        ${this._toggleHtml('Solar Forecast', 'Solcast or forecast.solar integration', 'solar_forecast', f.solar_forecast)}
-        ${this._toggleHtml('Weather Widget', 'Weather overlay on Overview', 'weather_widget', f.weather_widget)}
-        ${this._toggleHtml('Hide Cable Lines', 'Show only flow animation, no static cable backbone', 'hide_cables', f.hide_cables)}
+      <div style="margin-bottom:12px;padding:10px;background:rgba(63,81,181,0.08);border:1px solid rgba(63,81,181,0.2);border-radius:8px;">
+        <div style="font-size:11px;color:#8892a4;line-height:1.5;">
+          <b>💡 Tip:</b> Enable features here, then configure their entities on the <b>⚡ Entities</b> tab. Click <b>Apply Settings to Dashboard</b> on the Display tab after changes.
+        </div>
       </div>
       <div class="section">
-        <div class="section-title">Optional Equipment</div>
-        ${this._toggleHtml('EV Charger', 'Show EV charger + flow animation', 'ev_charger', f.ev_charger)}
-        ${this._toggleHtml('EV Vehicle', 'Show car in garage layer', 'ev_vehicle', f.ev_vehicle)}
-        ${this._toggleHtml('Heat Pump / HVAC', 'Show heat pump unit', 'heat_pump', f.heat_pump)}
+        <div class="section-title">🏠 System Components</div>
+        ${this._toggleHtml('Grid Connection', 'Disable for off-grid / island setups', 'grid_connection', f.grid_connection)}
+        ${this._toggleHtml('Weather Widget', 'Show weather overlay on the Overview page', 'weather_widget', f.weather_widget)}
+        ${this._toggleHtml('Hide Cable Lines', 'Show only animated flow dots, hide the static cable backbone on the house card', 'hide_cables', f.hide_cables)}
       </div>
       <div class="section">
-        <div class="section-title">Battery</div>
+        <div class="section-title">🤖 EMHASS Optimizer</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Requires the <a href="https://emhass.readthedocs.io/" target="_blank" style="color:#00d4b8;">EMHASS add-on</a>. Configure entities on the Entities tab → EMHASS section.</div>
+        ${this._toggleHtml('EMHASS Integration', 'Enable EMHASS optimizer stats and controls', 'emhass', f.emhass)}
+        ${this._toggleHtml('EMHASS Forecasts', 'Overlay MPC forecast series (PV/Battery/Grid/Load) on energy charts', 'emhass_forecasts', f.emhass_forecasts)}
+        ${this._toggleHtml('Deferrable Loads', 'Show heat pump/boiler schedule forecasts from EMHASS', 'deferrable_loads', f.deferrable_loads)}
+        ${this._toggleHtml('Financial Tracking', 'Show cost/savings cards and chart annotations', 'financial_tracking', f.financial_tracking)}
+      </div>
+      <div class="section">
+        <div class="section-title">☀️ Solar Forecast</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Requires <a href="https://github.com/oziee/ha-solcast-solar" target="_blank" style="color:#FFA500;">Solcast</a> or <a href="https://www.home-assistant.io/integrations/forecast_solar/" target="_blank" style="color:#FFA500;">Forecast.Solar</a>. Configure entities on the Entities tab → Solar Forecasting section.</div>
+        ${this._toggleHtml('Solar Forecast', 'Overlay solar production forecast on the energy chart', 'solar_forecast', f.solar_forecast)}
+        ${this._toggleHtml('Sunrise/Sunset Lines', 'Show day/night shading bands on charts', 'sunrise_sunset', f.sunrise_sunset)}
+      </div>
+      <div class="section">
+        <div class="section-title">🔌 Optional Equipment</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Enable to show equipment on the house card. Configure power/energy entities on the Entities tab.</div>
+        ${this._toggleHtml('EV Charger', 'Show EV charger with animated power flow', 'ev_charger', f.ev_charger)}
+        ${this._toggleHtml('EV Vehicle', 'Show car visual in the garage layer', 'ev_vehicle', f.ev_vehicle)}
+        ${this._toggleHtml('Heat Pump / HVAC', 'Show heat pump unit with power flow animation', 'heat_pump', f.heat_pump)}
+      </div>
+      <div class="section">
+        <div class="section-title">🔋 Battery</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Configure battery behavior and runtime estimation. Set the Battery Capacity entity on the Entities tab, or enter a manual value below.</div>
         <div class="row">
           <span class="row-label">Battery Packs</span>
           <input class="row-input" type="number" min="1" max="8" value="${f.battery_packs || 2}" data-key="battery_packs" />
         </div>
-        ${this._toggleHtml('Positive = Charging', 'Enable if your inverter reports positive battery power when charging (most brands). Disable if positive means discharging.', 'battery_positive_charging', f.battery_positive_charging !== false)}
-        ${this._toggleHtml('Battery Runtime', 'Show estimated time to charge/discharge on house card (requires Battery Capacity entity or manual kWh value)', 'battery_runtime', f.battery_runtime !== false)}
-        <div class="row" style="margin-top:4px;">
-          <span class="row-label" style="font-size:12px;color:#8892a4;">Manual Capacity (kWh)</span>
-          <input class="row-input" type="number" min="0" max="500" step="0.1" value="${cfg.entities?.battery_capacity_kwh || ''}" data-key="battery_capacity_kwh" placeholder="auto" style="width:80px;" />
+        <div style="font-size:10px;color:#666;padding:0 0 6px 4px;">Number of physical battery modules. Individual pack SoC entities are on the Entities tab.</div>
+        ${this._toggleHtml('Positive = Charging', 'Enable if your inverter reports positive battery power when charging. Disable for inverters where positive means discharging (e.g. Deye, Goodwe).', 'battery_positive_charging', f.battery_positive_charging !== false)}
+        ${this._toggleHtml('Battery Runtime', 'Show estimated time to full/empty on the house card battery label', 'battery_runtime', f.battery_runtime !== false)}
+        <div style="margin-top:6px;padding:10px;background:rgba(33,150,243,0.08);border:1px solid rgba(33,150,243,0.2);border-radius:8px;">
+          <div style="font-size:11px;font-weight:600;color:#64B5F6;margin-bottom:6px;">Runtime Settings</div>
+          <div class="row">
+            <span class="row-label" style="font-size:12px;color:#8892a4;">Manual Capacity (kWh)</span>
+            <input class="row-input" type="number" min="0" max="500" step="0.1" value="${cfg.entities?.battery_capacity_kwh || ''}" data-key="battery_capacity_kwh" placeholder="auto" style="width:80px;" />
+          </div>
+          <div style="font-size:10px;color:#666;padding:2px 0 6px 4px;">Leave blank to auto-read from Battery Capacity entity. Set manually if your inverter doesn't expose a capacity sensor.</div>
+          <div class="row">
+            <span class="row-label" style="font-size:12px;color:#8892a4;">Max SoC Target (%)</span>
+            <input class="row-input" type="number" min="50" max="100" step="1" value="${cfg.entities?.battery_max_soc_pct || ''}" data-key="battery_max_soc_pct" placeholder="100" style="width:80px;" />
+          </div>
+          <div class="row" style="margin-top:4px;">
+            <span class="row-label" style="font-size:12px;color:#8892a4;">Min SoC Target (%)</span>
+            <input class="row-input" type="number" min="0" max="50" step="1" value="${cfg.entities?.battery_min_soc_pct || ''}" data-key="battery_min_soc_pct" placeholder="0" style="width:80px;" />
+          </div>
+          <div style="font-size:10px;color:#666;padding:2px 0 0 4px;">Charge/discharge cutoff targets for runtime estimation. E.g. 95% max, 10% min. Leave blank for 100%/0%.</div>
         </div>
-        <div style="font-size:10px;color:#666;padding:2px 0 0 4px;">Leave blank to auto-read from Battery Capacity entity. Set manually if no capacity entity exists.</div>
-        <div class="row" style="margin-top:8px;">
-          <span class="row-label" style="font-size:12px;color:#8892a4;">Max SoC Target (%)</span>
-          <input class="row-input" type="number" min="50" max="100" step="1" value="${cfg.entities?.battery_max_soc_pct || ''}" data-key="battery_max_soc_pct" placeholder="100" style="width:80px;" />
-        </div>
-        <div class="row" style="margin-top:4px;">
-          <span class="row-label" style="font-size:12px;color:#8892a4;">Min SoC Target (%)</span>
-          <input class="row-input" type="number" min="0" max="50" step="1" value="${cfg.entities?.battery_min_soc_pct || ''}" data-key="battery_min_soc_pct" placeholder="0" style="width:80px;" />
-        </div>
-        <div style="font-size:10px;color:#666;padding:2px 0 0 4px;">SoC targets for runtime estimate. Leave blank to auto-read from entities, or set manually (e.g. 95% max, 10% min).</div>
       </div>
       <div class="section">
-        <div class="section-title">Charts</div>
-        ${this._toggleHtml('Sunrise/Sunset Lines', 'Show day/night shading', 'sunrise_sunset', f.sunrise_sunset)}
-      </div>
-      <div class="section">
-        <div class="section-title">\u{1F527} Developer</div>
-        ${this._toggleHtml('Cable Path Editor', 'Drag-to-position cable routing overlay on house card', 'path_editor', this._pathEditorOn)}
-      </div>
-      <div style="margin-top:12px;padding:10px;background:rgba(0,212,184,0.08);border-radius:8px;font-size:11px;color:#8892a4;">
-        <b>ℹ️</b> Grid configuration (3-phase, dual tariff), Sankey graph nodes (EV, heat pump), and auto-detect are in the <b>⚡ Entities</b> tab.
+        <div class="section-title">🛠️ Developer</div>
+        ${this._toggleHtml('Cable Path Editor', 'Drag-to-position cable routing overlay on house card (for layout customization)', 'path_editor', this._pathEditorOn)}
       </div>
     `;
 
