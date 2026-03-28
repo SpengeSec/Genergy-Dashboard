@@ -315,6 +315,11 @@ class SigenergyHouseCard extends LitElement {
   }
 
   get _batteryMaxSoc() {
+    // Manual numeric override takes precedence
+    if (this._config.battery_max_soc_pct != null) {
+      const pct = parseFloat(this._config.battery_max_soc_pct);
+      if (pct >= 50 && pct <= 100) return pct;
+    }
     const entity = this._config.entities.battery_max_soc;
     if (entity) {
       const val = this._stateNum(entity);
@@ -324,6 +329,11 @@ class SigenergyHouseCard extends LitElement {
   }
 
   get _batteryMinSoc() {
+    // Manual numeric override takes precedence
+    if (this._config.battery_min_soc_pct != null) {
+      const pct = parseFloat(this._config.battery_min_soc_pct);
+      if (pct >= 0 && pct < 100) return pct;
+    }
     const entity = this._config.entities.battery_min_soc;
     if (entity) {
       const val = this._stateNum(entity);

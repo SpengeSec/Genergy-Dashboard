@@ -1621,6 +1621,22 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
+          // ── Auto-detect battery sign convention ─────────────────────
+          // If battery_power entity contains "output" or "discharge", positive = discharging
+          if (this._hass && this._hass.states) {
+            const bpEntity = (cfg2.entities.battery_power || '').toLowerCase();
+            if (bpEntity) {
+              if (bpEntity.includes('output') || bpEntity.includes('discharge')) {
+                cfg2.features.battery_positive_charging = false;
+                found.push('⚡ Battery sign: positive = discharging (entity name contains "output/discharge")');
+              } else if (bpEntity.includes('sigen_') || bpEntity.includes('sigenergy')) {
+                cfg2.features.battery_positive_charging = true;
+                found.push('⚡ Battery sign: positive = charging (Sigenergy convention)');
+              }
+              // For other brands: if entity name is generic (just "battery_power"), keep the user's current setting
+            }
+          }
+
           // ── Auto-detect 3-phase voltage sensors ──────────────────────
           if (this._hass && this._hass.states && !cfg2.features.three_phase) {
             const allKeys = Object.keys(this._hass.states);
@@ -1794,9 +1810,18 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._toggleHtml('Battery Runtime', 'Show estimated time to charge/discharge on house card (requires Battery Capacity entity or manual kWh value)', 'battery_runtime', f.battery_runtime !== false)}
         <div class="row" style="margin-top:4px;">
           <span class="row-label" style="font-size:12px;color:#8892a4;">Manual Capacity (kWh)</span>
-          <input class="row-input" type="number" min="0" max="500" step="0.1" value="${e.battery_capacity_kwh || ''}" data-key="battery_capacity_kwh" placeholder="auto" style="width:80px;" />
+          <input class="row-input" type="number" min="0" max="500" step="0.1" value="${cfg.entities?.battery_capacity_kwh || ''}" data-key="battery_capacity_kwh" placeholder="auto" style="width:80px;" />
         </div>
         <div style="font-size:10px;color:#666;padding:2px 0 0 4px;">Leave blank to auto-read from Battery Capacity entity. Set manually if no capacity entity exists.</div>
+        <div class="row" style="margin-top:8px;">
+          <span class="row-label" style="font-size:12px;color:#8892a4;">Max SoC Target (%)</span>
+          <input class="row-input" type="number" min="50" max="100" step="1" value="${cfg.entities?.battery_max_soc_pct || ''}" data-key="battery_max_soc_pct" placeholder="100" style="width:80px;" />
+        </div>
+        <div class="row" style="margin-top:4px;">
+          <span class="row-label" style="font-size:12px;color:#8892a4;">Min SoC Target (%)</span>
+          <input class="row-input" type="number" min="0" max="50" step="1" value="${cfg.entities?.battery_min_soc_pct || ''}" data-key="battery_min_soc_pct" placeholder="0" style="width:80px;" />
+        </div>
+        <div style="font-size:10px;color:#666;padding:2px 0 0 4px;">SoC targets for runtime estimate. Leave blank to auto-read from entities, or set manually (e.g. 95% max, 10% min).</div>
       </div>
       <div class="section">
         <div class="section-title">Charts</div>
@@ -1864,6 +1889,28 @@ class SigenergySettingsCard extends HTMLElement {
         this._syncBatteryCapacityKwhToDashboard(cfg2.entities.battery_capacity_kwh);
       });
     }
+
+    // Bind manual SoC target inputs
+    const maxSocInput = el.querySelector('input[data-key="battery_max_soc_pct"]');
+    if (maxSocInput) {
+      maxSocInput.addEventListener('change', () => {
+        const cfg2 = this._storeGet();
+        const val = parseInt(maxSocInput.value);
+        cfg2.entities.battery_max_soc_pct = (val >= 50 && val <= 100) ? val.toString() : '';
+        this._storeSave(cfg2);
+        this._syncSocTargetsToDashboard(cfg2);
+      });
+    }
+    const minSocInput = el.querySelector('input[data-key="battery_min_soc_pct"]');
+    if (minSocInput) {
+      minSocInput.addEventListener('change', () => {
+        const cfg2 = this._storeGet();
+        const val = parseInt(minSocInput.value);
+        cfg2.entities.battery_min_soc_pct = (val >= 0 && val <= 50) ? val.toString() : '';
+        this._storeSave(cfg2);
+        this._syncSocTargetsToDashboard(cfg2);
+      });
+    }
   }
 
   async _syncBatteryCapacityKwhToDashboard(value) {
@@ -1887,6 +1934,33 @@ class SigenergySettingsCard extends HTMLElement {
         await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
       }
     } catch (e) { console.error('Sync battery_capacity_kwh to dashboard failed:', e); }
+  }
+
+  async _syncSocTargetsToDashboard(cfg) {
+    if (!this._hass) return;
+    try {
+      const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+      const maxPct = cfg.entities?.battery_max_soc_pct ? parseInt(cfg.entities.battery_max_soc_pct) : undefined;
+      const minPct = cfg.entities?.battery_min_soc_pct ? parseInt(cfg.entities.battery_min_soc_pct) : undefined;
+      const patchHouse = (obj) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (obj.type === 'custom:sigenergy-house-card') {
+          if (maxPct >= 50 && maxPct <= 100) obj.battery_max_soc_pct = maxPct;
+          else delete obj.battery_max_soc_pct;
+          if (minPct >= 0 && minPct <= 50) obj.battery_min_soc_pct = minPct;
+          else delete obj.battery_min_soc_pct;
+          return true;
+        }
+        for (const v of Object.values(obj)) {
+          if (Array.isArray(v)) { for (const item of v) { if (patchHouse(item)) return true; } }
+          else if (typeof v === 'object' && v !== null) { if (patchHouse(v)) return true; }
+        }
+        return false;
+      };
+      if (patchHouse(config)) {
+        await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+      }
+    } catch (e) { console.error('Sync SoC targets to dashboard failed:', e); }
   }
 
   _renderPricing(el, cfg) {
@@ -2452,6 +2526,9 @@ return forecast.map(function(d) {
       };
       // Sync manual battery capacity override if set
       if (e.battery_capacity_kwh) houseCardOrig.battery_capacity_kwh = parseFloat(e.battery_capacity_kwh) || 0;
+      // Sync manual SoC target overrides if set
+      if (e.battery_max_soc_pct != null && e.battery_max_soc_pct !== '') houseCardOrig.battery_max_soc_pct = parseInt(e.battery_max_soc_pct);
+      if (e.battery_min_soc_pct != null && e.battery_min_soc_pct !== '') houseCardOrig.battery_min_soc_pct = parseInt(e.battery_min_soc_pct);
       // Sync ALL features from config store to house card
       if (!houseCardOrig.features) houseCardOrig.features = {};
       // Remove stale image_path from old configs — house card auto-detects the correct path
