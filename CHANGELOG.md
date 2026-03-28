@@ -2,6 +2,23 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.7.0] - 2025-07-25
+
+### Fixed
+- **Sankey: Grid source not connecting to destinations** — Grid import energy was only linked to Home/Load as a child, missing Battery (charge). This caused Grid source to appear disconnected in the Sankey chart when grid energy primarily charged the battery. Added `battery_charge_today` to `gridImportChildren`.
+- **Sankey: HP/EV percentage not showing** — When Heat Pump or EV was enabled in the Sankey graph, the percentage labels showed nothing (var undefined). Root cause: the Jinja `:host {}` CSS variable block (which calculates `--pct-dst-hp` and `--pct-dst-ev`) was never regenerated when HP/EV toggles changed — only the CSS rules referencing these variables were added. Fixed by rebuilding the entire Jinja `:host {}` block on every dashboard build, dynamically including `--pct-dst-hp`/`--pct-dst-ev` when those features are enabled. The destination sum now correctly includes HP/EV energy for percentage calculations.
+
+### Improved
+- **Theme compatibility** — Replaced hardcoded dark-theme colors with HA CSS variable fallbacks across all cards:
+  - Stat cards / status cards: `background` → `var(--ha-card-background, ...)`, `border` → `var(--divider-color, ...)`
+  - Apex chart: Removed hardcoded white legend labels and grid border colors (let HA theme handle them)
+  - Sankey chart: `ha-card` background uses `var(--ha-card-background, #1a1f2e)` instead of hardcoded `#1a1f2e`
+  - Sankey title: Uses `var(--primary-text-color, #fff)` instead of hardcoded `white`
+  - Device card / battery card: Background, text, and pill colors use CSS variables
+  - House card container: Uses `var(--ha-card-background, #1a1f2e)` 
+  - Settings: PV strings select dropdown, prereq banner, dismiss button all use CSS variables
+  - This allows the dashboard to adapt to both light and dark HA themes
+
 ## [2.6.4] - 2025-07-25
 
 ### Fixed

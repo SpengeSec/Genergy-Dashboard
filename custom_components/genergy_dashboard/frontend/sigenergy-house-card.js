@@ -1038,8 +1038,7 @@ class SigenergyHouseCard extends LitElement {
         position: relative;
         width: 100%;
         overflow: hidden;
-        background: #1a1f2e;
-        border-radius: 12px;
+        background: var(--ha-card-background, #1a1f2e);        border-radius: 12px;
       }
 
       .loading {

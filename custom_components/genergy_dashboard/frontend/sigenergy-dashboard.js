@@ -1120,7 +1120,7 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Rated Power', 'rated_power', e)}
         <div style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;">
           <span style="font-size:12px;font-weight:600;color:#c8b84a;">☀️ PV Strings</span>
-          <select class="pv-strings-select" data-key="pv_strings" style="background:#1a1f2e;color:#e0e6f0;border:1px solid #2d3451;border-radius:6px;padding:3px 8px;font-size:11px;">
+          <select class="pv-strings-select" data-key="pv_strings" style="background:var(--card-background-color,#1a1f2e);color:var(--primary-text-color,#e0e6f0);border:1px solid var(--divider-color,#2d3451);border-radius:6px;padding:3px 8px;font-size:11px;">
             ${[1,2,3,4,5,6].map(n => `<option value="${n}" ${(cfg.features?.pv_strings || 2) == n ? 'selected' : ''}>${n} string${n > 1 ? 's' : ''}</option>`).join('')}
           </select>
         </div>
@@ -2141,11 +2141,10 @@ class SigenergySettingsCard extends HTMLElement {
           tooltip: { x: { format: 'HH:mm' }, shared: true, intersect: false },
           legend: {
             show: true, position: 'top', horizontalAlign: 'center',
-            fontSize: '10px', itemMargin: { horizontal: 4, vertical: 1 },
-            labels: { colors: 'rgba(255,255,255,0.7)' }
+            fontSize: '10px', itemMargin: { horizontal: 4, vertical: 1 }
           },
           stroke: { curve: 'smooth' },
-          grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
+          grid: { strokeDashArray: 3 },
           annotations: hasForecasts ? { yaxis: [{ y: 0, yAxisIndex: 0, borderColor: 'rgba(255,255,255,0.35)', strokeDashArray: 0 }] } : undefined
         },
         now: hasForecasts ? { show: true, label: 'Now' } : undefined,
@@ -2167,7 +2166,7 @@ class SigenergySettingsCard extends HTMLElement {
           icon: "{% if states('" + e.emhass_mode + "') == 'CHARGE' %}mdi:battery-charging{% elif states('" + e.emhass_mode + "') == 'DISCHARGE' %}mdi:battery-arrow-down{% else %}mdi:battery-clock{% endif %}",
           icon_color: "{% if states('" + e.emhass_mode + "') == 'CHARGE' %}green{% elif states('" + e.emhass_mode + "') == 'DISCHARGE' %}orange{% else %}grey{% endif %}",
           fill_container: true, multiline_secondary: true,
-          card_mod: { style: 'ha-card { background: linear-gradient(135deg, rgba(0,180,120,0.15), rgba(0,120,80,0.08)) !important; border: 1px solid rgba(0,180,120,0.25) !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 15px; --card-secondary-font-size: 11px; overflow: visible !important; white-space: normal !important; }' }
+          card_mod: { style: 'ha-card { background: linear-gradient(135deg, rgba(0,180,120,0.15), rgba(0,120,80,0.08)) !important; border: 1px solid rgba(0,180,120,0.25) !important; border-radius: 12px !important; color: var(--primary-text-color, #fff); } mushroom-state-info { --card-primary-font-size: 15px; --card-secondary-font-size: 11px; overflow: visible !important; white-space: normal !important; }' }
         }
       } : null;
 
@@ -2179,34 +2178,36 @@ class SigenergySettingsCard extends HTMLElement {
                "{% if u == 'kW' %}{{ v | round(2) }} kW{% else %}{{ v | round(0) }} W{% endif %}";
       };
 
+      // Theme-aware card style — uses HA CSS variables with dark-theme fallbacks
+      const _cardStyle = 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }';
       const statusCards = [
         {
           type: 'custom:mushroom-template-card',
           entity: e.solar_power || 'sensor.solar_production',
           primary: 'Solar', icon: 'mdi:solar-power', icon_color: 'orange',
           secondary: _powerTpl(e.solar_power || 'sensor.solar_production'),
-          card_mod: { style: 'ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }' }
+          card_mod: { style: _cardStyle }
         },
         {
           type: 'custom:mushroom-template-card',
           entity: e.load_power || 'sensor.home_consumption',
           primary: 'Home', icon: 'mdi:home-lightning-bolt', icon_color: 'deep-purple',
           secondary: _powerTpl(e.load_power || 'sensor.home_consumption'),
-          card_mod: { style: 'ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }' }
+          card_mod: { style: _cardStyle }
         },
         {
           type: 'custom:mushroom-template-card',
           entity: e.battery_soc || 'sensor.battery_soc',
           primary: 'Battery', icon: 'mdi:battery', icon_color: 'green',
           secondary: "{{ states('" + (e.battery_soc || 'sensor.battery_soc') + "') | round(0) }}%",
-          card_mod: { style: 'ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }' }
+          card_mod: { style: _cardStyle }
         },
         {
           type: 'custom:mushroom-template-card',
           entity: e.grid_active_power || e.grid_power || 'sensor.net_grid_power',
           primary: 'Grid', icon: 'mdi:transmission-tower', icon_color: 'red',
           secondary: _powerTpl(e.grid_active_power || e.grid_power || 'sensor.net_grid_power'),
-          card_mod: { style: 'ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }' }
+          card_mod: { style: _cardStyle }
         }
       ];
 
@@ -2219,7 +2220,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: entity,
           primary: name, icon: icon, icon_color: color,
           secondary: "{{ states('" + entity + "') | round(1) }} kWh",
-          card_mod: { style: 'ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }' }
+          card_mod: { style: _cardStyle }
         });
       };
       addStat(e.solar_energy_today, 'Solar', 'mdi:solar-power', 'orange');
@@ -2236,7 +2237,7 @@ class SigenergySettingsCard extends HTMLElement {
         primary: 'Self-Sufficiency',
         secondary: "{% set solar = states('" + e.solar_energy_today + "') | float(0) %}{% set load = states('" + e.load_energy_today + "') | float(1) %}{{ ((solar / load) * 100) | round(1) if load > 0 else 0 }}%",
         icon: 'mdi:check-decagram', icon_color: 'green',
-        card_mod: { style: 'ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; }' }
+        card_mod: { style: 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; }' }
       } : null;
 
       // Build Solcast forecast card (conditional)
@@ -2311,7 +2312,7 @@ class SigenergySettingsCard extends HTMLElement {
       const sankeyTitle = mainLayout.cards[1]?.cards?.[0] || {
         type: 'custom:mushroom-template-card',
         primary: 'Energy Flow Today', icon: 'mdi:chart-sankey-variant', icon_color: 'teal',
-        card_mod: { style: { 'ha-tile-info$': '.primary { font-size: 20px !important; font-weight: bold !important; color: white !important; letter-spacing: 0.5px; }', '.': 'ha-card { background-color: transparent !important; border: none !important; }' } }
+        card_mod: { style: { 'ha-tile-info$': '.primary { font-size: 20px !important; font-weight: bold !important; color: var(--primary-text-color, #fff) !important; letter-spacing: 0.5px; }', '.': 'ha-card { background-color: transparent !important; border: none !important; }' } }
       };
       const sankeyOld = mainLayout.cards[1]?.cards?.[1] || {};
       // Resolve EV/HP entity IDs — use utility meter if cumulative, otherwise direct entity
@@ -2329,7 +2330,7 @@ class SigenergySettingsCard extends HTMLElement {
       // Build source children arrays — sources can flow to all destinations
       const battDischargeChildren = [e.grid_export_today, e.load_energy_today].filter(Boolean);
       const solarChildren = [e.battery_charge_today, e.grid_export_today, e.load_energy_today].filter(Boolean);
-      const gridImportChildren = [e.load_energy_today].filter(Boolean);
+      const gridImportChildren = [e.battery_charge_today, e.load_energy_today].filter(Boolean);
 
       // Add EV/HP as potential children of all sources (energy can flow from any source)
       if (f.show_ev_in_sankey && evSankeyEntity) {
@@ -2365,9 +2366,45 @@ class SigenergySettingsCard extends HTMLElement {
         ],
         card_mod: sankeyOld.card_mod || {}
       };
-      // Fix sankey CSS: narrower solid boxes, remove section width constraint
+      // Rebuild the Jinja :host{} block fresh — includes EV/HP CSS variables when enabled
+      const _j = (eid) => "states('" + eid + "') | float(0)";
+      let jinjaHost = "{% set pv = " + _j(e.solar_energy_today || '') + " %}\n";
+      jinjaHost += "{% set bat_d = " + _j(e.battery_discharge_today || '') + " %}\n";
+      jinjaHost += "{% set grid_i = " + _j(e.grid_import_today || '') + " %}\n";
+      jinjaHost += "{% set bat_c = " + _j(e.battery_charge_today || '') + " %}\n";
+      jinjaHost += "{% set load = " + _j(e.load_energy_today || '') + " %}\n";
+      jinjaHost += "{% set grid_e = " + _j(e.grid_export_today || '') + " %}\n";
+      let dstSum = 'bat_c + load + grid_e';
+      if (f.show_ev_in_sankey && evSankeyEntity) {
+        jinjaHost += "{% set ev = " + _j(evSankeyEntity) + " %}\n";
+        dstSum += ' + ev';
+      }
+      if (f.show_hp_in_sankey && hpSankeyEntity) {
+        jinjaHost += "{% set hp = " + _j(hpSankeyEntity) + " %}\n";
+        dstSum += ' + hp';
+      }
+      jinjaHost += "{% set src = pv + bat_d + grid_i %}\n";
+      jinjaHost += "{% set dst = " + dstSum + " %}\n";
+      jinjaHost += ":host {\n";
+      jinjaHost += "  --pct-src-solar: \"{{ '%0.2f' | format((pv/src*100) if src > 0 else 0) }}%\";\n";
+      jinjaHost += "  --pct-src-bat: \"{{ '%0.2f' | format((bat_d/src*100) if src > 0 else 0) }}%\";\n";
+      jinjaHost += "  --pct-src-grid: \"{{ '%0.2f' | format((grid_i/src*100) if src > 0 else 0) }}%\";\n";
+      jinjaHost += "  --pct-dst-bat: \"{{ '%0.2f' | format((bat_c/dst*100) if dst > 0 else 0) }}%\";\n";
+      jinjaHost += "  --pct-dst-load: \"{{ '%0.2f' | format((load/dst*100) if dst > 0 else 0) }}%\";\n";
+      jinjaHost += "  --pct-dst-grid: \"{{ '%0.2f' | format((grid_e/dst*100) if dst > 0 else 0) }}%\";\n";
+      if (f.show_ev_in_sankey && evSankeyEntity) {
+        jinjaHost += "  --pct-dst-ev: \"{{ '%0.2f' | format((ev/dst*100) if dst > 0 else 0) }}%\";\n";
+      }
+      if (f.show_hp_in_sankey && hpSankeyEntity) {
+        jinjaHost += "  --pct-dst-hp: \"{{ '%0.2f' | format((hp/dst*100) if dst > 0 else 0) }}%\";\n";
+      }
+      jinjaHost += "}\n";
+
+      // Fix sankey CSS: strip old :host block + accumulated layout rules, then prepend fresh Jinja
       if (sankeyChart.card_mod?.style?.['sankey-chart-base$']) {
         let css = sankeyChart.card_mod.style['sankey-chart-base$'];
+        // Remove old Jinja :host block (starts with {% set and ends with closing })
+        css = css.replace(/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/m, '');
         css = css.replace(/min-width:\s*140px\s*!important/g, 'min-width: 90px !important');
         css = css.replace(/min-width:\s*70px\s*!important/g, 'min-width: 90px !important');
         // Remove the entire .section:first-of-type block (may contain broken CSS or max-width:75%)
@@ -2406,8 +2443,12 @@ class SigenergySettingsCard extends HTMLElement {
         css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="HP"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Heat"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
+        // Replace hardcoded dark-theme Sankey background with theme-aware variable
+        css = css.replace(/ha-card\s*\{\s*background:\s*#1a1f2e\s*!important/g, 'ha-card { background: var(--ha-card-background, #1a1f2e) !important');
         // Collapse multiple blank lines
         css = css.replace(/\n{3,}/g, '\n\n');
+        // Prepend fresh Jinja :host block
+        css = jinjaHost + css;
         // Always rebuild the layout/connector/EV/HP rules fresh from scratch
         css += '\n/* Sankey layout fix */\n';
         css += '.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n';
@@ -2735,9 +2776,9 @@ class SigenergyDeviceCard extends HTMLElement {
     const prereqDismissed = localStorage.getItem('genergy_prereq_dismissed_overview') === 'true';
     var prereqBanner = '';
     if (missingCards.length > 0 && !prereqDismissed) {
-      prereqBanner = '<div style="background:linear-gradient(135deg,#1a2332,#1e2a3a);border:1px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:12px;font-family:var(--ha-card-header-font-family,inherit)">' +
+      prereqBanner = '<div style="background:var(--ha-card-background,linear-gradient(135deg,#1a2332,#1e2a3a));border:1px solid #f59e0b;border-radius:12px;padding:12px 16px;margin-bottom:12px;font-family:var(--ha-card-header-font-family,inherit)">' +
         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:18px">⚠️</span><span style="font-size:14px;font-weight:600;color:#f59e0b">Missing Required Cards</span></div>' +
-        '<p style="font-size:12px;color:#8892a4;margin:0 0 8px;line-height:1.4">Install these HACS plugins for the dashboard to work properly, then hard-refresh (Ctrl+Shift+R).</p>' +
+        '<p style="font-size:12px;color:var(--secondary-text-color,#8892a4);margin:0 0 8px;line-height:1.4">Install these HACS plugins for the dashboard to work properly, then hard-refresh (Ctrl+Shift+R).</p>' +
         '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">' +
         missingCards.map(function(c) {
           return '<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=' + c.owner + '&repository=' + c.repository + '&category=plugin" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:4px 10px;text-decoration:none;font-size:11px;color:#f59e0b;white-space:nowrap">' +
@@ -2745,7 +2786,7 @@ class SigenergyDeviceCard extends HTMLElement {
         }).join('') +
         '</div>' +
         '<div style="display:flex;gap:8px">' +
-        '<button class="prereq-dismiss-overview" style="background:none;border:1px solid #4a4e5866;border-radius:8px;padding:4px 12px;font-size:11px;color:#8892a4;cursor:pointer">Dismiss</button>' +
+        '<button class="prereq-dismiss-overview" style="background:none;border:1px solid var(--divider-color,#4a4e5866);border-radius:8px;padding:4px 12px;font-size:11px;color:var(--secondary-text-color,#8892a4);cursor:pointer">Dismiss</button>' +
         '<a href="/dashboard-sigenergy/settings" style="display:inline-flex;align-items:center;gap:4px;background:rgba(0,212,184,0.1);border:1px solid rgba(0,212,184,0.3);border-radius:8px;padding:4px 12px;text-decoration:none;font-size:11px;color:#00d4b8">Open Settings ↗</a>' +
         '</div></div>';
     }
@@ -2754,7 +2795,7 @@ class SigenergyDeviceCard extends HTMLElement {
     if (this._cardWidth < 380) {
       var np = Math.max(1, Math.min(packs, 8));
       var imgSrc = _SIGENERGY_SCRIPT_DIR + 'images/1inverter' + np + 'battery.png';
-      var html = '<style>:host{display:block}.card{background:#1a1f2e;border-radius:16px;padding:12px;overflow:hidden;text-align:center}.img{max-width:100%;height:auto;margin:0 auto 12px;display:block}.labels{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}.pill{background:rgba(30,35,54,0.94);border:1px solid;border-radius:14px;padding:8px 14px;display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}.pill-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.pill-name{font-size:15px;font-weight:600;color:#e0e4ec;white-space:nowrap}.pill-val{font-size:16px;font-weight:700;color:#fff;white-space:nowrap}</style>';
+      var html = '<style>:host{display:block}.card{background:var(--ha-card-background,#1a1f2e);border-radius:16px;padding:12px;overflow:hidden;text-align:center;color:var(--primary-text-color,#fff)}.img{max-width:100%;height:auto;margin:0 auto 12px;display:block}.labels{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}.pill{background:var(--card-background-color,rgba(30,35,54,0.94));border:1px solid var(--divider-color,#2d3451);border-radius:14px;padding:8px 14px;display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}.pill-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.pill-name{font-size:15px;font-weight:600;color:var(--primary-text-color,#e0e4ec);white-space:nowrap}.pill-val{font-size:16px;font-weight:700;color:var(--primary-text-color,#fff);white-space:nowrap}</style>';
       html += '<div class="card">';
       html += prereqBanner;
       html += '<img class="img" src="' + imgSrc + '" alt="Battery System"/>';
@@ -2956,7 +2997,7 @@ class SigenergyDeviceCard extends HTMLElement {
     }
 
     this.shadowRoot.innerHTML =
-      '<style>:host{display:block}.card{background:#1a1f2e;border-radius:16px;padding:12px 4px;overflow:hidden} .chevron{cursor:pointer;pointer-events:all;-webkit-tap-highlight-color:transparent;touch-action:manipulation} .chevron *{pointer-events:all} .chevron:hover circle,.chevron:active circle{fill:#3a3e48}</style>' +
+      '<style>:host{display:block}.card{background:var(--ha-card-background,#1a1f2e);border-radius:16px;padding:12px 4px;overflow:hidden;color:var(--primary-text-color,#fff)} .chevron{cursor:pointer;pointer-events:all;-webkit-tap-highlight-color:transparent;touch-action:manipulation} .chevron *{pointer-events:all} .chevron:hover circle,.chevron:active circle{fill:#3a3e48}</style>' +
       '<div class="card">' + prereqBanner +
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + TW + ' ' + TH + '" width="100%" style="display:block">' +
       b + '</svg>' + panels + '</div>';
