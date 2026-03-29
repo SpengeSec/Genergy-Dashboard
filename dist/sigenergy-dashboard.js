@@ -3191,15 +3191,17 @@ return [];`;
           data_generator: buyDG,
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
         });
-        // Also add as state-tracked line (actual price history)
-        series.push({
-          entity: e.buy_price, name: 'Import Price', color: '#EF5350',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
-          group_by: { func: 'avg', duration: '30min' },
-          show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
-        });
+        // State-tracked line (actual price history) — only if no separate current_import_price
+        if (!e.current_import_price || e.current_import_price === e.buy_price) {
+          series.push({
+            entity: e.buy_price, name: 'Import Price', color: '#EF5350',
+            type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+            unit: priceUnit, float_precision: 4,
+            group_by: { func: 'avg', duration: '30min' },
+            show: { in_header: false, legend_value: true },
+            yaxis_id: 'price', curve: 'stepline'
+          });
+        }
       }
       if (e.sell_price) {
         const sellDG = `var d = entity.attributes.unit_prod_price_forecasts;
@@ -3215,14 +3217,17 @@ return [];`;
           data_generator: sellDG,
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
         });
-        series.push({
-          entity: e.sell_price, name: 'Export Price', color: '#42A5F5',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
-          group_by: { func: 'avg', duration: '30min' },
-          show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
-        });
+        // State-tracked line — only if no separate current_export_price
+        if (!e.current_export_price || e.current_export_price === e.sell_price) {
+          series.push({
+            entity: e.sell_price, name: 'Export Price', color: '#42A5F5',
+            type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+            unit: priceUnit, float_precision: 4,
+            group_by: { func: 'avg', duration: '30min' },
+            show: { in_header: false, legend_value: true },
+            yaxis_id: 'price', curve: 'stepline'
+          });
+        }
       }
       // Actual prices (separate entities — used when buy/sell are EMHASS-specific and these are the actual Amber/Nordpool sensors)
       if (e.current_import_price && e.current_import_price !== e.buy_price) {

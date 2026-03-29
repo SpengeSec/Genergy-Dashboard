@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.4] - 2026-03-29
+
+### Fixed
+- **Duplicate Price Lines in Legend** — When both `buy_price` (EMHASS entity) and `current_import_price` (actual price sensor) are configured, only one "Import Price" state-tracked line now appears. The `buy_price` state-tracked line is suppressed when a separate `current_import_price` exists, preventing two near-identical values in the chart legend. Same logic applied for export prices.
+
 ## [2.12.3] - 2026-03-29
 
 ### Fixed
