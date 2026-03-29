@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.8.4] - 2026-03-29
+
+### Fixed
+- **Mushroom Chips W/kW Display** — Fixed Jinja template in overview status chips (Solar, Home, Grid) that always showed watts regardless of sensor unit. The old template used `| default('W')` which doesn't replace `None` in all HA Jinja environments. New template normalizes to watts via `(state_attr(...) or 'W')`, then auto-scales by magnitude (≥1000 W → kW), matching the house card behavior. Sigenergy users (sensors in kW) now see correct "9.81 kW" instead of "10 W".
+
 ## [2.8.3] - 2026-03-29
 
 ### Fixed

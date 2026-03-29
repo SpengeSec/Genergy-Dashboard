@@ -2532,9 +2532,12 @@ return forecast.map(function(d) {
       // Build status mushroom cards
       // Helper: build Jinja template that shows value + unit from the sensor itself
       const _powerTpl = (eid) => {
-        return "{% set u = state_attr('" + eid + "', 'unit_of_measurement') | default('W') %}" +
-               "{% set v = states('" + eid + "') | float(0) %}" +
-               "{% if u == 'kW' %}{{ v | round(2) }} kW{% else %}{{ v | round(0) }} W{% endif %}";
+        // Normalise to watts then auto-scale so the chip always shows a sensible value.
+        // state_attr might return None (HA bug / entity loading), so coerce via default(…, true).
+        return "{% set u = (state_attr('" + eid + "', 'unit_of_measurement') or 'W') | string %}" +
+               "{% set raw = states('" + eid + "') | float(0) %}" +
+               "{% set w = raw * 1000 if u == 'kW' else raw %}" +
+               "{% if w >= 1000 %}{{ (w / 1000) | round(2) }} kW{% else %}{{ w | round(0) }} W{% endif %}";
       };
 
       // Theme-aware card style — uses HA CSS variables with dark-theme fallbacks
