@@ -3,9 +3,9 @@
     "step": {
       "user": {
         "title": "Genergy Dashboard Setup",
-        "description": "Set up your solar dashboard. Enable defaults for quick setup.",
+        "description": "Welcome! If you have a **Sigenergy** inverter, enable the toggle below to skip setup — all standard Sigenergy entity names will be pre-filled automatically.\n\nFor **any other inverter brand** (Huawei, Deye, Goodwe, SolarEdge, etc.), leave it off and select your entities manually on the next screens.",
         "data": {
-          "use_sigenergy_defaults": "Use Sigenergy defaults"
+          "use_sigenergy_defaults": "I have a Sigenergy inverter — use pre-filled defaults"
         }
       },
       "core": {

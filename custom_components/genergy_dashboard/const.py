@@ -3,7 +3,7 @@
 DOMAIN = "genergy_dashboard"
 VERSION = "1.0.0"
 DASHBOARD_URL_PATH = "dashboard-sigenergy"
-DASHBOARD_TITLE = "Sigenergy"
+DASHBOARD_TITLE = "Genergy"
 
 # ---------------------------------------------------------------------------
 # Entity configuration keys — maps to dashboard template placeholders

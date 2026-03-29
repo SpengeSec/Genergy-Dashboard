@@ -131,7 +131,7 @@ const PATHS = {
 const LABELS = {
   solar:   { top: "2%",  left: "36%",  entity: "solar_power",      label: "SOLAR",     color: "solar" },
   home:    { top: "2%",  left: "55%",  entity: "load_power",       label: "HOME",      color: "home" },
-  battery: { top: "72%", left: "28%",  entity: "battery_soc",      label: "SigenStor", color: "battery_discharge" },
+  battery: { top: "72%", left: "28%",  entity: "battery_soc",      label: "BATTERY", color: "battery_discharge" },
   grid:    { top: "65%", left: "72%",  entity: "grid_import",      label: "GRID",      color: "grid_import" },
   ev:      { top: "54%", left: "1%",   entity: "ev_charger_power",   label: "EV",          color: "ev" },
   ac:      { top: "33%", left: "1%",   entity: "ev_charger_power",   label: "AC CHARGER",   color: "ev" },
@@ -946,7 +946,9 @@ class SigenergyHouseCard extends LitElement {
     if (key === "heatpump" && !this._config.features.heat_pump) return "";
 
     let primary = "";
-    let secondary = def.label;
+    let secondary = key === "battery" && this._config.battery_label
+      ? this._config.battery_label
+      : def.label;
     let statusLine = "";
     let runtimeLine = "";
     let color = this._config.colors[def.color] || "#fff";

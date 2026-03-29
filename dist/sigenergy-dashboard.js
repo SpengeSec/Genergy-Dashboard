@@ -1687,6 +1687,10 @@ class SigenergySettingsCard extends HTMLElement {
                 // Sigenergy uses positive = charging convention
                 cfg2.features.battery_positive_charging = true;
                 found.push('✓ Battery sign convention set to Sigenergy (positive = charging)');
+                // Set battery label to SigenStor for Sigenergy users
+                if (!cfg2.display) cfg2.display = {};
+                cfg2.display.battery_label = 'SigenStor';
+                found.push('✓ Battery label set to SigenStor');
 
                 // Hint about commonly disabled entities
                 const tips = [];
@@ -2027,6 +2031,29 @@ class SigenergySettingsCard extends HTMLElement {
         await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
       }
     } catch (e) { console.error('Sync battery_capacity_kwh to dashboard failed:', e); }
+  }
+
+  async _syncBatteryLabelToDashboard(value) {
+    if (!this._hass) return;
+    try {
+      const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+      const patchHouse = (obj) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (obj.type === 'custom:sigenergy-house-card') {
+          if (value) obj.battery_label = value;
+          else delete obj.battery_label;
+          return true;
+        }
+        for (const v of Object.values(obj)) {
+          if (Array.isArray(v)) { for (const item of v) { if (patchHouse(item)) return true; } }
+          else if (typeof v === 'object' && v !== null) { if (patchHouse(v)) return true; }
+        }
+        return false;
+      };
+      if (patchHouse(config)) {
+        await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+      }
+    } catch (e) { console.error('Sync battery_label to dashboard failed:', e); }
   }
 
   async _syncSocTargetsToDashboard(cfg) {
@@ -2670,6 +2697,13 @@ return forecast.map(function(d) {
       houseCardOrig.features.battery_runtime = f.battery_runtime !== false;
       // Sigenergy convention: positive battery_power = charging
       houseCardOrig.battery_positive_charging = (f.battery_positive_charging !== false);
+      // Battery label override (e.g. "SigenStor", "Huawei LUNA", "PowerWall")
+      const battLabel = cfg.display?.battery_label;
+      if (battLabel) {
+        houseCardOrig.battery_label = battLabel;
+      } else {
+        delete houseCardOrig.battery_label;
+      }
       if (!houseCardOrig.card_mod) houseCardOrig.card_mod = {};
       houseCardOrig.card_mod.style = 'ha-card { overflow: hidden !important; }\n.house-container { width: 100% !important; overflow: hidden !important; }\n.house-container img { width: 100% !important; height: auto !important; }\n.house-container svg { width: 100% !important; height: auto !important; }';
       const houseStack = [houseCardOrig];
@@ -2918,6 +2952,11 @@ return forecast.map(function(d) {
           <input class="row-input" type="number" step="100" value="${d.power_threshold||1000}" data-key="power_threshold" />
           <span class="row-state">Below: W · Above: kW</span>
         </div>
+        <div class="row">
+          <span class="row-label">Battery Label</span>
+          <input class="row-input" type="text" value="${d.battery_label||''}" data-key="battery_label" placeholder="BATTERY" />
+          <span class="row-state">Name shown on house card</span>
+        </div>
       </div>
       <div class="section">
         <div class="section-title">Charts</div>
@@ -2966,6 +3005,10 @@ return forecast.map(function(d) {
           ? parseInt(input.value) : input.value;
         cfg2.display[key] = val;
         this._storeSave(cfg2);
+        // Sync battery_label directly to house card when changed
+        if (key === 'battery_label') {
+          this._syncBatteryLabelToDashboard(val);
+        }
       });
     });
 

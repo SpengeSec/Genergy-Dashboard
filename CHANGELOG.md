@@ -2,6 +2,18 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.8.3] - 2026-03-29
+
+### Fixed
+- **Dashboard Name** — Dashboard sidebar title changed from "Sigenergy" to "Genergy" so non-Sigenergy users don't see a brand-specific name.
+- **Config Entry Title** — Config flow entries now display as "Genergy Dashboard" instead of "Sigenergy Dashboard".
+
+### Improved
+- **Config Flow UX** — Rewrote the initial setup step description to clearly explain: if you have a Sigenergy inverter, enable the toggle for pre-filled defaults; otherwise leave it off and select your entities manually. Toggle renamed from "Use Sigenergy defaults" to "I have a Sigenergy inverter — use pre-filled defaults".
+
+### Added
+- **Configurable Battery Label** — The house card battery label (previously hardcoded as "SigenStor") now defaults to "BATTERY" and can be customized via Settings → Display → Battery Label. Sigenergy auto-detect sets it to "SigenStor" automatically.
+
 ## [2.8.2] - 2026-03-29
 
 ### Fixed
