@@ -2,6 +2,15 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.3] - 2026-03-29
+
+### Fixed
+- **Price Chart Works With Any EMS Provider** — Moved price series (buy_price, sell_price, current_import_price, current_export_price) out of the EMHASS-only code block. Price overlays now render for HAEO, standalone, and any EMS provider — not just EMHASS.
+- **Price Y-Axis Always Created** — The `price` Y-axis is now added whenever price entities are configured, even without EMHASS or HAEO forecasts enabled. Previously, apexcharts silently dropped price series because no matching yaxis_id existed.
+- **Dynamic Currency Everywhere** — Fixed hardcoded `€/kWh` in the Price Entities section header; now uses the configured currency symbol. Fixed HAEO optim cost unit from hardcoded `$` to use configured currency.
+- **Currency Change Re-renders UI** — Changing the Currency Symbol input now immediately re-renders the Pricing tab so threshold labels update to the new currency.
+- **Extended Chart for Price Entities** — The chart now uses the 48h extended view when price entities are configured with `show_price_overlay`, so Amber/Nordpool forecast data is visible beyond 24h.
+
 ## [2.12.2] - 2026-03-29
 
 ### Fixed

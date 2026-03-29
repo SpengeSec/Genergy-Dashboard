@@ -1076,7 +1076,7 @@ class SigenergySettingsCard extends HTMLElement {
       </div>
       <div class="section">
         <div class="section-title" style="display:flex;align-items:center;">💰 Price Entities <button class="section-detect-btn" data-section="prices" title="Auto-detect price entities">🔍</button></div>
-        <div style="font-size:10px;color:#666;margin-bottom:6px;">Electricity price sensors in <b>€/kWh</b> (or your local currency). Configure source integration on the Pricing tab.</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Electricity price sensors in <b>${this._esc((cfg.pricing?.currency || '€') + '/kWh')}</b> (or your local currency). Configure source integration on the Pricing tab.</div>
         ${this._entityRow('Buy Price', 'buy_price', e)}
         ${this._entityRow('Sell Price', 'sell_price', e)}
         ${this._entityRow('Nordpool', 'nordpool', e)}
@@ -2949,6 +2949,7 @@ class SigenergySettingsCard extends HTMLElement {
         const val = input.type === 'number' ? parseFloat(input.value) : input.value;
         cfg2.pricing[key] = val;
         this._storeSave(cfg2);
+        if (key === 'currency') this._render();
       });
     });
 
@@ -3080,78 +3081,6 @@ class SigenergySettingsCard extends HTMLElement {
           yaxis_id: 'soc', float_precision: 1
         });
       }
-      // Price forecast overlays
-      const priceUnit = ' ' + (cfg.pricing?.currency || '€') + '/kWh';
-      if (e.buy_price) {
-        // Universal data_generator: tries EMHASS attributes, then Amber forecast, then falls back to history
-        const buyDG = `var d = entity.attributes.unit_load_cost_forecasts;
-if (d && d.length) return d.map(function(p){ return [new Date(p.date).getTime(), parseFloat(p.mpc_general_price || p.price || 0)]; });
-var fc = entity.attributes.forecasts || entity.attributes.forecast;
-if (fc && Array.isArray(fc) && fc.length) return fc.map(function(p){ return [new Date(p.start_time || p.time || p.date).getTime(), parseFloat(p.per_kwh || p.price || p.value || 0)]; });
-return [];`;
-        series.push({
-          entity: e.buy_price, name: 'Import Price (plan)', color: '#EF9A9A',
-          type: 'line', extend_to: false, unit: priceUnit,
-          float_precision: 4, stroke_width: 1, opacity: 0.9,
-          show: { in_header: false, legend_value: false },
-          data_generator: buyDG,
-          yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
-        });
-        // Also add as state-tracked line (actual price, not just forecast)
-        series.push({
-          entity: e.buy_price, name: 'Import Price', color: '#EF5350',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
-          group_by: { func: 'avg', duration: '30min' },
-          show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
-        });
-      }
-      if (e.sell_price) {
-        const sellDG = `var d = entity.attributes.unit_prod_price_forecasts;
-if (d && d.length) return d.map(function(p){ return [new Date(p.date).getTime(), parseFloat(p.mpc_feed_in_price || p.price || 0)]; });
-var fc = entity.attributes.forecasts || entity.attributes.forecast;
-if (fc && Array.isArray(fc) && fc.length) return fc.map(function(p){ return [new Date(p.start_time || p.time || p.date).getTime(), parseFloat(p.per_kwh || p.price || p.value || 0)]; });
-return [];`;
-        series.push({
-          entity: e.sell_price, name: 'Export Price (plan)', color: '#90CAF9',
-          type: 'line', extend_to: false, unit: priceUnit,
-          float_precision: 4, stroke_width: 1, opacity: 0.9,
-          show: { in_header: false, legend_value: false },
-          data_generator: sellDG,
-          yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
-        });
-        // Also add as state-tracked line
-        series.push({
-          entity: e.sell_price, name: 'Export Price', color: '#42A5F5',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
-          group_by: { func: 'avg', duration: '30min' },
-          show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
-        });
-      }
-      // Actual prices (separate entities — used when buy/sell are EMHASS and these are the actual Amber/Nordpool sensors)
-      if (e.current_import_price && e.current_import_price !== e.buy_price) {
-        series.push({
-          entity: e.current_import_price, name: 'Import Price', color: '#EF5350',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
-          group_by: { func: 'avg', duration: '1h' },
-          show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
-        });
-      }
-      if (e.current_export_price && e.current_export_price !== e.sell_price) {
-        series.push({
-          entity: e.current_export_price, name: 'Export Price', color: '#42A5F5',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
-          group_by: { func: 'avg', duration: '1h' },
-          show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
-        });
-      }
     }
 
     // HAEO Forecast overlays (conditional) — reads forecast attribute from HAEO sensors
@@ -3234,34 +3163,86 @@ return [];`;
           yaxis_id: 'soc', float_precision: 1
         });
       }
-      // Actual prices (shared with EMHASS)
-      const emhassPriceUnit = ' ' + (cfg.pricing?.currency || '€') + '/kWh';
-      if (e.current_import_price) {
-        series.push({
-          entity: e.current_import_price, name: 'Import Price', color: '#EF5350',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: emhassPriceUnit, float_precision: 4,
-          group_by: { func: 'avg', duration: '1h' },
-          show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
-        });
-      }
-      if (e.current_export_price) {
-        series.push({
-          entity: e.current_export_price, name: 'Export Price', color: '#42A5F5',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: emhassPriceUnit, float_precision: 4,
-          group_by: { func: 'avg', duration: '1h' },
-          show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
-        });
-      }
       // HAEO optimization cost in header
       if (features.financial_tracking && e.haeo_optim_cost) {
         series.push({
-          entity: e.haeo_optim_cost, name: 'Optim Cost', unit: ' $',
+          entity: e.haeo_optim_cost, name: 'Optim Cost', unit: ' ' + (cfg.pricing?.currency || '$'),
           show: { legend_value: true, in_chart: false, in_header: true },
           float_precision: 2, yaxis_id: 'power'
+        });
+      }
+    }
+
+    // Price overlays — independent of EMS provider (works with EMHASS, HAEO, or standalone)
+    {
+      const priceUnit = ' ' + (cfg.pricing?.currency || '€') + '/kWh';
+      if (e.buy_price) {
+        // Universal data_generator: tries EMHASS attributes, then Amber/generic forecast, then returns empty for state-tracked fallback
+        const buyDG = `var d = entity.attributes.unit_load_cost_forecasts;
+if (d && d.length) return d.map(function(p){ return [new Date(p.date).getTime(), parseFloat(p.mpc_general_price || p.price || 0)]; });
+var fc = entity.attributes.forecasts || entity.attributes.forecast;
+if (fc && Array.isArray(fc) && fc.length) return fc.map(function(p){ return [new Date(p.start_time || p.time || p.date).getTime(), parseFloat(p.per_kwh || p.price || p.value || 0)]; });
+return [];`;
+        series.push({
+          entity: e.buy_price, name: 'Import Price (plan)', color: '#EF9A9A',
+          type: 'line', extend_to: false, unit: priceUnit,
+          float_precision: 4, stroke_width: 1, opacity: 0.9,
+          show: { in_header: false, legend_value: false },
+          data_generator: buyDG,
+          yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
+        });
+        // Also add as state-tracked line (actual price history)
+        series.push({
+          entity: e.buy_price, name: 'Import Price', color: '#EF5350',
+          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          unit: priceUnit, float_precision: 4,
+          group_by: { func: 'avg', duration: '30min' },
+          show: { in_header: false, legend_value: true },
+          yaxis_id: 'price', curve: 'stepline'
+        });
+      }
+      if (e.sell_price) {
+        const sellDG = `var d = entity.attributes.unit_prod_price_forecasts;
+if (d && d.length) return d.map(function(p){ return [new Date(p.date).getTime(), parseFloat(p.mpc_feed_in_price || p.price || 0)]; });
+var fc = entity.attributes.forecasts || entity.attributes.forecast;
+if (fc && Array.isArray(fc) && fc.length) return fc.map(function(p){ return [new Date(p.start_time || p.time || p.date).getTime(), parseFloat(p.per_kwh || p.price || p.value || 0)]; });
+return [];`;
+        series.push({
+          entity: e.sell_price, name: 'Export Price (plan)', color: '#90CAF9',
+          type: 'line', extend_to: false, unit: priceUnit,
+          float_precision: 4, stroke_width: 1, opacity: 0.9,
+          show: { in_header: false, legend_value: false },
+          data_generator: sellDG,
+          yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
+        });
+        series.push({
+          entity: e.sell_price, name: 'Export Price', color: '#42A5F5',
+          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          unit: priceUnit, float_precision: 4,
+          group_by: { func: 'avg', duration: '30min' },
+          show: { in_header: false, legend_value: true },
+          yaxis_id: 'price', curve: 'stepline'
+        });
+      }
+      // Actual prices (separate entities — used when buy/sell are EMHASS-specific and these are the actual Amber/Nordpool sensors)
+      if (e.current_import_price && e.current_import_price !== e.buy_price) {
+        series.push({
+          entity: e.current_import_price, name: 'Import Price', color: '#EF5350',
+          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          unit: priceUnit, float_precision: 4,
+          group_by: { func: 'avg', duration: '1h' },
+          show: { in_header: false, legend_value: true },
+          yaxis_id: 'price', curve: 'stepline'
+        });
+      }
+      if (e.current_export_price && e.current_export_price !== e.sell_price) {
+        series.push({
+          entity: e.current_export_price, name: 'Export Price', color: '#42A5F5',
+          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          unit: priceUnit, float_precision: 4,
+          group_by: { func: 'avg', duration: '1h' },
+          show: { in_header: false, legend_value: true },
+          yaxis_id: 'price', curve: 'stepline'
         });
       }
     }
@@ -3417,6 +3398,18 @@ return forecast.map(function(d) {
         });
       }
     }
+    // Always add price axis if price entities are configured (standalone price without forecasts)
+    const ent = cfg?.entities || {};
+    if (!yaxis.find(y => y.id === 'price') && (ent.buy_price || ent.sell_price || ent.current_import_price || ent.current_export_price)) {
+      yaxis.push({
+        id: 'price', min: 'auto', max: 'auto', decimals: 2, show: false,
+        opposite: true,
+        apex_config: {
+          title: { text: 'Price (' + currency + '/kWh)', style: { fontSize: '12px' } },
+          forceNiceScale: true, tickAmount: 4
+        }
+      });
+    }
     return yaxis;
   }
 
@@ -3443,7 +3436,8 @@ return forecast.map(function(d) {
       const hasHaeoForecasts = emsP === 'haeo' && f.haeo_forecasts;
       const hasForecasts = hasEmhassForecasts || hasHaeoForecasts;
       const hasSolarForecast = f.solar_forecast && (e.solcast_today || e.solcast_remaining || e.forecast_solar_today);
-      const showExtendedChart = hasForecasts || hasSolarForecast;
+      const hasPriceOverlay = (e.buy_price || e.sell_price) && cfg.pricing?.show_price_overlay;
+      const showExtendedChart = hasForecasts || hasSolarForecast || hasPriceOverlay;
 
       const apexChart = {
         type: 'custom:apexcharts-card',
