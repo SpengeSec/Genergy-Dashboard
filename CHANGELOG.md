@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.6] - 2026-03-29
+
+### Changed
+- **Rebrand Bootstrap YAML** — Renamed `dashboards/sigenergy.yaml` to `dashboards/genergy.yaml`. Updated all user-visible text (title, comments) from "Sigenergy" to "Genergy". The `dashboard-sigenergy` URL path and `custom:sigenergy-settings-card` element name are kept unchanged for backward compatibility.
+
 ## [2.12.5] - 2026-03-29
 
 ### Fixed
