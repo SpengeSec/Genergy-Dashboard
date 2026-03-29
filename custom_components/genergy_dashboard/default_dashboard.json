@@ -150,7 +150,6 @@
                   "wide": true,
                   "min_box_size": 50,
                   "min_box_distance": 8,
-                  "unit_prefix": "k",
                   "energy_date_selection": false,
                   "sections": [
                     {
@@ -301,7 +300,7 @@
                   "primary": "Solar",
                   "icon": "mdi:solar-power",
                   "icon_color": "orange",
-                  "secondary": "{{ states('__solar_energy_today__') | round(1) }} kWh",
+                  "secondary": "{% set v = states('__solar_energy_today__') | float(0) %}{% set u = state_attr('__solar_energy_today__', 'unit_of_measurement') %}{{ ((v * 1000) | round(1)) if u == 'MWh' else ((v / 1000) | round(1)) if u == 'Wh' else (v | round(1)) }} kWh",
                   "card_mod": {
                     "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
                   }
@@ -312,7 +311,7 @@
                   "primary": "Load",
                   "icon": "mdi:power-plug",
                   "icon_color": "purple",
-                  "secondary": "{{ states('__load_energy_today__') | round(1) }} kWh",
+                  "secondary": "{% set v = states('__load_energy_today__') | float(0) %}{% set u = state_attr('__load_energy_today__', 'unit_of_measurement') %}{{ ((v * 1000) | round(1)) if u == 'MWh' else ((v / 1000) | round(1)) if u == 'Wh' else (v | round(1)) }} kWh",
                   "card_mod": {
                     "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
                   }
@@ -323,7 +322,7 @@
                   "primary": "Charged",
                   "icon": "mdi:battery-arrow-up",
                   "icon_color": "green",
-                  "secondary": "{{ states('__battery_charge_today__') | round(1) }} kWh",
+                  "secondary": "{% set v = states('__battery_charge_today__') | float(0) %}{% set u = state_attr('__battery_charge_today__', 'unit_of_measurement') %}{{ ((v * 1000) | round(1)) if u == 'MWh' else ((v / 1000) | round(1)) if u == 'Wh' else (v | round(1)) }} kWh",
                   "card_mod": {
                     "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
                   }
@@ -334,7 +333,7 @@
                   "primary": "Discharged",
                   "icon": "mdi:battery-arrow-down",
                   "icon_color": "teal",
-                  "secondary": "{{ states('__battery_discharge_today__') | round(1) }} kWh",
+                  "secondary": "{% set v = states('__battery_discharge_today__') | float(0) %}{% set u = state_attr('__battery_discharge_today__', 'unit_of_measurement') %}{{ ((v * 1000) | round(1)) if u == 'MWh' else ((v / 1000) | round(1)) if u == 'Wh' else (v | round(1)) }} kWh",
                   "card_mod": {
                     "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
                   }
@@ -345,7 +344,7 @@
                   "primary": "Imported",
                   "icon": "mdi:transmission-tower-import",
                   "icon_color": "red",
-                  "secondary": "{{ states('__grid_import_today__') | round(1) }} kWh",
+                  "secondary": "{% set v = states('__grid_import_today__') | float(0) %}{% set u = state_attr('__grid_import_today__', 'unit_of_measurement') %}{{ ((v * 1000) | round(1)) if u == 'MWh' else ((v / 1000) | round(1)) if u == 'Wh' else (v | round(1)) }} kWh",
                   "card_mod": {
                     "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
                   }
@@ -356,7 +355,7 @@
                   "primary": "Exported",
                   "icon": "mdi:transmission-tower-export",
                   "icon_color": "blue",
-                  "secondary": "{{ states('__grid_export_today__') | round(1) }} kWh",
+                  "secondary": "{% set v = states('__grid_export_today__') | float(0) %}{% set u = state_attr('__grid_export_today__', 'unit_of_measurement') %}{{ ((v * 1000) | round(1)) if u == 'MWh' else ((v / 1000) | round(1)) if u == 'Wh' else (v | round(1)) }} kWh",
                   "card_mod": {
                     "style": "ha-card { background: rgba(30,35,54,0.94) !important; border: 1px solid #2d3451 !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }"
                   }

@@ -414,9 +414,12 @@ class SigenergySettingsCard extends HTMLElement {
     const raw = s.state;
     const num = parseFloat(raw);
     if (!isNaN(num) && isFinite(num) && String(num) === raw.trim()) {
+      // Convert MWh → kWh and Wh → kWh for clearer energy display
+      if (u === 'MWh') return `${(num * 1000).toFixed(2)} kWh`;
+      if (u === 'Wh') return `${(num / 1000).toFixed(2)} kWh`;
       let decimals;
       if (u === 'V' || u === 'W' || u === 'VA') decimals = 1;
-      else if (u === 'kW' || u === 'kWh' || u === 'MWh') decimals = 2;
+      else if (u === 'kW' || u === 'kWh') decimals = 2;
       else if (u === '%') decimals = 0;
       else if (u === '°C' || u === '°F') decimals = 1;
       else decimals = Math.abs(num) >= 100 ? 1 : 2;
@@ -1556,7 +1559,7 @@ class SigenergySettingsCard extends HTMLElement {
             // Fallback: scan all HA states for EV-related energy sensors
             const evStates = Object.keys(this._hass.states).filter(k =>
               k.includes('sensor.') && (k.includes('ev_') || k.includes('charger_energy') || k.includes('wallbox') || k.includes('charging_energy') || k.includes('zappi') || k.includes('easee') || k.includes('ocpp') || k.includes('tesla_') || k.includes('juicebox'))
-              && (this._hass.states[k].attributes?.unit_of_measurement === 'kWh' || this._hass.states[k].attributes?.device_class === 'energy')
+              && (['kWh','MWh','Wh'].includes(this._hass.states[k].attributes?.unit_of_measurement) || this._hass.states[k].attributes?.device_class === 'energy')
             );
             if (evStates.length > 0) {
               foundEntity = evStates[0];
@@ -1613,7 +1616,7 @@ class SigenergySettingsCard extends HTMLElement {
             // Fallback: scan all HA states for HP-related energy sensors
             const hpStates = Object.keys(this._hass.states).filter(k =>
               k.includes('sensor.') && (k.includes('heat_pump') || k.includes('heatpump') || k.includes('warmtepomp') || k.includes('wp_kot') || k.includes('hvac_energy') || k.includes('daikin') || k.includes('nibe') || k.includes('aquarea') || k.includes('vaillant') || k.includes('viessmann'))
-              && (this._hass.states[k].attributes?.unit_of_measurement === 'kWh' || this._hass.states[k].attributes?.device_class === 'energy')
+              && (['kWh','MWh','Wh'].includes(this._hass.states[k].attributes?.unit_of_measurement) || this._hass.states[k].attributes?.device_class === 'energy')
             );
             if (hpStates.length > 0) {
               foundEntity = hpStates[0];
@@ -3871,7 +3874,7 @@ return forecast.map(function(d) {
         layout: 'horizontal',
         show_names: true, show_states: true, show_units: true, show_icons: false,
         round: 1, height: 480, wide: true,
-        min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
+        min_box_size: 50, min_box_distance: 8,
         min_state: 0.01,
         energy_date_selection: false,
         sections: [
