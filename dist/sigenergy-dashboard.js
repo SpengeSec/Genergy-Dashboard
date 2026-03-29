@@ -495,6 +495,9 @@ class SigenergySettingsCard extends HTMLElement {
           console.log('Created utility meter:', friendlyName, 'from', sourceEntityId);
           // Wait a moment for HA to register the new entity
           await new Promise(r => setTimeout(r, 3000));
+          // Try to force-initialize by requesting a state update on the source entity
+          try { await this._hass.callService('homeassistant', 'update_entity', { entity_id: sourceEntityId }); } catch(e) {}
+          await new Promise(r => setTimeout(r, 1000));
           // Find the newly created entity
           const newMeter = Object.keys(this._hass.states).find(k =>
             k.includes('genergy_' + meterName) && k.includes('daily')
@@ -878,7 +881,7 @@ class SigenergySettingsCard extends HTMLElement {
       const valKwh = uom === 'MWh' ? val * 1000 : uom === 'Wh' ? val / 1000 : val;
       const isCumulative = (sc === 'total_increasing' || sc === 'total') && isEnergy && valKwh > 50;
       if (isCumulative) {
-        helperHTML = `<div style="margin:-2px 0 4px 110px;padding:6px 10px;background:rgba(255,165,0,0.1);border:1px solid rgba(255,165,0,0.3);border-radius:6px;font-size:11px;color:#ffa726;">⚠️ Lifetime entity detected (${this._esc(String(Math.round(valKwh)))} kWh). <button class="create-daily-helper-btn" data-key="${key}" data-source="${this._esc(id)}" style="background:#FF8F00;color:#fff;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;margin-left:6px;">Create Daily Helper</button></div>`;
+        helperHTML = `<div style="margin:-2px 0 4px 110px;padding:6px 10px;background:rgba(255,165,0,0.1);border:1px solid rgba(255,165,0,0.3);border-radius:6px;font-size:11px;color:#ffa726;">⚠️ Lifetime entity detected (${this._esc(String(Math.round(valKwh)))} kWh). <button class="create-daily-helper-btn" data-key="${key}" data-source="${this._esc(id)}" style="background:#FF8F00;color:#fff;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;margin-left:6px;">Create Daily Helper</button><br><span style="font-size:10px;color:#8892a4;margin-top:3px;display:inline-block;">ℹ️ Creates a utility meter helper that resets daily. May show <b>unknown</b> until the source sensor updates (usually within minutes).</span></div>`;
       }
     }
     return `
@@ -1428,9 +1431,15 @@ class SigenergySettingsCard extends HTMLElement {
             const cfg2 = this._storeGet();
             cfg2.entities[key] = result.dailyEntity;
             this._storeSave(cfg2);
+            // Try to force-initialize the utility meter by updating the source entity
+            try { await this._hass.callService('homeassistant', 'update_entity', { entity_id: source }); } catch(e) {}
             btn.textContent = '✓ Created: ' + result.dailyEntity;
             btn.style.background = '#00d4b8';
-            setTimeout(() => this._render(), 1500);
+            const infoDiv = document.createElement('div');
+            infoDiv.style.cssText = 'font-size:10px;color:#8892a4;margin-top:4px;';
+            infoDiv.textContent = 'ℹ️ Helper may show "unknown" until the source sensor updates (usually within minutes). This is normal.';
+            btn.parentElement.appendChild(infoDiv);
+            setTimeout(() => this._render(), 3000);
           } else {
             btn.textContent = 'Not needed (entity is already daily)';
             btn.style.background = '#8892a4';

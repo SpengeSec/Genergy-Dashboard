@@ -336,6 +336,8 @@ To use: check the "**I have a Sigenergy inverter**" toggle on the first step of 
 
 ### Daily Energy Totals (Recommended)
 
+> **Note**: If your inverter provides only cumulative (lifetime total) energy sensors, the dashboard will auto-detect this and offer to create a daily utility meter helper. After creation, the helper may show **"unknown"** for a few minutes until the source sensor updates — this is normal Home Assistant behaviour and resolves automatically.
+
 | Settings Field | Description |
 |---|---|
 | `solar_energy_today` | Total solar generation today (kWh) |
@@ -585,6 +587,7 @@ The house card composites multiple PNG layers:
 | **Cards overlap or misaligned** | Ensure `layout-card` is installed. Try: Settings → Dashboards → Resources → check JS resources are listed |
 | **Price badge not showing** | Enable Price Badge in Pricing tab AND set a price entity in Entities tab |
 | **Integration not found** | Make sure `custom_components/genergy_dashboard/` exists in your HA config dir and restart HA |
+| **Daily helpers show "unknown"** | Newly created utility meter helpers start as "unknown" — this is normal HA behavior. The helper needs the source sensor to report at least one state change after creation. This resolves automatically within minutes (next inverter update) or at the latest by midnight when the daily cycle resets. If still unknown after 24h, check **Settings → Devices & Services → Utility Meter** to verify the source entity is correct |
 
 ---
 
