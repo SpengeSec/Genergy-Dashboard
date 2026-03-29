@@ -640,6 +640,29 @@ class SigenergySettingsCard extends HTMLElement {
         }
         .save-btn:hover { opacity: 0.88; }
         select.row-input { cursor: pointer; }
+        .entity-input-wrap { position: relative; flex: 1; }
+        .entity-dropdown {
+          position: absolute; left: 0; right: 0; top: 100%;
+          background: var(--card-background-color, #1a1f2e);
+          border: 1px solid var(--divider-color, #ccc);
+          border-radius: 4px; max-height: 200px; overflow-y: auto;
+          z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          display: none;
+        }
+        .entity-dropdown.open { display: block; }
+        .entity-dropdown-item {
+          padding: 6px 8px; cursor: pointer; font-size: 12px;
+          border-bottom: 1px solid var(--divider-color, #2d3451);
+        }
+        .entity-dropdown-item:hover { background: var(--primary-color, #03a9f4); color: #fff; }
+        .entity-dropdown-item .entity-name { font-weight: 500; }
+        .entity-dropdown-item .entity-state { opacity: 0.6; font-size: 11px; margin-left: 6px; }
+        .section-detect-btn {
+          background: none; border: 1px solid rgba(0,212,184,0.3); border-radius: 4px;
+          color: #00d4b8; cursor: pointer; font-size: 11px; padding: 2px 6px;
+          margin-left: 8px; transition: all 0.2s;
+        }
+        .section-detect-btn:hover { background: rgba(0,212,184,0.15); border-color: #00d4b8; }
         @media (max-width: 500px) {
           .row { flex-wrap: wrap; }
           .row-label { min-width: 100%; margin-bottom: 4px; }
@@ -819,7 +842,10 @@ class SigenergySettingsCard extends HTMLElement {
     return `
       <div class="row">
         <span class="row-label">${label}</span>
-        <input class="row-input" value="${this._esc(id)}" placeholder="sensor.entity_id" data-key="${key}" />
+        <div class="entity-input-wrap">
+          <input class="row-input entity-ac-input" value="${this._esc(id)}" placeholder="sensor.entity_id" data-key="${key}" autocomplete="off" />
+          <div class="entity-dropdown" data-dropdown-for="${key}"></div>
+        </div>
         <span class="row-state ${isErr?'err':''}" data-entity="${this._esc(id)}">${state}</span>
       </div>`;
   }
@@ -965,13 +991,14 @@ class SigenergySettingsCard extends HTMLElement {
           <div>
             <div style="font-size:13px;font-weight:600;color:#00d4b8;">🔍 Auto-Detect from HA Energy Dashboard</div>
             <div style="font-size:11px;color:#8892a4;margin-top:2px;">Automatically detect energy sources, solar forecasts (Solcast/forecast.solar), EV chargers, and heat pumps from your HA configuration</div>
+            <div style="font-size:10px;color:#e67e22;margin-top:3px;">⚠️ This will overwrite any manually configured entities. Use the per-section 🔍 buttons below to detect only specific sections.</div>
           </div>
-          <button class="auto-detect-btn" data-key="auto_detect_energy" style="flex-shrink:0;margin-left:12px;padding:8px 16px;background:#00d4b8;color:#1a1f2e;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">Detect</button>
+          <button class="auto-detect-btn" data-key="auto_detect_energy" style="flex-shrink:0;margin-left:12px;padding:8px 16px;background:#00d4b8;color:#1a1f2e;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">Detect All</button>
         </div>
         <div class="auto-detect-status" style="margin-top:6px;font-size:11px;color:#8892a4;display:none;"></div>
       </div>
       <div class="section">
-        <div class="section-title">☀️ Core Power</div>
+        <div class="section-title" style="display:flex;align-items:center;">☀️ Core Power <button class="section-detect-btn" data-section="core_power" title="Auto-detect core power entities">🔍</button></div>
         <div style="font-size:10px;color:#666;margin-bottom:6px;">Real-time power sensors in <b>W</b> or <b>kW</b>. Auto-detected by the Detect button above.</div>
         ${this._entityRow('Solar Power', 'solar_power', e)}
         ${this._entityRow('Home Load', 'load_power', e)}
@@ -986,7 +1013,7 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Grid Power', 'grid_power', e)}
       </div>
       <div class="section">
-        <div class="section-title">📊 Daily Energy</div>
+        <div class="section-title" style="display:flex;align-items:center;">📊 Daily Energy <button class="section-detect-btn" data-section="daily_energy" title="Auto-detect daily energy entities">🔍</button></div>
         <div style="font-size:10px;color:#666;margin-bottom:6px;">Daily energy counters in <b>kWh</b>. Found in <i>HA → Settings → Devices → [Your Inverter]</i>.</div>
         ${this._entityRow('Solar Energy Today', 'solar_energy_today', e)}
         ${this._entityRow('Load Energy Today', 'load_energy_today', e)}
@@ -1020,7 +1047,7 @@ class SigenergySettingsCard extends HTMLElement {
         `}
       </div>
       <div class="section">
-        <div class="section-title">💰 Price Entities</div>
+        <div class="section-title" style="display:flex;align-items:center;">💰 Price Entities <button class="section-detect-btn" data-section="prices" title="Auto-detect price entities">🔍</button></div>
         <div style="font-size:10px;color:#666;margin-bottom:6px;">Electricity price sensors in <b>€/kWh</b> (or your local currency). Configure source integration on the Pricing tab.</div>
         ${this._entityRow('Buy Price', 'buy_price', e)}
         ${this._entityRow('Sell Price', 'sell_price', e)}
@@ -1028,7 +1055,7 @@ class SigenergySettingsCard extends HTMLElement {
       </div>
       <div class="section" style="border:1px solid ${emhassOn ? '#00d4b8' : haeoOn ? '#7c4dff' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
         <div style="margin-bottom:${emhassOn || haeoOn ? '12' : '0'}px;">
-          <div style="font-size:14px;font-weight:700;color:${emhassOn ? '#00d4b8' : haeoOn ? '#7c4dff' : '#8892a4'};">🤖 Energy Management System (EMS)</div>
+          <div style="font-size:14px;font-weight:700;color:${emhassOn ? '#00d4b8' : haeoOn ? '#7c4dff' : '#8892a4'};display:flex;align-items:center;">🤖 Energy Management System (EMS) <button class="section-detect-btn" data-section="ems" title="Auto-detect EMS/HAEO/EMHASS entities" style="margin-left:8px;">🔍</button></div>
           <div style="font-size:11px;color:#8892a4;margin-top:2px;">Select your energy optimizer. Configure entities below after selecting a provider.</div>
           <div style="display:flex;gap:8px;margin-top:10px;">
             <button class="ems-btn ${emsProvider === 'none' ? 'active' : ''}" data-ems="none" style="flex:1;padding:8px 6px;border:1px solid ${emsProvider === 'none' ? '#8892a4' : '#2d3451'};background:${emsProvider === 'none' ? 'rgba(136,146,164,0.15)' : 'transparent'};color:${emsProvider === 'none' ? '#fff' : '#8892a4'};border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;">None</button>
@@ -1112,7 +1139,7 @@ class SigenergySettingsCard extends HTMLElement {
           <div style="margin-top:8px;">
             <div class="section-title" style="font-size:11px;">HAEO Network Status</div>
             ${this._entityRow('Optim Status', 'haeo_optim_status', e)}
-            <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">sensor.{network_name}_optimization_status — success / failed / pending</div>
+            <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">sensor.{network_name}_network_optimization_status — success / failed / pending</div>
             ${this._entityRow('Optim Cost', 'haeo_optim_cost', e)}
             ${this._entityRow('Optim Duration', 'haeo_optim_duration', e)}
           </div>
@@ -1209,7 +1236,7 @@ class SigenergySettingsCard extends HTMLElement {
         ` : ''}
       </div>
       <div class="section">
-        <div class="section-title">🌡️ System</div>
+        <div class="section-title" style="display:flex;align-items:center;">🌡️ System <button class="section-detect-btn" data-section="system" title="Auto-detect system entities">🔍</button></div>
         <div style="font-size:10px;color:#666;margin-bottom:6px;">Temperature (<b>°C</b>), voltage (<b>V</b>), and frequency (<b>Hz</b>) sensors. Found in <i>HA → Settings → Devices</i>.</div>
         ${this._entityRow('Weather', 'weather', e)}
         ${this._entityRow('Inverter Temp', 'inverter_temp', e)}
@@ -1272,6 +1299,50 @@ class SigenergySettingsCard extends HTMLElement {
       'ev_charger_power', 'ev_charger_state', 'ev_soc', 'ev_range',
       'heat_pump_power', 'battery_capacity',
     ]);
+
+    // ── Entity autocomplete dropdown wiring ──────────────────────
+    if (this._hass && this._hass.states) {
+      const allEntityIds = Object.keys(this._hass.states);
+      let activeDropdown = null;
+      const closeAllDropdowns = () => {
+        el.querySelectorAll('.entity-dropdown.open').forEach(d => d.classList.remove('open'));
+        activeDropdown = null;
+      };
+      el.querySelectorAll('.entity-ac-input').forEach(input => {
+        const wrap = input.closest('.entity-input-wrap');
+        const dropdown = wrap ? wrap.querySelector('.entity-dropdown') : null;
+        if (!dropdown) return;
+        const showDropdown = (filter) => {
+          const q = (filter || '').toLowerCase();
+          const matches = allEntityIds.filter(k => {
+            if (!q) return true;
+            const st = this._hass.states[k];
+            const fn = (st?.attributes?.friendly_name || '').toLowerCase();
+            return k.toLowerCase().includes(q) || fn.includes(q);
+          }).slice(0, 50);
+          if (matches.length === 0) { dropdown.classList.remove('open'); activeDropdown = null; return; }
+          dropdown.innerHTML = matches.map(k => {
+            const st = this._hass.states[k];
+            const fn = st?.attributes?.friendly_name || '';
+            const val = st?.state || '';
+            return '<div class="entity-dropdown-item" data-eid="' + this._esc(k) + '"><span class="entity-name">' + this._esc(k) + '</span>' + (fn ? ' <span class="entity-state">' + this._esc(fn) + '</span>' : '') + ' <span class="entity-state">= ' + this._esc(val) + '</span></div>';
+          }).join('');
+          dropdown.classList.add('open');
+          activeDropdown = dropdown;
+          dropdown.querySelectorAll('.entity-dropdown-item').forEach(item => {
+            item.addEventListener('mousedown', (ev) => {
+              ev.preventDefault();
+              input.value = item.dataset.eid;
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+              closeAllDropdowns();
+            });
+          });
+        };
+        input.addEventListener('focus', () => showDropdown(input.value));
+        input.addEventListener('input', () => showDropdown(input.value));
+        input.addEventListener('blur', () => { setTimeout(closeAllDropdowns, 200); });
+      });
+    }
 
     // EMS provider selector handler (None / EMHASS / HAEO)
     el.querySelectorAll('.ems-btn').forEach(btn => {
@@ -1930,17 +2001,17 @@ class SigenergySettingsCard extends HTMLElement {
           // ── HAEO auto-detect ─────────────────────────────────────────
           if (this._hass && this._hass.states) {
             const allKeys = Object.keys(this._hass.states);
-            // Look for HAEO optimization_status sensor pattern
-            const haeoStatusKeys = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_optimization_status'));
+            // Look for HAEO network_optimization_status sensor pattern (HAEO prefixes with "network_")
+            const haeoStatusKeys = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_network_optimization_status'));
             if (haeoStatusKeys.length > 0) {
               const statusKey = haeoStatusKeys[0];
-              // Derive network name prefix (e.g. "sensor.home_energy_" from "sensor.home_energy_optimization_status")
-              const networkPrefix = statusKey.replace('_optimization_status', '');
+              // Derive network name prefix (e.g. "sensor.home_energy_" from "sensor.home_energy_network_optimization_status")
+              const networkPrefix = statusKey.replace('_network_optimization_status', '_');
               cfg2.entities.haeo_optim_status = statusKey;
               found.push('HAEO optimization status: ' + statusKey);
-              // Try optimization cost and duration
-              const costKey = networkPrefix + '_optimization_cost';
-              const durKey = networkPrefix + '_optimization_duration';
+              // Try network optimization cost and duration
+              const costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
+              const durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
               if (allKeys.includes(costKey)) {
                 cfg2.entities.haeo_optim_cost = costKey;
                 found.push('HAEO optimization cost: ' + costKey);
@@ -1949,25 +2020,21 @@ class SigenergySettingsCard extends HTMLElement {
                 cfg2.entities.haeo_optim_duration = durKey;
                 found.push('HAEO optimization duration: ' + durKey);
               }
-              // Find HAEO battery sensors (power_consumed = charge, power_produced = discharge)
-              const haeoBattCharge = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_power_consumed') && !k.includes('grid') && !k.includes('load'));
-              const haeoBattDischarge = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_power_produced') && !k.includes('grid') && !k.includes('solar') && !k.includes('pv'));
-              const haeoBattSoc = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_soc') && k !== (cfg2.entities.battery_soc || ''));
-              // Check for forecast attribute to confirm these are HAEO sensors
-              const isHaeoSensor = (key) => {
-                const st = this._hass.states[key];
-                return st && st.attributes && (st.attributes.forecast !== undefined || st.attributes.horizon !== undefined);
-              };
-              const haeoCharge = haeoBattCharge.find(k => isHaeoSensor(k));
-              const haeoDischarge = haeoBattDischarge.find(k => isHaeoSensor(k));
-              const haeoSoc = haeoBattSoc.find(k => isHaeoSensor(k));
+              // Find HAEO battery sensors by entity naming patterns (no forecast attribute check needed)
+              const haeoBattCharge = allKeys.filter(k => k.startsWith('sensor.') && (k.endsWith('_battery_power_charge') || k.endsWith('_power_consumed')) && !k.includes('grid') && !k.includes('load'));
+              const haeoBattDischarge = allKeys.filter(k => k.startsWith('sensor.') && (k.endsWith('_battery_power_discharge') || k.endsWith('_power_produced')) && !k.includes('grid') && !k.includes('solar') && !k.includes('pv'));
+              const haeoBattSoc = allKeys.filter(k => k.startsWith('sensor.') && (k.endsWith('_battery_state_of_charge') || k.endsWith('_soc')) && k !== (cfg2.entities.battery_soc || ''));
+              // Use first match by entity name pattern
+              const haeoCharge = haeoBattCharge[0];
+              const haeoDischarge = haeoBattDischarge[0];
+              const haeoSoc = haeoBattSoc[0];
               if (haeoCharge) { cfg2.entities.haeo_battery_charge = haeoCharge; found.push('HAEO battery charge: ' + haeoCharge); }
               if (haeoDischarge) { cfg2.entities.haeo_battery_discharge = haeoDischarge; found.push('HAEO battery discharge: ' + haeoDischarge); }
               if (haeoSoc) { cfg2.entities.haeo_battery_soc = haeoSoc; found.push('HAEO battery SoC: ' + haeoSoc); }
-              // Find HAEO grid, solar, load sensors
-              const haeoGridKeys = allKeys.filter(k => k.startsWith('sensor.') && (k.includes('grid') || k.includes('import') || k.includes('export')) && isHaeoSensor(k));
-              const haeoSolarKeys = allKeys.filter(k => k.startsWith('sensor.') && (k.includes('solar') || k.includes('pv')) && k.endsWith('_power_produced') && isHaeoSensor(k));
-              const haeoLoadKeys = allKeys.filter(k => k.startsWith('sensor.') && k.includes('load') && isHaeoSensor(k));
+              // Find HAEO grid, solar, load sensors by naming patterns
+              const haeoGridKeys = allKeys.filter(k => k.startsWith('sensor.') && k.includes('_grid_') && (k.endsWith('_power') || k.endsWith('_power_import') || k.endsWith('_power_export')));
+              const haeoSolarKeys = allKeys.filter(k => k.startsWith('sensor.') && k.includes('_solar_') && (k.endsWith('_power') || k.endsWith('_power_produced') || k.endsWith('_power_available')));
+              const haeoLoadKeys = allKeys.filter(k => k.startsWith('sensor.') && k.includes('_load_') && (k.endsWith('_power') || k.endsWith('_power_consumed')));
               if (haeoGridKeys.length > 0 && !cfg2.entities.haeo_grid_power) { cfg2.entities.haeo_grid_power = haeoGridKeys[0]; found.push('HAEO grid: ' + haeoGridKeys[0]); }
               if (haeoSolarKeys.length > 0 && !cfg2.entities.haeo_solar_power) { cfg2.entities.haeo_solar_power = haeoSolarKeys[0]; found.push('HAEO solar: ' + haeoSolarKeys[0]); }
               if (haeoLoadKeys.length > 0 && !cfg2.entities.haeo_load_power) { cfg2.entities.haeo_load_power = haeoLoadKeys[0]; found.push('HAEO load: ' + haeoLoadKeys[0]); }
@@ -2022,7 +2089,7 @@ class SigenergySettingsCard extends HTMLElement {
         cfg2.entities[key] = value;
         this._storeSave(cfg2);
         // Update state badge inline without destroying the DOM
-        const stateEl = input.parentElement.querySelector('.row-state');
+        const stateEl = input.closest('.row')?.querySelector('.row-state');
         if (stateEl) {
           const state = this._getState(value);
           stateEl.textContent = state;
@@ -2034,6 +2101,176 @@ class SigenergySettingsCard extends HTMLElement {
         }
       });
     });
+
+    // ── Per-section auto-detect button wiring ──────────────────
+    el.querySelectorAll('.section-detect-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const section = btn.dataset.section;
+        btn.textContent = '⏳';
+        btn.disabled = true;
+        let found = [];
+        try {
+          switch (section) {
+            case 'core_power': found = await this._autoDetectCorePower(); break;
+            case 'daily_energy': found = await this._autoDetectDailyEnergy(); break;
+            case 'prices': found = await this._autoDetectPrices(); break;
+            case 'ems': found = await this._autoDetectEMS(); break;
+            case 'system': found = await this._autoDetectSystem(); break;
+          }
+        } catch (e) { console.error('Section detect error:', e); }
+        if (found.length > 0) {
+          btn.textContent = '✅ ' + found.length;
+          setTimeout(() => { this._render(); }, 1000);
+        } else {
+          btn.textContent = '⚠️ 0';
+          setTimeout(() => { btn.textContent = '🔍'; btn.disabled = false; }, 2000);
+        }
+      });
+    });
+  }
+
+  // ── Per-section auto-detect methods ────────────────────────────
+
+  async _autoDetectCorePower() {
+    const found = [];
+    if (!this._hass?.states) return found;
+    const cfg2 = this._storeGet();
+    const allKeys = Object.keys(this._hass.states);
+    const sigenKeys = allKeys.filter(k => k.startsWith('sensor.sigen_'));
+    if (sigenKeys.length > 0) {
+      const map = {
+        solar_power: sigenKeys.find(k => k.includes('plant_pv_power') || k.endsWith('_pv_power')),
+        load_power: sigenKeys.find(k => k.includes('plant_load_power') || k.endsWith('_load_power')),
+        battery_power: sigenKeys.find(k => k.includes('plant_battery_power') || k.endsWith('_battery_power')),
+        battery_soc: sigenKeys.find(k => k.includes('plant_battery_soc') || k.endsWith('_battery_soc')),
+        grid_power: sigenKeys.find(k => k.includes('plant_active_power') || k.endsWith('_active_power')),
+        battery_capacity: sigenKeys.find(k => k.includes('plant_rated_energy_capacity') || k.includes('plant_rated_capacity')),
+      };
+      for (const [key, eid] of Object.entries(map)) {
+        if (eid) { cfg2.entities[key] = eid; found.push(key + ': ' + eid); }
+      }
+    }
+    // Battery capacity fallback
+    if (!cfg2.entities.battery_capacity) {
+      const capKeys = allKeys.filter(k => k.toLowerCase().includes('battery') && (k.toLowerCase().includes('rated_capacity') || k.toLowerCase().includes('capacity_kwh')));
+      if (capKeys.length > 0) { cfg2.entities.battery_capacity = capKeys[0]; found.push('battery_capacity: ' + capKeys[0]); }
+    }
+    if (found.length > 0) this._storeSave(cfg2);
+    return found;
+  }
+
+  async _autoDetectDailyEnergy() {
+    const found = [];
+    const cfg2 = this._storeGet();
+    try {
+      const prefs = await this._hass.callWS({ type: 'energy/get_prefs' });
+      if (!prefs?.energy_sources) return found;
+      for (const src of prefs.energy_sources) {
+        if (src.type === 'solar' && src.stat_energy_from) {
+          cfg2.entities.solar_energy_today = src.stat_energy_from; found.push('Solar: ' + src.stat_energy_from);
+        }
+        if (src.type === 'battery') {
+          if (src.stat_energy_from) { cfg2.entities.battery_discharge_today = src.stat_energy_from; found.push('Battery discharge: ' + src.stat_energy_from); }
+          if (src.stat_energy_to) { cfg2.entities.battery_charge_today = src.stat_energy_to; found.push('Battery charge: ' + src.stat_energy_to); }
+        }
+        if (src.type === 'grid') {
+          const flowFrom = src.flow_from || [];
+          const flowTo = src.flow_to || [];
+          if (flowFrom.length >= 1) { cfg2.entities.grid_import_today = flowFrom[0].stat_energy_from; found.push('Grid import: ' + flowFrom[0].stat_energy_from); }
+          if (flowTo.length >= 1) { cfg2.entities.grid_export_today = flowTo[0].stat_energy_to; found.push('Grid export: ' + flowTo[0].stat_energy_to); }
+        }
+      }
+    } catch (e) { console.error('Daily energy detect error:', e); }
+    if (found.length > 0) this._storeSave(cfg2);
+    return found;
+  }
+
+  async _autoDetectPrices() {
+    const found = [];
+    if (!this._hass?.states) return found;
+    const cfg2 = this._storeGet();
+    const allKeys = Object.keys(this._hass.states);
+    const buyPatterns = [
+      'sensor.amber_general_price', 'sensor.electricity_price',
+      /nordpool.*kwh/i, /energi_data_service/i, /octopus.*current.*rate/i,
+      /energy.*price.*import/i, /electricity.*price/i, /buy.*price/i, /spot.*price/i,
+    ];
+    for (const p of buyPatterns) {
+      const m = typeof p === 'string' ? allKeys.find(k => k === p) : allKeys.find(k => p.test(k) && !k.includes('feed_in') && !k.includes('export') && !k.includes('sell'));
+      if (m) { cfg2.entities.buy_price = m; found.push('Buy price: ' + m); break; }
+    }
+    const sellPatterns = ['sensor.amber_feed_in_price', /feed.in.*price/i, /export.*price/i, /sell.*price/i, /octopus.*export.*rate/i];
+    for (const p of sellPatterns) {
+      const m = typeof p === 'string' ? allKeys.find(k => k === p) : allKeys.find(k => p.test(k));
+      if (m) { cfg2.entities.sell_price = m; found.push('Sell price: ' + m); break; }
+    }
+    const npKey = allKeys.find(k => k.startsWith('sensor.nordpool'));
+    if (npKey) { cfg2.entities.nordpool = npKey; found.push('Nordpool: ' + npKey); }
+    if (found.length > 0) this._storeSave(cfg2);
+    return found;
+  }
+
+  async _autoDetectEMS() {
+    const found = [];
+    if (!this._hass?.states) return found;
+    const cfg2 = this._storeGet();
+    const allKeys = Object.keys(this._hass.states);
+    // HAEO detection
+    const haeoStatusKeys = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_network_optimization_status'));
+    if (haeoStatusKeys.length > 0) {
+      const statusKey = haeoStatusKeys[0];
+      cfg2.entities.haeo_optim_status = statusKey; found.push('HAEO status: ' + statusKey);
+      const costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
+      const durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
+      if (allKeys.includes(costKey)) { cfg2.entities.haeo_optim_cost = costKey; found.push('HAEO cost: ' + costKey); }
+      if (allKeys.includes(durKey)) { cfg2.entities.haeo_optim_duration = durKey; found.push('HAEO duration: ' + durKey); }
+      const haeoBattCharge = allKeys.find(k => k.startsWith('sensor.') && (k.endsWith('_battery_power_charge') || k.endsWith('_power_consumed')) && !k.includes('grid') && !k.includes('load'));
+      const haeoBattDischarge = allKeys.find(k => k.startsWith('sensor.') && (k.endsWith('_battery_power_discharge') || k.endsWith('_power_produced')) && !k.includes('grid') && !k.includes('solar'));
+      const haeoBattSoc = allKeys.find(k => k.startsWith('sensor.') && (k.endsWith('_battery_state_of_charge') || k.endsWith('_soc')) && k !== (cfg2.entities.battery_soc || ''));
+      if (haeoBattCharge) { cfg2.entities.haeo_battery_charge = haeoBattCharge; found.push('HAEO charge: ' + haeoBattCharge); }
+      if (haeoBattDischarge) { cfg2.entities.haeo_battery_discharge = haeoBattDischarge; found.push('HAEO discharge: ' + haeoBattDischarge); }
+      if (haeoBattSoc) { cfg2.entities.haeo_battery_soc = haeoBattSoc; found.push('HAEO SoC: ' + haeoBattSoc); }
+      const haeoGrid = allKeys.find(k => k.startsWith('sensor.') && k.includes('_grid_') && (k.endsWith('_power') || k.endsWith('_power_import')));
+      const haeoSolar = allKeys.find(k => k.startsWith('sensor.') && k.includes('_solar_') && (k.endsWith('_power') || k.endsWith('_power_produced')));
+      const haeoLoad = allKeys.find(k => k.startsWith('sensor.') && k.includes('_load_') && (k.endsWith('_power') || k.endsWith('_power_consumed')));
+      if (haeoGrid) { cfg2.entities.haeo_grid_power = haeoGrid; found.push('HAEO grid: ' + haeoGrid); }
+      if (haeoSolar) { cfg2.entities.haeo_solar_power = haeoSolar; found.push('HAEO solar: ' + haeoSolar); }
+      if (haeoLoad) { cfg2.entities.haeo_load_power = haeoLoad; found.push('HAEO load: ' + haeoLoad); }
+      cfg2.features.ems_provider = 'haeo'; cfg2.features.haeo_forecasts = true;
+      found.push('✓ HAEO detected');
+    }
+    // EMHASS detection fallback
+    if (haeoStatusKeys.length === 0) {
+      const emhassMode = allKeys.find(k => k.includes('emhass') && (k.includes('_mode') || k.includes('_status')));
+      if (emhassMode) { cfg2.entities.emhass_mode = emhassMode; cfg2.features.ems_provider = 'emhass'; found.push('EMHASS: ' + emhassMode); }
+    }
+    if (found.length > 0) this._storeSave(cfg2);
+    return found;
+  }
+
+  async _autoDetectSystem() {
+    const found = [];
+    if (!this._hass?.states) return found;
+    const cfg2 = this._storeGet();
+    const allKeys = Object.keys(this._hass.states);
+    const sigenKeys = allKeys.filter(k => k.startsWith('sensor.sigen_'));
+    if (sigenKeys.length > 0) {
+      const map = {
+        inverter_temp: sigenKeys.find(k => k.includes('_radiator_temperature') || k.includes('inverter_temp')),
+        battery_temp: sigenKeys.find(k => k.includes('_battery_temperature') || k.includes('cell_temperature')),
+        grid_voltage: sigenKeys.find(k => k.includes('_a_phase_voltage') || k.endsWith('_grid_voltage')),
+        grid_frequency: sigenKeys.find(k => k.includes('_frequency') || (k.includes('grid') && k.includes('frequency'))),
+        inverter_output_power: sigenKeys.find(k => k.includes('_inverter_active_power') || k.endsWith('_active_power')),
+      };
+      for (const [key, eid] of Object.entries(map)) {
+        if (eid) { cfg2.entities[key] = eid; found.push(key + ': ' + eid); }
+      }
+    }
+    // Weather
+    const weatherKey = allKeys.find(k => k.startsWith('weather.') && !k.includes('forecast'));
+    if (weatherKey && !cfg2.entities.weather) { cfg2.entities.weather = weatherKey; found.push('weather: ' + weatherKey); }
+    if (found.length > 0) this._storeSave(cfg2);
+    return found;
   }
 
   _toggleHtml(label, desc, key, value) {
@@ -2557,7 +2794,7 @@ class SigenergySettingsCard extends HTMLElement {
           type: 'area', opacity: 0.06, curve: 'stepline', extend_to: false,
           unit: ' kW', stroke_width: 1, stroke_dash: 5,
           show: { in_header: false, legend_value: false },
-          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power', float_precision: 2
         });
       }
@@ -2568,7 +2805,7 @@ class SigenergySettingsCard extends HTMLElement {
           type: 'area', opacity: 0.06, curve: 'stepline', extend_to: false,
           unit: ' kW', stroke_width: 1, stroke_dash: 5,
           show: { in_header: false, legend_value: false },
-          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), -(parseFloat(e[1]) || 0)]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), -(p.value || 0)]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), -(parseFloat(e[1]) || 0)]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power', float_precision: 2
         });
       }
@@ -2579,7 +2816,7 @@ class SigenergySettingsCard extends HTMLElement {
           type: 'area', opacity: 0.06, curve: 'smooth', extend_to: false,
           unit: ' kW', float_precision: fp, stroke_width: 1, stroke_dash: 5,
           show: { in_header: false, legend_value: false },
-          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power'
         });
       }
@@ -2590,7 +2827,7 @@ class SigenergySettingsCard extends HTMLElement {
           type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
           extend_to: false, unit: ' kW',
           show: { in_header: false, legend_value: false },
-          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power', float_precision: 2
         });
       }
@@ -2601,7 +2838,7 @@ class SigenergySettingsCard extends HTMLElement {
           type: 'line', curve: 'smooth', extend_to: false, unit: ' kW',
           float_precision: fp, stroke_width: 1, stroke_dash: 4,
           show: { in_header: false, legend_value: false, in_chart: true },
-          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power', invert: true, opacity: 0.6
         });
       }
@@ -2612,7 +2849,7 @@ class SigenergySettingsCard extends HTMLElement {
           type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
           extend_to: false, unit: ' %',
           show: { in_header: false, legend_value: false },
-          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'soc', float_precision: 1
         });
       }
@@ -3366,6 +3603,26 @@ return forecast.map(function(d) {
           </select>
         </div>
       </div>
+      <div class="section">
+        <div class="section-title">💾 Configuration Profiles</div>
+        <div style="font-size:10px;color:#666;margin-bottom:8px;">Save up to 3 named snapshots of your entire configuration (entities, features, pricing, display).</div>
+        ${(() => {
+          const profiles = JSON.parse(localStorage.getItem('sigenergy_dashboard_profiles') || '[]');
+          return [0,1,2].map(i => {
+            const p = profiles[i] || null;
+            const nameVal = p ? this._esc(p.name || 'Profile ' + (i+1)) : '';
+            const savedAt = p ? new Date(p.savedAt).toLocaleString() : '';
+            return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:8px;background:rgba(45,52,81,0.4);border-radius:8px;">' +
+              '<span style="font-size:12px;font-weight:600;color:#00d4b8;min-width:18px;">' + (i+1) + '</span>' +
+              '<input class="row-input profile-name" data-slot="' + i + '" value="' + nameVal + '" placeholder="Profile ' + (i+1) + '" style="flex:1;max-width:140px;" />' +
+              '<button class="profile-save-btn" data-slot="' + i + '" style="padding:4px 8px;background:#00d4b8;color:#1a1f2e;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;">Save</button>' +
+              (p ? '<button class="profile-load-btn" data-slot="' + i + '" style="padding:4px 8px;background:#3F51B5;color:#fff;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;">Load</button>' +
+              '<button class="profile-del-btn" data-slot="' + i + '" style="padding:4px 8px;background:#e74c3c;color:#fff;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;">✕</button>' : '') +
+              (savedAt ? '<span style="font-size:9px;color:#8892a4;">' + savedAt + '</span>' : '<span style="font-size:9px;color:#666;">Empty</span>') +
+              '</div>';
+          }).join('');
+        })()}
+      </div>
       </div>
     `;
 
@@ -3392,6 +3649,47 @@ return forecast.map(function(d) {
         if (key === 'battery_label') {
           this._syncBatteryLabelToDashboard(val);
         }
+      });
+    });
+
+    // ── Profile handlers ──────────────────────────────────────
+    el.querySelectorAll('.profile-save-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const slot = parseInt(btn.dataset.slot);
+        const nameInput = el.querySelector('.profile-name[data-slot="' + slot + '"]');
+        const profiles = JSON.parse(localStorage.getItem('sigenergy_dashboard_profiles') || '[]');
+        const currentCfg = this._storeGet();
+        profiles[slot] = {
+          name: (nameInput?.value || '').trim() || 'Profile ' + (slot + 1),
+          savedAt: new Date().toISOString(),
+          config: { entities: { ...currentCfg.entities }, features: { ...currentCfg.features }, pricing: { ...currentCfg.pricing }, display: { ...currentCfg.display } }
+        };
+        localStorage.setItem('sigenergy_dashboard_profiles', JSON.stringify(profiles));
+        btn.textContent = '✅'; setTimeout(() => { this._render(); }, 1000);
+      });
+    });
+    el.querySelectorAll('.profile-load-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const slot = parseInt(btn.dataset.slot);
+        const profiles = JSON.parse(localStorage.getItem('sigenergy_dashboard_profiles') || '[]');
+        const prof = profiles[slot];
+        if (!prof?.config) return;
+        const cfg2 = this._storeGet();
+        if (prof.config.entities) cfg2.entities = { ...cfg2.entities, ...prof.config.entities };
+        if (prof.config.features) cfg2.features = { ...cfg2.features, ...prof.config.features };
+        if (prof.config.pricing) cfg2.pricing = { ...cfg2.pricing, ...prof.config.pricing };
+        if (prof.config.display) cfg2.display = { ...cfg2.display, ...prof.config.display };
+        this._storeSave(cfg2);
+        btn.textContent = '✅ Loaded'; setTimeout(() => { this._render(); }, 500);
+      });
+    });
+    el.querySelectorAll('.profile-del-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const slot = parseInt(btn.dataset.slot);
+        const profiles = JSON.parse(localStorage.getItem('sigenergy_dashboard_profiles') || '[]');
+        profiles[slot] = null;
+        localStorage.setItem('sigenergy_dashboard_profiles', JSON.stringify(profiles));
+        this._render();
       });
     });
   }

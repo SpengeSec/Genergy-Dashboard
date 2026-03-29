@@ -2,6 +2,21 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.11.0] - 2026-03-29
+
+### Added
+- **Entity Autocomplete Dropdown** — All entity input fields now show a filterable dropdown of matching HA entities as you type, with entity ID, friendly name, and current state. Replaces manual entity ID entry.
+- **Per-Section Auto-Detect** — Each entity section (Core Power, Daily Energy, Prices, EMS, System) now has its own 🔍 auto-detect button. Only detects entities for that section, preserving manually configured entities in other sections.
+- **Settings Profiles** — Save up to 3 named configuration profiles on the Display tab. Save current settings, load a previous profile, or delete a slot. Each profile stores a complete snapshot of all entities, features, pricing, and display settings.
+- **Detect All Warning** — The main "Detect All" button now shows a warning that it may overwrite manual changes, directing users to per-section buttons instead.
+
+### Fixed
+- **HAEO Auto-Detect** — Fixed entity patterns to match HAEO's actual naming convention: `*_network_optimization_status` (not `*_optimization_status`), `*_battery_power_charge/discharge`, `*_battery_state_of_charge`. Entity hints updated accordingly.
+- **HAEO Chart Forecasts** — HAEO forecast overlays now correctly read the `forecast` attribute (array of `{time, value}` points) from HAEO sensors and render as dashed overlay lines on the ApexCharts energy chart.
+
+### Improved
+- **HAEO Support Matured** — Full auto-detection, chart overlay, status card, and EMS provider toggle now work end-to-end with the HAEO (Home Assistant Energy Optimizer) integration.
+
 ## [2.10.1] - 2026-03-29
 
 ### Improved
