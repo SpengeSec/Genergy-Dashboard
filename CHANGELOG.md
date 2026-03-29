@@ -2,6 +2,18 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.13.2] - 2025-07-15
+
+### Improved
+- **Daily Helper "Unknown" State UX** — Newly created utility meter helpers start as "unknown" in Home Assistant (normal HA behavior). Added clear user guidance:
+  - Info note below the "Create Daily Helper" button explaining the temporary unknown state
+  - Post-creation message confirming the helper may show "unknown" for a few minutes
+  - Force-initialization: after creating a utility meter, the dashboard now calls `homeassistant.update_entity` on the source sensor to trigger an immediate state update, significantly reducing the time the helper stays in "unknown" state
+
+### Documentation
+- **README — Troubleshooting** — Added entry for daily helpers showing "unknown" with explanation and resolution steps
+- **README — Daily Energy Totals** — Added note about auto-created utility meter helpers and temporary unknown state after creation
+
 ## [2.13.1] - 2026-03-29
 
 ### Fixed
