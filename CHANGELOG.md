@@ -2,6 +2,21 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.13.4] - 2025-07-15
+
+### Fixed
+- **Sankey Chart Unit Display** — Restored `unit_prefix: 'k'` that was incorrectly removed in v2.13.3. Without it, the sankey-chart normalizes all entities to base Wh (e.g. 22,800 Wh instead of 22.8 kWh). Now correctly displays kWh regardless of whether source entities report in Wh, kWh, or MWh
+- **Auto-Scale Threshold Wired** — The `power_threshold` setting (W↔kW crossover) was stored in config but never read by any code. Now wired to the dashboard Jinja power templates and the house card's `_formatPower()` — respects your configured threshold for auto-scaling power display
+- **MW Power Handling** — Added megawatt support to power display (`_toWatts()`, `_formatPower()`, `_powerTpl`, and 48h chart `powerTransform`). Large commercial systems reporting in MW now convert correctly to kW for display
+- **48h Chart MW→kW Conversion** — Fixed `powerTransform` which passed MW values through as-is. Now correctly converts: MW×1000→kW, kW as-is, W÷1000→kW
+
+### Improved
+- **Inverter Detection Patterns** — Added auto-detection patterns for Deye (`summary_day_*`), Huawei (`daily_yield_*`), GoodWe (`day_*`), SunGrow (`daily_*`), and Growatt (`today_*`) daily energy sensors. Auto-detect now finds native daily sensors for these brands before falling back to utility meter helper creation
+
+### Documentation
+- **README — Helper Data Acquisition** — Added note that utility meter helpers only track energy from the moment of creation and do not retroactively import historical data. Recommends using native daily sensors when available
+- **README — Troubleshooting** — Added entry for daily helpers showing very low values with explanation and resolution
+
 ## [2.13.3] - 2025-07-15
 
 ### Fixed

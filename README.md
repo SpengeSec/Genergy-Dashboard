@@ -337,6 +337,8 @@ To use: check the "**I have a Sigenergy inverter**" toggle on the first step of 
 ### Daily Energy Totals (Recommended)
 
 > **Note**: If your inverter provides only cumulative (lifetime total) energy sensors, the dashboard will auto-detect this and offer to create a daily utility meter helper. After creation, the helper may show **"unknown"** for a few minutes until the source sensor updates — this is normal Home Assistant behaviour and resolves automatically.
+>
+> **ℹ️ Important**: Utility meter helpers only start tracking energy **from the moment they are created** — they do not retroactively import historical data. If a helper is created mid-day, it will show only the energy accumulated since creation, not the full day's total. The first complete daily reading will appear after midnight when the meter resets. If your inverter already provides native daily sensors (e.g. Deye `summary_day_*`, SunSynk `grid_daily_*`), prefer those over auto-created helpers for accurate same-day values.
 
 | Settings Field | Description |
 |---|---|
@@ -588,6 +590,7 @@ The house card composites multiple PNG layers:
 | **Price badge not showing** | Enable Price Badge in Pricing tab AND set a price entity in Entities tab |
 | **Integration not found** | Make sure `custom_components/genergy_dashboard/` exists in your HA config dir and restart HA |
 | **Daily helpers show "unknown"** | Newly created utility meter helpers start as "unknown" — this is normal HA behavior. The helper needs the source sensor to report at least one state change after creation. This resolves automatically within minutes (next inverter update) or at the latest by midnight when the daily cycle resets. If still unknown after 24h, check **Settings → Devices & Services → Utility Meter** to verify the source entity is correct |
+| **Daily helpers show very low values** | Utility meter helpers only track energy **from the moment they are created**. If created mid-day, the value represents only the delta since creation — not the full day's total. The first accurate full-day reading appears after midnight. If your inverter provides native daily sensors (Deye `summary_day_*`, SunSynk `grid_daily_*`, etc.), re-run auto-detect to use those instead |
 
 ---
 
