@@ -2,6 +2,18 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.8.2] - 2026-03-29
+
+### Fixed
+- **ApexCharts W/kW Unit Mismatch** — Fixed bug where the energy overview chart always divided sensor values by 1000ergardless of the sensor's unit of measurement. Sensors reporting in kW (e.g. Sigenergy) were being double-divided, while sensors in W showed the raw value with "kW" suffix. The transform now reads `entity.attributes.unit_of_measurement` and only divides when the source is W.
+- **ApexCharts Decimal Precision** — Chart header, legend, and tooltip now respect the Display → "Decimal Places" setting instead of hardcoded `1`.
+- **EMHASS Forecast Double Transform Removed** — Removed redundant `transform: 'return x / 1000;'` from all data_generator series (PV, Battery, Grid, Load forecasts). The data_generator already divides by 1000 internally, and the apexcharts-card ignores `transform` for data_generator series — so while harmless, the dead code was confusing.
+
+### Added
+- **Electricity Price Auto-Detection** — Auto-detect now identifies common electricity price entities: Amber Electric (`sensor.amber_general_price`, `sensor.amber_feed_in_price`), Tibber (`sensor.electricity_price`), Nordpool, EnergiDataService, Octopus Energy, and generic patterns (`*spot_price*`, `*energy_price*`, `*buy_price*`, `*feed_in_price*`).
+- **Sigenergy Battery Capacity Auto-Detection** — Added `sensor.sigen_plant_rated_energy_capacity` to the Sigenergy auto-detect map. Previously, battery capacity was only detected for non-Sigenergy brands via the generic detection patterns.
+- **Sigenergy SoC Limit Auto-Detection** — Added detection for Sigenergy ESS charge/discharge cutoff SoC entities (`ess_charge_cut_off_state_of_charge`, `ess_discharge_cut_off_state_of_charge`, `ess_backup_state_of_charge`).
+
 ## [2.8.1] - 2026-03-28
 
 ### Fixed

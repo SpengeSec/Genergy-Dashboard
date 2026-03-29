@@ -1497,6 +1497,62 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
+          // Auto-detect common electricity price entities (Amber, Tibber, Nordpool, EnergiDataService, etc.)
+          if (this._hass && this._hass.states && !cfg2.entities.buy_price) {
+            const allKeys = Object.keys(this._hass.states);
+            // Buy price patterns (ordered by specificity)
+            const buyPatterns = [
+              'sensor.amber_general_price',             // Amber Electric (AU)
+              'sensor.electricity_price',                // Tibber
+              /nordpool.*kwh/i,                          // Nordpool (various regions)
+              /energi_data_service/i,                    // EnergiDataService (DK/NO/SE)
+              /octopus.*current.*rate/i,                 // Octopus Energy (UK)
+              /energy.*price.*import/i,                  // Generic import price
+              /electricity.*price/i,                     // Generic
+              /general.*price/i,                         // Generic general price
+              /buy.*price/i,                             // Generic buy price
+              /spot.*price/i,                            // Spot price
+            ];
+            for (const pattern of buyPatterns) {
+              const match = typeof pattern === 'string'
+                ? allKeys.find(k => k === pattern)
+                : allKeys.find(k => pattern.test(k) && !k.includes('feed_in') && !k.includes('export') && !k.includes('sell'));
+              if (match) {
+                cfg2.entities.buy_price = match;
+                found.push('Buy price: ' + match);
+                break;
+              }
+            }
+            // Sell/feed-in price patterns
+            const sellPatterns = [
+              'sensor.amber_feed_in_price',              // Amber Electric (AU)
+              /feed.in.*price/i,                         // Generic feed-in
+              /export.*price/i,                          // Generic export
+              /sell.*price/i,                            // Generic sell
+              /octopus.*export.*rate/i,                  // Octopus Energy (UK)
+            ];
+            if (!cfg2.entities.sell_price) {
+              for (const pattern of sellPatterns) {
+                const match = typeof pattern === 'string'
+                  ? allKeys.find(k => k === pattern)
+                  : allKeys.find(k => pattern.test(k));
+                if (match) {
+                  cfg2.entities.sell_price = match;
+                  found.push('Sell price: ' + match);
+                  break;
+                }
+              }
+            }
+            // Auto-detect Nordpool entity
+            if (!cfg2.entities.nordpool) {
+              const npKey = allKeys.find(k => k.startsWith('sensor.nordpool'));
+              if (npKey) {
+                cfg2.entities.nordpool = npKey;
+                found.push('Nordpool: ' + npKey);
+              }
+            }
+          }
+
           // Auto-detect device consumption entities for EV and Heat Pump
           if (prefs.device_consumption && prefs.device_consumption.length > 0) {
             const evKw = ['ev', 'charger', 'wallbox', 'laadpaal', 'tesla', 'charging', 'zaptec', 'easee', 'ocpp', 'juicebox', 'chargepoint', 'zappi', 'myenergi', 'go-e', 'keba', 'openevse', 'emporia', 'pulsar', 'ohme', 'hypervolt', 'alfen', 'evbox'];
@@ -1586,7 +1642,28 @@ class SigenergySettingsCard extends HTMLElement {
                 pv4_power:               sigenKeys.find(k => k.endsWith('_pv4_power')),
                 pv5_power:               sigenKeys.find(k => k.endsWith('_pv5_power')),
                 pv6_power:               sigenKeys.find(k => k.endsWith('_pv6_power')),
+                // Battery capacity — Sigenergy reports rated capacity at plant level
+                battery_capacity:        sigenKeys.find(k => k.includes('plant_rated_energy_capacity') || k.includes('plant_rated_capacity')),
               };
+
+              // Also detect Sigenergy SoC limit entities (number domain, not sensor)
+              const allSigenKeys = Object.keys(this._hass.states).filter(k => k.includes('sigen_'));
+              const sigenMaxSoc = allSigenKeys.find(k => k.includes('ess_charge_cut_off_state_of_charge') || k.includes('charge_cut_off_soc'));
+              const sigenMinSoc = allSigenKeys.find(k => k.includes('ess_discharge_cut_off_state_of_charge') || k.includes('discharge_cut_off_soc'));
+              const sigenBackupSoc = allSigenKeys.find(k => k.includes('ess_backup_state_of_charge') || k.includes('backup_soc'));
+              if (sigenMaxSoc && !cfg2.entities.battery_max_soc) {
+                cfg2.entities.battery_max_soc = sigenMaxSoc;
+                found.push('Sigenergy max SoC: ' + sigenMaxSoc);
+              }
+              if (!cfg2.entities.battery_min_soc) {
+                if (sigenMinSoc) {
+                  cfg2.entities.battery_min_soc = sigenMinSoc;
+                  found.push('Sigenergy min SoC (discharge cutoff): ' + sigenMinSoc);
+                } else if (sigenBackupSoc) {
+                  cfg2.entities.battery_min_soc = sigenBackupSoc;
+                  found.push('Sigenergy min SoC (backup): ' + sigenBackupSoc);
+                }
+              }
 
               let sigenCount = 0;
               for (const [key, eid] of Object.entries(map)) {
@@ -2053,45 +2130,48 @@ class SigenergySettingsCard extends HTMLElement {
 
   _buildApexSeries(e, features) {
     const series = [];
+    // Unit-aware power transform: only divide by 1000 if sensor reports in W (not kW)
+    const powerTransform = "const u = entity?.attributes?.unit_of_measurement || ''; return (u === 'kW' || u === 'MW') ? x : x / 1000;";
+    const fp = this._storeGet()?.display?.decimal_places ?? 1;
     // Always: actual solar
     series.push({
       entity: e.solar_power || 'sensor.solar_production',
       name: 'Solar', color: '#FF8F00', type: 'area', opacity: 0.35,
       stroke_width: 2.5, extend_to: false, unit: ' kW',
-      transform: 'return x / 1000;',
+      transform: powerTransform,
       group_by: { func: 'avg', duration: '5min' },
       show: { in_header: true, legend_value: true },
-      yaxis_id: 'power', float_precision: 1
+      yaxis_id: 'power', float_precision: fp
     });
     // Always: actual battery
     series.push({
       entity: e.battery_power || 'sensor.battery_output_power',
       name: 'Battery', color: '#00C853', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
-      transform: 'return x / 1000;',
+      transform: powerTransform,
       group_by: { func: 'avg', duration: '5min' },
       show: { in_header: true, legend_value: true },
-      yaxis_id: 'power', float_precision: 1
+      yaxis_id: 'power', float_precision: fp
     });
     // Always: actual grid
     series.push({
       entity: e.grid_active_power || e.grid_power || 'sensor.net_grid_power',
       name: 'Grid', color: '#D32F2F', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
-      transform: 'return x / 1000;',
+      transform: powerTransform,
       group_by: { func: 'avg', duration: '5min' },
       show: { in_header: true, legend_value: true },
-      yaxis_id: 'power', float_precision: 1
+      yaxis_id: 'power', float_precision: fp
     });
     // Always: actual consumption (inverted)
     series.push({
       entity: e.load_power || 'sensor.home_consumption',
       name: 'Consumption', color: '#8E24AA', type: 'area', opacity: 0.08,
       stroke_width: 1.5, extend_to: false, unit: ' kW',
-      transform: 'return x / 1000;',
+      transform: powerTransform,
       group_by: { func: 'avg', duration: '5min' },
       show: { in_header: 'raw', legend_value: true },
-      yaxis_id: 'power', invert: true, float_precision: 1
+      yaxis_id: 'power', invert: true, float_precision: fp
     });
 
     // EMHASS Forecast overlays (conditional)
@@ -2100,10 +2180,10 @@ class SigenergySettingsCard extends HTMLElement {
       series.push({
         entity: e.mpc_pv, name: 'Solar (plan)', color: '#FFF59D',
         type: 'area', opacity: 0.06, curve: 'smooth', extend_to: false,
-        unit: ' kW', float_precision: 1, stroke_width: 1, stroke_dash: 5,
+        unit: ' kW', float_precision: fp, stroke_width: 1, stroke_dash: 5,
         show: { in_header: false, legend_value: false },
         data_generator: "const data = entity.attributes.forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_pv_power) / 1000]);",
-        yaxis_id: 'power', transform: 'return x / 1000;'
+        yaxis_id: 'power'
       });
       // Battery forecast
       if (e.mpc_battery) {
@@ -2113,7 +2193,7 @@ class SigenergySettingsCard extends HTMLElement {
           unit: ' kW', stroke_width: 1, stroke_dash: 5,
           show: { in_header: false, legend_value: false },
           data_generator: "const data = entity.attributes.battery_scheduled_power;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_batt_power) / 1000]);",
-          yaxis_id: 'power', transform: 'return x / 1000;', float_precision: 0
+          yaxis_id: 'power', float_precision: 0
         });
       }
       // Grid forecast
@@ -2124,7 +2204,7 @@ class SigenergySettingsCard extends HTMLElement {
           extend_to: false, unit: ' kW',
           show: { in_header: false, legend_value: false },
           data_generator: "const data = entity.attributes.forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_grid_power) / 1000]);",
-          yaxis_id: 'power', transform: 'return x / 1000;', float_precision: 0
+          yaxis_id: 'power', float_precision: 0
         });
       }
       // Load forecast (inverted)
@@ -2132,10 +2212,10 @@ class SigenergySettingsCard extends HTMLElement {
         series.push({
           entity: e.mpc_load, name: 'Load (plan)', color: '#CE93D8',
           type: 'line', curve: 'smooth', extend_to: false, unit: ' kW',
-          float_precision: 1, stroke_width: 1, stroke_dash: 4,
+          float_precision: fp, stroke_width: 1, stroke_dash: 4,
           show: { in_header: false, legend_value: false, in_chart: true },
           data_generator: "const data = entity.attributes.forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_load_power) / 1000]);",
-          yaxis_id: 'power', invert: true, opacity: 0.6, transform: 'return x / 1000;'
+          yaxis_id: 'power', invert: true, opacity: 0.6
         });
       }
       // SOC forecast (secondary axis)
