@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.8] - 2026-03-29
+
+### Fixed
+- **Entity Input Fields Now Span Full Width** — Entity input boxes in the Settings card were only ~150px wide instead of filling the available row space. The `.row-input` inside `.entity-input-wrap` lacked `width: 100%` — the `flex: 1` property had no effect since the parent wrapper is not a flex container. Entity names are now fully visible without truncation.
+
 ## [2.12.7] - 2026-03-29
 
 ### Removed

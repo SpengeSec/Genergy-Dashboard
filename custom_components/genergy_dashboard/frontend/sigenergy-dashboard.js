@@ -587,7 +587,7 @@ class SigenergySettingsCard extends HTMLElement {
         }
         .row-label { min-width: 110px; max-width: 130px; font-size: 12px; color: var(--secondary-text-color, #8892a4); white-space: nowrap; }
         .row-input {
-          flex: 1; min-width: 0; background: var(--card-background-color, #1a1f2e);
+          flex: 1; min-width: 0; width: 100%; background: var(--card-background-color, #1a1f2e);
           border: 1px solid var(--divider-color, #2d3451);
           border-radius: 6px; padding: 6px 10px;
           color: var(--primary-text-color, #fff);
