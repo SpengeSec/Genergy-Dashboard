@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.7] - 2026-03-29
+
+### Removed
+- **Removed legacy bootstrap YAML** — Deleted `dashboards/genergy.yaml` (formerly `sigenergy.yaml`) and the `dashboards/` directory. This file was legacy code from before the config flow was implemented. The dashboard is now fully auto-created by the integration's config flow and dashboard generator — no manual YAML pasting needed.
+
 ## [2.12.6] - 2026-03-29
 
 ### Changed
