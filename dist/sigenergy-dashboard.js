@@ -2482,7 +2482,7 @@ class SigenergySettingsCard extends HTMLElement {
             if (src.stat_energy_from && !cfg2.entities.battery_discharge_today) { cfg2.entities.battery_discharge_today = src.stat_energy_from; found.push('Battery discharge: ' + src.stat_energy_from); }
             if (src.stat_energy_to && !cfg2.entities.battery_charge_today) { cfg2.entities.battery_charge_today = src.stat_energy_to; found.push('Battery charge: ' + src.stat_energy_to); }
           }
-          if (src.type === 'grid') {
+          if (src.type === 'grid' && !cfg2.features.dual_tariff) {
             const flowFrom = src.flow_from || [];
             const flowTo = src.flow_to || [];
             if (flowFrom.length >= 1 && !cfg2.entities.grid_import_today) { cfg2.entities.grid_import_today = flowFrom[0].stat_energy_from; found.push('Grid import: ' + flowFrom[0].stat_energy_from); }
@@ -2501,7 +2501,12 @@ class SigenergySettingsCard extends HTMLElement {
       { key: 'grid_import_today', patterns: [/grid.*import.*energy.*daily/i, /grid.*import.*today/i, /grid.*buy.*energy.*daily/i, /electricity.*import.*daily/i, /summary_day_grid_import/i, /daily.*grid.*buy/i, /day_grid_import/i, /today.*grid.*import/i, /today.*buy/i], meter: 'grid_import' },
       { key: 'grid_export_today', patterns: [/grid.*export.*energy.*daily/i, /grid.*export.*today/i, /grid.*sell.*energy.*daily/i, /grid.*feed.*daily/i, /summary_day_grid_export/i, /daily.*grid.*sell/i, /day_grid_export/i, /today.*grid.*export/i, /today.*sell/i, /today.*feed/i], meter: 'grid_export' },
     ];
-    for (const def of energyDefs) {
+    // Filter out grid import/export from generic detection when dual_tariff is enabled
+    // (they are handled via tariff entities instead)
+    const energyDefsFiltered = cfg2.features.dual_tariff
+      ? energyDefs.filter(d => d.key !== 'grid_import_today' && d.key !== 'grid_export_today')
+      : energyDefs;
+    for (const def of energyDefsFiltered) {
       if (!cfg2.entities[def.key]) {
         // Try to find a matching daily entity
         const candidates = this._findEntityCandidates(allKeys, def.patterns, { domainFilter: 'sensor' });
@@ -2529,8 +2534,7 @@ class SigenergySettingsCard extends HTMLElement {
       ['load_energy_today', 'load_energy'],
       ['battery_charge_today', 'battery_charge'],
       ['battery_discharge_today', 'battery_discharge'],
-      ['grid_import_today', 'grid_import'],
-      ['grid_export_today', 'grid_export'],
+      ...(!cfg2.features.dual_tariff ? [['grid_import_today', 'grid_import'], ['grid_export_today', 'grid_export']] : []),
     ];
     for (const [cfgKey, meterName] of energyKeys) {
       if (cfg2.entities[cfgKey]) {
@@ -3705,8 +3709,40 @@ return forecast.map(function(d) {
       addStat(e.load_energy_today, 'Load', 'mdi:power-plug', 'purple');
       addStat(e.battery_charge_today, 'Charged', 'mdi:battery-arrow-up', 'green');
       addStat(e.battery_discharge_today, 'Discharged', 'mdi:battery-arrow-down', 'teal');
-      addStat(e.grid_import_today, 'Imported', 'mdi:transmission-tower-import', 'red');
-      addStat(e.grid_export_today, 'Exported', 'mdi:transmission-tower-export', 'blue');
+
+      // Grid import/export mushroom cards — dual tariff sums high+low via Jinja
+      if (f.dual_tariff && (e.grid_import_high_tariff || e.grid_import_low_tariff)) {
+        const hiI = e.grid_import_high_tariff, loI = e.grid_import_low_tariff;
+        const impEntity = hiI || loI;
+        const impSecondary = (hiI && loI)
+          ? "{{ (states('" + hiI + "') | float(0) + states('" + loI + "') | float(0)) | round(1) }} kWh"
+          : "{{ states('" + impEntity + "') | round(1) }} kWh";
+        statCards.push({
+          type: 'custom:mushroom-template-card',
+          entity: impEntity,
+          primary: 'Imported', icon: 'mdi:transmission-tower-import', icon_color: 'red',
+          secondary: impSecondary,
+          card_mod: { style: _cardStyle }
+        });
+      } else {
+        addStat(e.grid_import_today, 'Imported', 'mdi:transmission-tower-import', 'red');
+      }
+      if (f.dual_tariff && (e.grid_export_high_tariff || e.grid_export_low_tariff)) {
+        const hiE = e.grid_export_high_tariff, loE = e.grid_export_low_tariff;
+        const expEntity = hiE || loE;
+        const expSecondary = (hiE && loE)
+          ? "{{ (states('" + hiE + "') | float(0) + states('" + loE + "') | float(0)) | round(1) }} kWh"
+          : "{{ states('" + expEntity + "') | round(1) }} kWh";
+        statCards.push({
+          type: 'custom:mushroom-template-card',
+          entity: expEntity,
+          primary: 'Exported', icon: 'mdi:transmission-tower-export', icon_color: 'blue',
+          secondary: expSecondary,
+          card_mod: { style: _cardStyle }
+        });
+      } else {
+        addStat(e.grid_export_today, 'Exported', 'mdi:transmission-tower-export', 'blue');
+      }
 
       // Build self-sufficiency card
       const selfSuffCard = (e.solar_energy_today && e.load_energy_today) ? {
@@ -3853,11 +3889,23 @@ return forecast.map(function(d) {
       if (f.show_ev_in_sankey && evSankeyEntity) sankeyDest.push({ entity_id: evSankeyEntity, name: 'EV', color: '#ff69b4' });
       if (f.show_hp_in_sankey && hpSankeyEntity) sankeyDest.push({ entity_id: hpSankeyEntity, name: 'HP', color: '#e67e22' });
       if (e.battery_charge_today) sankeyDest.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
-      if (e.grid_export_today) sankeyDest.push({ entity_id: e.grid_export_today, name: 'Grid', color: '#7c5cbf' });
+
+      // Grid export destination — dual tariff uses add_entities to sum high+low, fallback to grid_export_today
+      const _hasDualExport = f.dual_tariff && (e.grid_export_high_tariff || e.grid_export_low_tariff);
+      const _gridExportId = _hasDualExport ? (e.grid_export_high_tariff || e.grid_export_low_tariff) : e.grid_export_today;
+      const _gridExportAdd = (_hasDualExport && e.grid_export_high_tariff && e.grid_export_low_tariff)
+        ? [e.grid_export_high_tariff === _gridExportId ? e.grid_export_low_tariff : e.grid_export_high_tariff]
+        : undefined;
+      if (_gridExportId) {
+        const exportNode = { entity_id: _gridExportId, name: 'Grid', color: '#7c5cbf' };
+        if (_gridExportAdd) exportNode.add_entities = _gridExportAdd;
+        sankeyDest.push(exportNode);
+      }
 
       // Build source children arrays — sources can flow to all destinations
-      const battDischargeChildren = [e.grid_export_today, e.load_energy_today].filter(Boolean);
-      const solarChildren = [e.battery_charge_today, e.grid_export_today, e.load_energy_today].filter(Boolean);
+      const _gridExportChild = _gridExportId || e.grid_export_today;
+      const battDischargeChildren = [_gridExportChild, e.load_energy_today].filter(Boolean);
+      const solarChildren = [e.battery_charge_today, _gridExportChild, e.load_energy_today].filter(Boolean);
       const gridImportChildren = [e.battery_charge_today, e.load_energy_today].filter(Boolean);
 
       // Add EV/HP as potential children of all sources (energy can flow from any source)
@@ -3871,6 +3919,15 @@ return forecast.map(function(d) {
         solarChildren.push(hpSankeyEntity);
         gridImportChildren.push(hpSankeyEntity);
       }
+
+      // Grid import source — dual tariff uses add_entities to sum high+low, fallback to grid_import_today
+      const _hasDualImport = f.dual_tariff && (e.grid_import_high_tariff || e.grid_import_low_tariff);
+      const _gridImportId = _hasDualImport ? (e.grid_import_high_tariff || e.grid_import_low_tariff) : e.grid_import_today;
+      const _gridImportAdd = (_hasDualImport && e.grid_import_high_tariff && e.grid_import_low_tariff)
+        ? [e.grid_import_high_tariff === _gridImportId ? e.grid_import_low_tariff : e.grid_import_high_tariff]
+        : undefined;
+      const gridImportNode = { entity_id: _gridImportId, name: 'Grid', color: '#6b7fd4', children: gridImportChildren };
+      if (_gridImportAdd) gridImportNode.add_entities = _gridImportAdd;
 
       const sankeyChart = {
         type: 'custom:sankey-chart',
@@ -3886,7 +3943,7 @@ return forecast.map(function(d) {
             // destinations first). Put smallest source (Grid) first so it gets visible
             // flow lines even when larger sources would otherwise consume all destinations.
             entities: [
-              { entity_id: e.grid_import_today, name: 'Grid', color: '#6b7fd4', children: gridImportChildren },
+              gridImportNode,
               { entity_id: e.battery_discharge_today, name: 'Battery', color: '#00d4b8', children: battDischargeChildren },
               { entity_id: e.solar_energy_today, name: 'Solar', color: '#c8b84a', children: solarChildren }
             ].filter(x => x.entity_id)
@@ -3899,12 +3956,19 @@ return forecast.map(function(d) {
       };
       // Rebuild the Jinja :host{} block fresh — includes EV/HP CSS variables when enabled
       const _j = (eid) => "states('" + eid + "') | float(0)";
+      // Grid import/export Jinja: sum high+low tariffs when dual_tariff is on
+      const _gridImpJinja = (_hasDualImport && e.grid_import_high_tariff && e.grid_import_low_tariff)
+        ? _j(e.grid_import_high_tariff) + " + " + _j(e.grid_import_low_tariff)
+        : _j(e.grid_import_today || _gridImportId || '');
+      const _gridExpJinja = (_hasDualExport && e.grid_export_high_tariff && e.grid_export_low_tariff)
+        ? _j(e.grid_export_high_tariff) + " + " + _j(e.grid_export_low_tariff)
+        : _j(e.grid_export_today || _gridExportId || '');
       let jinjaHost = "{% set pv = " + _j(e.solar_energy_today || '') + " %}\n";
       jinjaHost += "{% set bat_d = " + _j(e.battery_discharge_today || '') + " %}\n";
-      jinjaHost += "{% set grid_i = " + _j(e.grid_import_today || '') + " %}\n";
+      jinjaHost += "{% set grid_i = " + _gridImpJinja + " %}\n";
       jinjaHost += "{% set bat_c = " + _j(e.battery_charge_today || '') + " %}\n";
       jinjaHost += "{% set load = " + _j(e.load_energy_today || '') + " %}\n";
-      jinjaHost += "{% set grid_e = " + _j(e.grid_export_today || '') + " %}\n";
+      jinjaHost += "{% set grid_e = " + _gridExpJinja + " %}\n";
       let dstSum = 'bat_c + load + grid_e';
       if (f.show_ev_in_sankey && evSankeyEntity) {
         jinjaHost += "{% set ev = " + _j(evSankeyEntity) + " %}\n";
