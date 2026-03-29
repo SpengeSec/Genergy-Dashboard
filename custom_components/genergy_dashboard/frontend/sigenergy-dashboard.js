@@ -585,18 +585,19 @@ class SigenergySettingsCard extends HTMLElement {
           margin-bottom: 6px; padding: 6px 8px;
           background: rgba(45,52,81,0.4); border-radius: 8px;
         }
-        .row-label { min-width: 130px; font-size: 12px; color: var(--secondary-text-color, #8892a4); }
+        .row-label { min-width: 110px; max-width: 130px; font-size: 12px; color: var(--secondary-text-color, #8892a4); white-space: nowrap; }
         .row-input {
-          flex: 1; background: var(--card-background-color, #1a1f2e);
+          flex: 1; min-width: 0; background: var(--card-background-color, #1a1f2e);
           border: 1px solid var(--divider-color, #2d3451);
           border-radius: 6px; padding: 6px 10px;
           color: var(--primary-text-color, #fff);
-          font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace;
+          font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace;
+          text-overflow: ellipsis;
         }
         .row-input:focus { outline: none; border-color: #00d4b8; }
         .row-state {
-          min-width: 90px; text-align: right; font-size: 11px;
-          font-weight: 600; color: #00d4b8;
+          min-width: 80px; text-align: right; font-size: 11px;
+          font-weight: 600; color: #00d4b8; white-space: nowrap;
         }
         .row-state.err { color: #e74c3c; }
         .toggle-row {
@@ -640,7 +641,7 @@ class SigenergySettingsCard extends HTMLElement {
         }
         .save-btn:hover { opacity: 0.88; }
         select.row-input { cursor: pointer; }
-        .entity-input-wrap { position: relative; flex: 1; }
+        .entity-input-wrap { position: relative; flex: 1; min-width: 0; }
         .entity-dropdown {
           position: absolute; left: 0; right: 0; top: 100%;
           background: var(--card-background-color, #1a1f2e);

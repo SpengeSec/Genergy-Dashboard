@@ -2,6 +2,13 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.2] - 2026-03-29
+
+### Fixed
+- **Entity Input Fields Wider** — Reduced label min-width from 130px to 110px, reduced state column from 90px to 80px, added `min-width: 0` to entity-input-wrap and row-input for proper flex shrinking. Entity names like `sensor.deyeinvertermaster_battery_power` are no longer cut off.
+- **Input Font Size** — Reduced entity input font from 12px to 11px to fit more characters.
+- **Text Overflow** — Added `text-overflow: ellipsis` on inputs and `white-space: nowrap` on labels/states for cleaner overflow handling.
+
 ## [2.12.1] - 2026-03-29
 
 ### Fixed
