@@ -150,6 +150,7 @@
                   "wide": true,
                   "min_box_size": 50,
                   "min_box_distance": 8,
+                  "unit_prefix": "k",
                   "energy_date_selection": false,
                   "sections": [
                     {

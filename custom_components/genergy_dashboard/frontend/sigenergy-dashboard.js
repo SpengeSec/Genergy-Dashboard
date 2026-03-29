@@ -417,6 +417,8 @@ class SigenergySettingsCard extends HTMLElement {
       // Convert MWh → kWh and Wh → kWh for clearer energy display
       if (u === 'MWh') return `${(num * 1000).toFixed(2)} kWh`;
       if (u === 'Wh') return `${(num / 1000).toFixed(2)} kWh`;
+      // Convert MW → kW for clearer power display
+      if (u === 'MW') return `${(num * 1000).toFixed(2)} kW`;
       let decimals;
       if (u === 'V' || u === 'W' || u === 'VA') decimals = 1;
       else if (u === 'kW' || u === 'kWh') decimals = 2;
@@ -2492,12 +2494,12 @@ class SigenergySettingsCard extends HTMLElement {
 
     // Step 2: Generic fallback detection for missing daily energy entities
     const energyDefs = [
-      { key: 'solar_energy_today', patterns: [/solar.*energy.*daily/i, /solar.*energy.*today/i, /solar.*production.*daily/i, /pv.*energy.*today/i, /solar.*yield.*today/i], meter: 'solar_energy' },
-      { key: 'load_energy_today', patterns: [/load.*energy.*daily/i, /load.*energy.*today/i, /consumption.*energy.*daily/i, /consumption.*today/i, /home.*consumption.*daily/i], meter: 'load_energy' },
-      { key: 'battery_charge_today', patterns: [/battery.*charge.*energy.*daily/i, /battery.*charge.*today/i, /battery.*input.*energy.*daily/i], meter: 'battery_charge' },
-      { key: 'battery_discharge_today', patterns: [/battery.*discharge.*energy.*daily/i, /battery.*discharge.*today/i, /battery.*output.*energy.*daily/i], meter: 'battery_discharge' },
-      { key: 'grid_import_today', patterns: [/grid.*import.*energy.*daily/i, /grid.*import.*today/i, /grid.*buy.*energy.*daily/i, /electricity.*import.*daily/i], meter: 'grid_import' },
-      { key: 'grid_export_today', patterns: [/grid.*export.*energy.*daily/i, /grid.*export.*today/i, /grid.*sell.*energy.*daily/i, /grid.*feed.*daily/i], meter: 'grid_export' },
+      { key: 'solar_energy_today', patterns: [/solar.*energy.*daily/i, /solar.*energy.*today/i, /solar.*production.*daily/i, /pv.*energy.*today/i, /solar.*yield.*today/i, /summary_day_pv/i, /daily_yield_energy/i, /day_pv_energy/i, /today.*generation/i, /daily_generation/i, /solar.*today.*kwh/i], meter: 'solar_energy' },
+      { key: 'load_energy_today', patterns: [/load.*energy.*daily/i, /load.*energy.*today/i, /consumption.*energy.*daily/i, /consumption.*today/i, /home.*consumption.*daily/i, /summary_day_load/i, /daily_consumption/i, /day_load_energy/i, /today.*consumption/i], meter: 'load_energy' },
+      { key: 'battery_charge_today', patterns: [/battery.*charge.*energy.*daily/i, /battery.*charge.*today/i, /battery.*input.*energy.*daily/i, /summary_day_battery_charge/i, /daily_charge_energy/i, /day_battery_charge/i, /today.*battery.*charge/i], meter: 'battery_charge' },
+      { key: 'battery_discharge_today', patterns: [/battery.*discharge.*energy.*daily/i, /battery.*discharge.*today/i, /battery.*output.*energy.*daily/i, /summary_day_battery_discharge/i, /daily_discharge_energy/i, /day_battery_discharge/i, /today.*battery.*discharge/i], meter: 'battery_discharge' },
+      { key: 'grid_import_today', patterns: [/grid.*import.*energy.*daily/i, /grid.*import.*today/i, /grid.*buy.*energy.*daily/i, /electricity.*import.*daily/i, /summary_day_grid_import/i, /daily.*grid.*buy/i, /day_grid_import/i, /today.*grid.*import/i, /today.*buy/i], meter: 'grid_import' },
+      { key: 'grid_export_today', patterns: [/grid.*export.*energy.*daily/i, /grid.*export.*today/i, /grid.*sell.*energy.*daily/i, /grid.*feed.*daily/i, /summary_day_grid_export/i, /daily.*grid.*sell/i, /day_grid_export/i, /today.*grid.*export/i, /today.*sell/i, /today.*feed/i], meter: 'grid_export' },
     ];
     for (const def of energyDefs) {
       if (!cfg2.entities[def.key]) {
@@ -3094,7 +3096,7 @@ class SigenergySettingsCard extends HTMLElement {
   _buildApexSeries(e, features, cfg) {
     const series = [];
     // Unit-aware power transform: only divide by 1000 if sensor reports in W (not kW)
-    const powerTransform = "const u = entity?.attributes?.unit_of_measurement || ''; return (u === 'kW' || u === 'MW') ? x : x / 1000;";
+    const powerTransform = "const u = entity?.attributes?.unit_of_measurement || ''; return u === 'MW' ? x * 1000 : u === 'kW' ? x : x / 1000;";
     const fp = this._storeGet()?.display?.decimal_places ?? 1;
     // Actual solar
     if (e.solar_power) series.push({
@@ -3652,13 +3654,14 @@ return forecast.map(function(d) {
 
       // Build status mushroom cards
       // Helper: build Jinja template that shows value + unit from the sensor itself
+      const pwrThresh = cfg.display?.power_threshold || 1000;
       const _powerTpl = (eid) => {
         // Normalise to watts then auto-scale so the chip always shows a sensible value.
         // state_attr might return None (HA bug / entity loading), so coerce via default(…, true).
         return "{% set u = (state_attr('" + eid + "', 'unit_of_measurement') or 'W') | string %}" +
                "{% set raw = states('" + eid + "') | float(0) %}" +
-               "{% set w = raw * 1000 if u == 'kW' else raw %}" +
-               "{% if w >= 1000 %}{{ (w / 1000) | round(2) }} kW{% else %}{{ w | round(0) }} W{% endif %}";
+               "{% set w = raw * 1000000 if u == 'MW' else raw * 1000 if u == 'kW' else raw %}" +
+               "{% if w >= " + pwrThresh + " %}{{ (w / 1000) | round(2) }} kW{% else %}{{ w | round(0) }} W{% endif %}";
       };
 
       // Theme-aware card style — uses HA CSS variables with dark-theme fallbacks
@@ -3874,7 +3877,7 @@ return forecast.map(function(d) {
         layout: 'horizontal',
         show_names: true, show_states: true, show_units: true, show_icons: false,
         round: 1, height: 480, wide: true,
-        min_box_size: 50, min_box_distance: 8,
+        min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
         min_state: 0.01,
         energy_date_selection: false,
         sections: [
