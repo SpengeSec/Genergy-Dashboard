@@ -2170,7 +2170,7 @@ class SigenergySettingsCard extends HTMLElement {
       stroke_width: 1.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
       group_by: { func: 'avg', duration: '5min' },
-      show: { in_header: 'raw', legend_value: true },
+      show: { in_header: true, legend_value: true },
       yaxis_id: 'power', invert: true, float_precision: fp
     });
 
@@ -2340,7 +2340,7 @@ return forecast.map(function(d) {
           extend_to: false, unit: ' kW', stroke_width: 0.8, stroke_dash: 4,
           show: { in_header: false, legend_value: false },
           data_generator: "const data = entity.attributes.deferrables_schedule;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_deferrable0) / 1000]);",
-          yaxis_id: 'power', invert: true, transform: 'return x / 1000;', float_precision: 0
+          yaxis_id: 'power', invert: true, float_precision: 0
         });
       }
       if (e.mpc_deferrable1) {
@@ -2350,7 +2350,7 @@ return forecast.map(function(d) {
           extend_to: false, unit: ' kW', stroke_width: 0.8, stroke_dash: 4,
           show: { in_header: false, legend_value: false },
           data_generator: "const data = entity.attributes.deferrables_schedule;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_deferrable1) / 1000]);",
-          yaxis_id: 'power', invert: true, transform: 'return x / 1000;', float_precision: 0
+          yaxis_id: 'power', invert: true, float_precision: 0
         });
       }
       // Actual deferrable power
@@ -2358,10 +2358,10 @@ return forecast.map(function(d) {
         series.push({
           entity: e.deferrable0_power, name: e.deferrable0_label || 'Deferrable 0',
           color: '#E65100', type: 'line', stroke_width: 1.5, extend_to: false,
-          transform: 'return x / 1000;', unit: ' kW',
+          transform: powerTransform, unit: ' kW',
           group_by: { func: 'avg', duration: '5min' },
           show: { in_header: false, legend_value: false },
-          yaxis_id: 'power', invert: true, opacity: 1, float_precision: 1
+          yaxis_id: 'power', invert: true, opacity: 1, float_precision: fp
         });
       }
     }
