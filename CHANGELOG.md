@@ -2,6 +2,19 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.13.1] - 2026-03-29
+
+### Fixed
+- **Label Overflow in Entity Rows** — Long entity row labels (e.g. "Battery Reserved SoC") were overflowing their container and overlapping input fields. Replaced `white-space: nowrap` with `overflow: hidden; text-overflow: ellipsis` on `.row-label`, widened max-width to 140px.
+- **Hardcoded Entity Fallbacks Removed** — Nine chart series and mushroom status cards had `|| 'sensor.xxx'` fallbacks that showed "entity not found" errors on fresh installs. All series and cards are now conditional — they only render when the entity is actually configured.
+- **EMHASS False-Positive Auto-Detect** — The EMS auto-detect was too broad: any entity containing "emhass" triggered EMHASS mode, and backward-compat migration used `!== false` (truthy for `undefined`). Now requires both the mode entity AND MPC entities to be present, and uses strict `=== true` check.
+- **Daily Energy Helper Auto-Creation** — `_autoDetectDailyEnergy` only queried `energy/get_prefs` with no fallback. Now uses a 3-step process: HA energy preferences → pattern matching → automatic `utility_meter` helper creation via `_ensureDailyMeter()` for cumulative sensors that lack daily variants.
+- **Unit of Measurement in Entity Picker** — Candidate entities in the picker dropdown and autocomplete now show their unit of measurement (e.g. "sensor.grid_power — W"), making it easier to distinguish between similarly-named sensors with different units.
+- **"Create Daily Helper" Button** — Entity rows for cumulative energy sensors now show a dedicated button to create a `utility_meter` daily helper on demand, providing a one-click solution when auto-detect doesn't find a daily sensor.
+
+### Notes
+- **HACS Icon** — Investigated the HACS dashboard not showing the Genergy brand icon. This is a HACS limitation: HACS 2.x hardcodes CDN URLs (`brands.home-assistant.io`) for entity pictures. The local `brand/` directory works correctly in native HA UI. No fix possible on our side — requires a HACS update or accepted brands PR.
+
 ## [2.13.0] - 2026-03-29
 
 ### Changed

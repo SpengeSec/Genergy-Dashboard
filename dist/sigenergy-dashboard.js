@@ -320,7 +320,7 @@ class SigConfigStore {
     }
     // Backward compat: migrate old boolean emhass flag to ems_provider
     if (result.features && result.features.ems_provider === undefined) {
-      result.features.ems_provider = result.features.emhass !== false ? 'emhass' : 'none';
+      result.features.ems_provider = result.features.emhass === true ? 'emhass' : 'none';
     }
     return result;
   }
@@ -585,7 +585,7 @@ class SigenergySettingsCard extends HTMLElement {
           margin-bottom: 6px; padding: 6px 8px;
           background: rgba(45,52,81,0.4); border-radius: 8px;
         }
-        .row-label { min-width: 110px; max-width: 130px; font-size: 12px; color: var(--secondary-text-color, #8892a4); white-space: nowrap; }
+        .row-label { min-width: 100px; max-width: 140px; font-size: 12px; color: var(--secondary-text-color, #8892a4); overflow: hidden; text-overflow: ellipsis; }
         .row-input {
           flex: 1; min-width: 0; width: 100%; background: var(--card-background-color, #1a1f2e);
           border: 1px solid var(--divider-color, #2d3451);
@@ -864,8 +864,23 @@ class SigenergySettingsCard extends HTMLElement {
     const candidateHTML = candidates.length > 1 || (candidates.length > 0 && !id) ? `
       <div class="candidate-picker" data-cand-key="${key}">
         <div class="cp-header">Choose entity:</div>
-        ${candidates.map(c => `<div class="candidate-item${c.disabled ? ' cand-disabled' : ''}" data-cand-id="${this._esc(c.id)}"><span class="ci-id">${this._esc(c.id)}${c.friendly_name ? ' <span class="ci-fn">(' + this._esc(c.friendly_name) + ')</span>' : ''}</span><span class="ci-val">= ${this._esc(String(c.value))}</span>${c.disabled ? '<span class="ci-badge">disabled</span>' : ''}</div>`).join('')}
+        ${candidates.map(c => `<div class="candidate-item${c.disabled ? ' cand-disabled' : ''}" data-cand-id="${this._esc(c.id)}"><span class="ci-id">${this._esc(c.id)}${c.friendly_name ? ' <span class="ci-fn">(' + this._esc(c.friendly_name) + ')</span>' : ''}</span><span class="ci-val">= ${this._esc(String(c.value))}${c.unit ? ' ' + this._esc(c.unit) : ''}</span>${c.disabled ? '<span class="ci-badge">disabled</span>' : ''}</div>`).join('')}
       </div>` : '';
+    // Check if this is a daily energy field with a cumulative source — offer to create helper
+    let helperHTML = '';
+    const dailyKeys = ['solar_energy_today','load_energy_today','battery_charge_today','battery_discharge_today','grid_import_today','grid_export_today','ev_energy_today','heat_pump_energy_today'];
+    if (id && dailyKeys.includes(key) && this._hass?.states?.[id]) {
+      const st = this._hass.states[id];
+      const sc = st?.attributes?.state_class;
+      const uom = st?.attributes?.unit_of_measurement || '';
+      const val = parseFloat(st?.state);
+      const isEnergy = uom === 'kWh' || uom === 'MWh' || uom === 'Wh';
+      const valKwh = uom === 'MWh' ? val * 1000 : uom === 'Wh' ? val / 1000 : val;
+      const isCumulative = (sc === 'total_increasing' || sc === 'total') && isEnergy && valKwh > 50;
+      if (isCumulative) {
+        helperHTML = `<div style="margin:-2px 0 4px 110px;padding:6px 10px;background:rgba(255,165,0,0.1);border:1px solid rgba(255,165,0,0.3);border-radius:6px;font-size:11px;color:#ffa726;">⚠️ Lifetime entity detected (${this._esc(String(Math.round(valKwh)))} kWh). <button class="create-daily-helper-btn" data-key="${key}" data-source="${this._esc(id)}" style="background:#FF8F00;color:#fff;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;margin-left:6px;">Create Daily Helper</button></div>`;
+      }
+    }
     return `
       <div class="row">
         <span class="row-label">${label}</span>
@@ -875,7 +890,7 @@ class SigenergySettingsCard extends HTMLElement {
           ${candidateHTML}
         </div>
         <span class="row-state ${isErr?'err':''}" data-entity="${this._esc(id)}">${state}</span>
-      </div>`;
+      </div>${helperHTML}`;
   }
 
   _esc(str) { return (str||'').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
@@ -1010,7 +1025,7 @@ class SigenergySettingsCard extends HTMLElement {
 
   _renderEntities(el, cfg) {
     const e = cfg.entities || {};
-    const emsProvider = cfg.features?.ems_provider || (cfg.features?.emhass !== false ? 'emhass' : 'none');
+    const emsProvider = cfg.features?.ems_provider || (cfg.features?.emhass === true ? 'emhass' : 'none');
     const emhassOn = emsProvider === 'emhass';
     const haeoOn = emsProvider === 'haeo';
     el.innerHTML = `
@@ -1353,7 +1368,8 @@ class SigenergySettingsCard extends HTMLElement {
             const st = this._hass.states[k];
             const fn = st?.attributes?.friendly_name || '';
             const val = st?.state || '';
-            return '<div class="entity-dropdown-item" data-eid="' + this._esc(k) + '"><span class="entity-name">' + this._esc(k) + '</span>' + (fn ? ' <span class="entity-state">' + this._esc(fn) + '</span>' : '') + ' <span class="entity-state">= ' + this._esc(val) + '</span></div>';
+            const uom = st?.attributes?.unit_of_measurement || '';
+            return '<div class="entity-dropdown-item" data-eid="' + this._esc(k) + '"><span class="entity-name">' + this._esc(k) + '</span>' + (fn ? ' <span class="entity-state">' + this._esc(fn) + '</span>' : '') + ' <span class="entity-state">= ' + this._esc(val) + (uom ? ' ' + this._esc(uom) : '') + '</span></div>';
           }).join('');
           dropdown.classList.add('open');
           activeDropdown = dropdown;
@@ -1393,6 +1409,36 @@ class SigenergySettingsCard extends HTMLElement {
         // Clear candidates for this key
         if (this._candidates) delete this._candidates[candKey];
         this._render();
+      });
+    });
+
+    // Handle "Create Daily Helper" buttons
+    el.querySelectorAll('.create-daily-helper-btn').forEach(btn => {
+      btn.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        const key = btn.dataset.key;
+        const source = btn.dataset.source;
+        if (!key || !source) return;
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+        const meterName = key.replace('_today', '').replace('_energy', '_energy');
+        try {
+          const result = await this._ensureDailyMeter(source, meterName);
+          if (result.isCumulative && result.dailyEntity) {
+            const cfg2 = this._storeGet();
+            cfg2.entities[key] = result.dailyEntity;
+            this._storeSave(cfg2);
+            btn.textContent = '✓ Created: ' + result.dailyEntity;
+            btn.style.background = '#00d4b8';
+            setTimeout(() => this._render(), 1500);
+          } else {
+            btn.textContent = 'Not needed (entity is already daily)';
+            btn.style.background = '#8892a4';
+          }
+        } catch (err) {
+          btn.textContent = '❌ Failed: ' + (err.message || 'Unknown error');
+          btn.style.background = '#e74c3c';
+        }
       });
     });
 
@@ -2316,7 +2362,8 @@ class SigenergySettingsCard extends HTMLElement {
         return false;
       })) {
         const fn = st?.attributes?.friendly_name || '';
-        candidates.push({ id: k, value: st?.state || '?', disabled: false, friendly_name: fn });
+        const uom = st?.attributes?.unit_of_measurement || '';
+        candidates.push({ id: k, value: st?.state || '?', disabled: false, friendly_name: fn, unit: uom });
         seen.add(k);
       }
     }
@@ -2405,25 +2452,83 @@ class SigenergySettingsCard extends HTMLElement {
   async _autoDetectDailyEnergy() {
     const found = [];
     const cfg2 = this._storeGet();
+    if (!this._hass?.states) return found;
+    const allKeys = Object.keys(this._hass.states);
+    if (!this._candidates) this._candidates = {};
+
+    // Step 1: Try HA Energy Dashboard config first
     try {
       const prefs = await this._hass.callWS({ type: 'energy/get_prefs' });
-      if (!prefs?.energy_sources) return found;
-      for (const src of prefs.energy_sources) {
-        if (src.type === 'solar' && src.stat_energy_from) {
-          cfg2.entities.solar_energy_today = src.stat_energy_from; found.push('Solar: ' + src.stat_energy_from);
-        }
-        if (src.type === 'battery') {
-          if (src.stat_energy_from) { cfg2.entities.battery_discharge_today = src.stat_energy_from; found.push('Battery discharge: ' + src.stat_energy_from); }
-          if (src.stat_energy_to) { cfg2.entities.battery_charge_today = src.stat_energy_to; found.push('Battery charge: ' + src.stat_energy_to); }
-        }
-        if (src.type === 'grid') {
-          const flowFrom = src.flow_from || [];
-          const flowTo = src.flow_to || [];
-          if (flowFrom.length >= 1) { cfg2.entities.grid_import_today = flowFrom[0].stat_energy_from; found.push('Grid import: ' + flowFrom[0].stat_energy_from); }
-          if (flowTo.length >= 1) { cfg2.entities.grid_export_today = flowTo[0].stat_energy_to; found.push('Grid export: ' + flowTo[0].stat_energy_to); }
+      if (prefs?.energy_sources) {
+        for (const src of prefs.energy_sources) {
+          if (src.type === 'solar' && src.stat_energy_from && !cfg2.entities.solar_energy_today) {
+            cfg2.entities.solar_energy_today = src.stat_energy_from; found.push('Solar: ' + src.stat_energy_from);
+          }
+          if (src.type === 'battery') {
+            if (src.stat_energy_from && !cfg2.entities.battery_discharge_today) { cfg2.entities.battery_discharge_today = src.stat_energy_from; found.push('Battery discharge: ' + src.stat_energy_from); }
+            if (src.stat_energy_to && !cfg2.entities.battery_charge_today) { cfg2.entities.battery_charge_today = src.stat_energy_to; found.push('Battery charge: ' + src.stat_energy_to); }
+          }
+          if (src.type === 'grid') {
+            const flowFrom = src.flow_from || [];
+            const flowTo = src.flow_to || [];
+            if (flowFrom.length >= 1 && !cfg2.entities.grid_import_today) { cfg2.entities.grid_import_today = flowFrom[0].stat_energy_from; found.push('Grid import: ' + flowFrom[0].stat_energy_from); }
+            if (flowTo.length >= 1 && !cfg2.entities.grid_export_today) { cfg2.entities.grid_export_today = flowTo[0].stat_energy_to; found.push('Grid export: ' + flowTo[0].stat_energy_to); }
+          }
         }
       }
-    } catch (e) { console.error('Daily energy detect error:', e); }
+    } catch (e) { console.warn('energy/get_prefs not available, using fallback detection'); }
+
+    // Step 2: Generic fallback detection for missing daily energy entities
+    const energyDefs = [
+      { key: 'solar_energy_today', patterns: [/solar.*energy.*daily/i, /solar.*energy.*today/i, /solar.*production.*daily/i, /pv.*energy.*today/i, /solar.*yield.*today/i], meter: 'solar_energy' },
+      { key: 'load_energy_today', patterns: [/load.*energy.*daily/i, /load.*energy.*today/i, /consumption.*energy.*daily/i, /consumption.*today/i, /home.*consumption.*daily/i], meter: 'load_energy' },
+      { key: 'battery_charge_today', patterns: [/battery.*charge.*energy.*daily/i, /battery.*charge.*today/i, /battery.*input.*energy.*daily/i], meter: 'battery_charge' },
+      { key: 'battery_discharge_today', patterns: [/battery.*discharge.*energy.*daily/i, /battery.*discharge.*today/i, /battery.*output.*energy.*daily/i], meter: 'battery_discharge' },
+      { key: 'grid_import_today', patterns: [/grid.*import.*energy.*daily/i, /grid.*import.*today/i, /grid.*buy.*energy.*daily/i, /electricity.*import.*daily/i], meter: 'grid_import' },
+      { key: 'grid_export_today', patterns: [/grid.*export.*energy.*daily/i, /grid.*export.*today/i, /grid.*sell.*energy.*daily/i, /grid.*feed.*daily/i], meter: 'grid_export' },
+    ];
+    for (const def of energyDefs) {
+      if (!cfg2.entities[def.key]) {
+        // Try to find a matching daily entity
+        const candidates = this._findEntityCandidates(allKeys, def.patterns, { domainFilter: 'sensor' });
+        if (candidates.length > 0) {
+          this._assignCandidate(def.key, candidates, cfg2, found);
+        } else {
+          // Try to find a cumulative/lifetime entity that could be converted
+          const cumulativePatterns = def.patterns.map(p => new RegExp(p.source.replace(/daily|today/gi, '').replace(/\.\*\.\*/g, '.*'), 'i'));
+          const cumCandidates = this._findEntityCandidates(allKeys, cumulativePatterns, { domainFilter: 'sensor' });
+          // Filter to only cumulative entities (total_increasing state class)
+          const actualCumulative = cumCandidates.filter(eid => {
+            const s = this._hass.states[eid];
+            return s?.attributes?.state_class === 'total_increasing' || s?.attributes?.state_class === 'total';
+          });
+          if (actualCumulative.length > 0) {
+            this._assignCandidate(def.key, actualCumulative, cfg2, found);
+          }
+        }
+      }
+    }
+
+    // Step 3: For all detected energy entities, check if cumulative and auto-create daily helpers
+    const energyKeys = [
+      ['solar_energy_today', 'solar_energy'],
+      ['load_energy_today', 'load_energy'],
+      ['battery_charge_today', 'battery_charge'],
+      ['battery_discharge_today', 'battery_discharge'],
+      ['grid_import_today', 'grid_import'],
+      ['grid_export_today', 'grid_export'],
+    ];
+    for (const [cfgKey, meterName] of energyKeys) {
+      if (cfg2.entities[cfgKey]) {
+        const result = await this._ensureDailyMeter(cfg2.entities[cfgKey], meterName);
+        if (result.isCumulative) {
+          const origEntity = cfg2.entities[cfgKey];
+          cfg2.entities[cfgKey] = result.dailyEntity;
+          found.push('⚡ ' + meterName + ': created daily helper (' + origEntity + ' → ' + result.dailyEntity + ')');
+        }
+      }
+    }
+
     if (found.length > 0) this._storeSave(cfg2);
     return found;
   }
@@ -2530,14 +2635,19 @@ class SigenergySettingsCard extends HTMLElement {
       cfg2.features.ems_provider = 'haeo'; cfg2.features.haeo_forecasts = true;
       found.push('✓ HAEO detected');
     }
-    // EMHASS detection fallback
+    // EMHASS detection fallback — require both mode AND at least one MPC entity
     if (!statusKey) {
       const emhassC = this._findEntityCandidates(allKeys, [
-        (k) => k.includes('emhass') && (k.includes('_mode') || k.includes('_status')),
+        (k) => k.includes('emhass') && k.includes('_mode') && !k.includes('_mode_'),
+        (k) => k.startsWith('sensor.emhass_') && k.endsWith('_mode'),
       ], { domainFilter: 'sensor' });
-      this._assignCandidate('emhass_mode', emhassC, cfg2, found);
-      if (cfg2.entities.emhass_mode) {
-        cfg2.features.ems_provider = 'emhass';
+      // Confirm EMHASS by checking for MPC entities too
+      const hasMpc = allKeys.some(k => k.startsWith('sensor.') && k.includes('mpc_') && (k.includes('_pv') || k.includes('_battery') || k.includes('_grid')));
+      if (emhassC.length > 0 && hasMpc) {
+        this._assignCandidate('emhass_mode', emhassC, cfg2, found);
+        if (cfg2.entities.emhass_mode) {
+          cfg2.features.ems_provider = 'emhass';
+        }
       }
     }
     if (found.length > 0) this._storeSave(cfg2);
@@ -2610,7 +2720,7 @@ class SigenergySettingsCard extends HTMLElement {
 
   _renderFeatures(el, cfg) {
     const f = cfg.features || {};
-    const emsProvider = f.ems_provider || (f.emhass !== false ? 'emhass' : 'none');
+    const emsProvider = f.ems_provider || (f.emhass === true ? 'emhass' : 'none');
     el.innerHTML = `
       <div style="margin-bottom:12px;padding:10px;background:rgba(63,81,181,0.08);border:1px solid rgba(63,81,181,0.2);border-radius:8px;">
         <div style="font-size:11px;color:#8892a4;line-height:1.5;">
@@ -2974,9 +3084,9 @@ class SigenergySettingsCard extends HTMLElement {
     // Unit-aware power transform: only divide by 1000 if sensor reports in W (not kW)
     const powerTransform = "const u = entity?.attributes?.unit_of_measurement || ''; return (u === 'kW' || u === 'MW') ? x : x / 1000;";
     const fp = this._storeGet()?.display?.decimal_places ?? 1;
-    // Always: actual solar
-    series.push({
-      entity: e.solar_power || 'sensor.solar_production',
+    // Actual solar
+    if (e.solar_power) series.push({
+      entity: e.solar_power,
       name: 'Solar', color: '#FF8F00', type: 'area', opacity: 0.35,
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
@@ -2984,9 +3094,9 @@ class SigenergySettingsCard extends HTMLElement {
       show: { in_header: true, legend_value: true },
       yaxis_id: 'power', float_precision: fp
     });
-    // Always: actual battery
-    series.push({
-      entity: e.battery_power || 'sensor.battery_output_power',
+    // Actual battery
+    if (e.battery_power) series.push({
+      entity: e.battery_power,
       name: 'Battery', color: '#00C853', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
@@ -2994,8 +3104,8 @@ class SigenergySettingsCard extends HTMLElement {
       show: { in_header: true, legend_value: true },
       yaxis_id: 'power', float_precision: fp
     });
-    // Always: actual grid
-    series.push({
+    // Actual grid
+    if (e.grid_active_power || e.grid_power) series.push({
       entity: e.grid_active_power || e.grid_power,
       name: 'Grid', color: '#D32F2F', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
@@ -3004,9 +3114,9 @@ class SigenergySettingsCard extends HTMLElement {
       show: { in_header: true, legend_value: true },
       yaxis_id: 'power', float_precision: fp
     });
-    // Always: actual consumption (inverted)
-    series.push({
-      entity: e.load_power || 'sensor.home_consumption',
+    // Actual consumption (inverted)
+    if (e.load_power) series.push({
+      entity: e.load_power,
       name: 'Consumption', color: '#8E24AA', type: 'area', opacity: 0.08,
       stroke_width: 1.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
@@ -3084,7 +3194,7 @@ class SigenergySettingsCard extends HTMLElement {
     }
 
     // HAEO Forecast overlays (conditional) — reads forecast attribute from HAEO sensors
-    const emsProvider = features.ems_provider || (features.emhass !== false ? 'emhass' : 'none');
+    const emsProvider = features.ems_provider || (features.emhass === true ? 'emhass' : 'none');
     if (emsProvider === 'haeo' && features.haeo_forecasts) {
       // HAEO Battery charge forecast
       if (e.haeo_battery_charge) {
@@ -3384,7 +3494,7 @@ return forecast.map(function(d) {
         }
       });
     }
-    const emsP = features.ems_provider || (features.emhass !== false ? 'emhass' : 'none');
+    const emsP = features.ems_provider || (features.emhass === true ? 'emhass' : 'none');
     if (emsP === 'haeo' && features.haeo_forecasts) {
       // Add SOC and price axes for HAEO (only if not already added by EMHASS block above)
       if (!yaxis.find(y => y.id === 'soc')) {
@@ -3439,7 +3549,7 @@ return forecast.map(function(d) {
       // Build the apex chart with conditional series
       const series = this._buildApexSeries(e, f, cfg);
       const yaxis = this._buildYAxes(f, cfg);
-      const emsP = f.ems_provider || (f.emhass !== false ? 'emhass' : 'none');
+      const emsP = f.ems_provider || (f.emhass === true ? 'emhass' : 'none');
       const hasEmhassForecasts = emsP === 'emhass' && f.emhass_forecasts;
       const hasHaeoForecasts = emsP === 'haeo' && f.haeo_forecasts;
       const hasForecasts = hasEmhassForecasts || hasHaeoForecasts;
@@ -3541,36 +3651,28 @@ return forecast.map(function(d) {
 
       // Theme-aware card style — uses HA CSS variables with dark-theme fallbacks
       const _cardStyle = 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }';
-      const statusCards = [
-        {
-          type: 'custom:mushroom-template-card',
-          entity: e.solar_power || 'sensor.solar_production',
-          primary: 'Solar', icon: 'mdi:solar-power', icon_color: 'orange',
-          secondary: _powerTpl(e.solar_power || 'sensor.solar_production'),
-          card_mod: { style: _cardStyle }
-        },
-        {
-          type: 'custom:mushroom-template-card',
-          entity: e.load_power || 'sensor.home_consumption',
-          primary: 'Home', icon: 'mdi:home-lightning-bolt', icon_color: 'deep-purple',
-          secondary: _powerTpl(e.load_power || 'sensor.home_consumption'),
-          card_mod: { style: _cardStyle }
-        },
-        {
-          type: 'custom:mushroom-template-card',
-          entity: e.battery_soc || 'sensor.battery_soc',
-          primary: 'Battery', icon: 'mdi:battery', icon_color: 'green',
-          secondary: "{{ states('" + (e.battery_soc || 'sensor.battery_soc') + "') | round(0) }}%",
-          card_mod: { style: _cardStyle }
-        },
-        {
-          type: 'custom:mushroom-template-card',
-          entity: e.grid_active_power || e.grid_power,
-          primary: 'Grid', icon: 'mdi:transmission-tower', icon_color: 'red',
-          secondary: _powerTpl(e.grid_active_power || e.grid_power),
-          card_mod: { style: _cardStyle }
-        }
-      ];
+      const statusCards = [];
+      if (e.solar_power) statusCards.push({
+        type: 'custom:mushroom-template-card',
+        entity: e.solar_power, primary: 'Solar', icon: 'mdi:solar-power', icon_color: 'orange',
+        secondary: _powerTpl(e.solar_power), card_mod: { style: _cardStyle }
+      });
+      if (e.load_power) statusCards.push({
+        type: 'custom:mushroom-template-card',
+        entity: e.load_power, primary: 'Home', icon: 'mdi:home-lightning-bolt', icon_color: 'deep-purple',
+        secondary: _powerTpl(e.load_power), card_mod: { style: _cardStyle }
+      });
+      if (e.battery_soc) statusCards.push({
+        type: 'custom:mushroom-template-card',
+        entity: e.battery_soc, primary: 'Battery', icon: 'mdi:battery', icon_color: 'green',
+        secondary: "{{ states('" + e.battery_soc + "') | round(0) }}%",
+        card_mod: { style: _cardStyle }
+      });
+      if (e.grid_active_power || e.grid_power) statusCards.push({
+        type: 'custom:mushroom-template-card',
+        entity: e.grid_active_power || e.grid_power, primary: 'Grid', icon: 'mdi:transmission-tower', icon_color: 'red',
+        secondary: _powerTpl(e.grid_active_power || e.grid_power), card_mod: { style: _cardStyle }
+      });
 
       // Build stat cards
       const statCards = [];
