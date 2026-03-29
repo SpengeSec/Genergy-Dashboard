@@ -663,6 +663,25 @@ class SigenergySettingsCard extends HTMLElement {
           margin-left: 8px; transition: all 0.2s;
         }
         .section-detect-btn:hover { background: rgba(0,212,184,0.15); border-color: #00d4b8; }
+        .candidate-picker {
+          margin-top: 4px; padding: 6px; background: rgba(0,212,184,0.05);
+          border: 1px solid rgba(0,212,184,0.2); border-radius: 6px; font-size: 11px;
+        }
+        .candidate-picker .cp-header { color: #00d4b8; font-weight: 600; margin-bottom: 4px; }
+        .candidate-item {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 4px 6px; margin: 2px 0; cursor: pointer; border-radius: 4px;
+          background: rgba(255,255,255,0.03); border: 1px solid transparent;
+          transition: all 0.15s;
+        }
+        .candidate-item:hover { border-color: #00d4b8; background: rgba(0,212,184,0.1); cursor: pointer; }
+        .candidate-item.cand-disabled { opacity: 0.5; cursor: help; }
+        .candidate-item .ci-id { font-family: monospace; font-size: 10px; }
+        .candidate-item .ci-val { font-size: 10px; color: #8892a4; }
+        .candidate-item .ci-badge {
+          font-size: 9px; padding: 1px 4px; border-radius: 3px;
+          background: rgba(230,126,34,0.2); color: #e67e22;
+        }
         @media (max-width: 500px) {
           .row { flex-wrap: wrap; }
           .row-label { min-width: 100%; margin-bottom: 4px; }
@@ -839,12 +858,18 @@ class SigenergySettingsCard extends HTMLElement {
     const id = entities[key] || '';
     const state = this._getState(id);
     const isErr = state.startsWith('❌');
+    const candidates = this._socCandidates && this._socCandidates[key] ? this._socCandidates[key] : [];
+    const candidateHTML = candidates.length > 1 || (candidates.length > 0 && !id) ? `
+      <div class="candidate-picker" data-cand-key="${key}">
+        ${candidates.map(c => `<div class="candidate-item${c.disabled ? ' cand-disabled' : ''}" data-cand-id="${this._esc(c.id)}"><span class="ci-id">${this._esc(c.id)}</span><span class="ci-val">= ${this._esc(String(c.value))}</span>${c.disabled ? '<span class="ci-badge">disabled</span>' : ''}</div>`).join('')}
+      </div>` : '';
     return `
       <div class="row">
         <span class="row-label">${label}</span>
         <div class="entity-input-wrap">
           <input class="row-input entity-ac-input" value="${this._esc(id)}" placeholder="sensor.entity_id" data-key="${key}" autocomplete="off" />
           <div class="entity-dropdown" data-dropdown-for="${key}"></div>
+          ${candidateHTML}
         </div>
         <span class="row-state ${isErr?'err':''}" data-entity="${this._esc(id)}">${state}</span>
       </div>`;
@@ -1343,6 +1368,30 @@ class SigenergySettingsCard extends HTMLElement {
         input.addEventListener('blur', () => { setTimeout(closeAllDropdowns, 200); });
       });
     }
+
+    // ── Candidate picker click handlers ──────────────────────
+    el.querySelectorAll('.candidate-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const candKey = item.closest('.candidate-picker')?.dataset?.candKey;
+        const candId = item.dataset.candId;
+        if (!candKey || !candId) return;
+        if (item.classList.contains('cand-disabled')) {
+          // Show hint for disabled entities
+          item.style.outline = '2px solid #e67e22';
+          item.setAttribute('title', 'This entity is disabled in HA. Enable it first in Settings → Devices & Services.');
+          return;
+        }
+        const cfg2 = this._storeGet();
+        cfg2.entities[candKey] = candId;
+        this._storeSave(cfg2);
+        // Update input field
+        const inp = el.querySelector(`.entity-ac-input[data-key="${candKey}"]`);
+        if (inp) { inp.value = candId; inp.dispatchEvent(new Event('change', { bubbles: true })); }
+        // Clear candidates for this key
+        if (this._socCandidates) delete this._socCandidates[candKey];
+        this._render();
+      });
+    });
 
     // EMS provider selector handler (None / EMHASS / HAEO)
     el.querySelectorAll('.ems-btn').forEach(btn => {
@@ -2155,6 +2204,99 @@ class SigenergySettingsCard extends HTMLElement {
       const capKeys = allKeys.filter(k => k.toLowerCase().includes('battery') && (k.toLowerCase().includes('rated_capacity') || k.toLowerCase().includes('capacity_kwh')));
       if (capKeys.length > 0) { cfg2.entities.battery_capacity = capKeys[0]; found.push('battery_capacity: ' + capKeys[0]); }
     }
+    if (found.length > 0) this._storeSave(cfg2);
+    // Also run SoC limit detection (with candidate picker support)
+    const socFound = await this._autoDetectSocLimits();
+    found.push(...socFound);
+    return found;
+  }
+
+  async _autoDetectSocLimits() {
+    const found = [];
+    if (!this._hass?.states) return found;
+    const cfg2 = this._storeGet();
+    const allKeys = Object.keys(this._hass.states);
+
+    // Try to also load disabled entities from entity registry
+    let registryEntities = [];
+    try {
+      registryEntities = await this._hass.callWS({ type: 'config/entity_registry/list' });
+    } catch (e) { /* not critical */ }
+
+    // Build candidate lists for max SoC, min SoC, reserved SoC
+    const isPercent = (k) => {
+      const st = this._hass.states[k];
+      return st && (st.attributes?.unit_of_measurement === '%' || st.attributes?.unit_of_measurement === '%');
+    };
+
+    // Helper: find candidates from both enabled and disabled entities
+    const findCandidates = (patterns, excludePatterns = []) => {
+      const candidates = [];
+      // Enabled entities
+      for (const k of allKeys) {
+        const lower = k.toLowerCase();
+        if (!isPercent(k)) continue;
+        if (excludePatterns.some(p => lower.includes(p))) continue;
+        if (patterns.some(p => typeof p === 'function' ? p(lower) : lower.includes(p))) {
+          const st = this._hass.states[k];
+          candidates.push({ id: k, value: st?.state || '?', disabled: false });
+        }
+      }
+      // Disabled entities from registry
+      if (registryEntities && registryEntities.length > 0) {
+        for (const re of registryEntities) {
+          if (!re.disabled_by) continue;
+          const lower = (re.entity_id || '').toLowerCase();
+          if (excludePatterns.some(p => lower.includes(p))) continue;
+          if (patterns.some(p => typeof p === 'function' ? p(lower) : lower.includes(p))) {
+            if (!candidates.find(c => c.id === re.entity_id)) {
+              candidates.push({ id: re.entity_id, value: 'disabled', disabled: true });
+            }
+          }
+        }
+      }
+      return candidates;
+    };
+
+    // Max SoC candidates
+    const maxSocCandidates = findCandidates([
+      (k) => k.includes('charge') && k.includes('cut_off') && (k.includes('soc') || k.includes('state_of_charge')),
+      (k) => k.includes('charge_cutoff') && (k.includes('soc') || k.includes('state_of_charge')),
+      'max_soc', 'charge_limit_soc',
+      (k) => k.includes('battery_soc_max'),
+    ], ['emhass', 'mpc_']);
+    // Min SoC candidates
+    const minSocCandidates = findCandidates([
+      (k) => k.includes('discharge') && k.includes('cut_off') && (k.includes('soc') || k.includes('state_of_charge')),
+      (k) => k.includes('discharge_cutoff') && (k.includes('soc') || k.includes('state_of_charge')),
+      'min_soc', 'battery_shutdown',
+      (k) => k.includes('battery_soc_min'),
+    ], ['emhass', 'mpc_', 'voltage']);
+    // Reserved SoC candidates
+    const reservedSocCandidates = findCandidates([
+      (k) => k.includes('backup') && (k.includes('soc') || k.includes('state_of_charge')),
+      (k) => k.includes('reserve') && (k.includes('soc') || k.includes('state_of_charge')),
+      'reserved_soc',
+    ], ['emhass']);
+
+    // For each: if exactly 1 enabled candidate, auto-assign. If 0 or >1, store for picker UI.
+    this._socCandidates = { battery_max_soc: maxSocCandidates, battery_min_soc: minSocCandidates, battery_reserved_soc: reservedSocCandidates };
+
+    const autoAssign = (key, candidates) => {
+      const enabled = candidates.filter(c => !c.disabled);
+      if (enabled.length === 1 && !cfg2.entities[key]) {
+        cfg2.entities[key] = enabled[0].id;
+        found.push(key + ': ' + enabled[0].id);
+      } else if (enabled.length > 1) {
+        found.push(key + ': ' + enabled.length + ' candidates — choose below');
+      } else if (candidates.length > 0 && enabled.length === 0) {
+        found.push(key + ': found disabled entities — enable in HA or set manually');
+      }
+    };
+    autoAssign('battery_max_soc', maxSocCandidates);
+    autoAssign('battery_min_soc', minSocCandidates);
+    autoAssign('battery_reserved_soc', reservedSocCandidates);
+
     if (found.length > 0) this._storeSave(cfg2);
     return found;
   }
