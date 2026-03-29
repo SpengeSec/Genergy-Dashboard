@@ -2,6 +2,14 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.13.0] - 2026-03-29
+
+### Changed
+- **Production-Ready Defaults** — Removed ALL developer-specific hardcoded entity defaults from the integration. Previous defaults referenced Deye inverter entities (`sensor.deyeinvertermaster_*`), Gobel Battery Monitor entities (`sensor.battery_monitor_pack_*`), Belgium Nordpool (`sensor.nordpool_kwh_be_*`), and a custom grid template sensor. All entity fields now default to empty — users configure their own entities via auto-detect or manual entry.
+- **EMS Provider Defaults to None** — New installations no longer default to EMHASS. The EMS provider is set to "None" and financial tracking is disabled by default. Battery packs default to 0.
+- **Pricing Source Defaults to Custom** — No longer defaults to Nordpool, which is Europe-specific.
+- **Battery Pack Details Derived from Config** — The battery pack detail panels (SoH, voltage, current, cell voltages, temperature) now derive entity prefixes from the configured pack SoC entity instead of hardcoding the Gobel Battery Monitor naming pattern.
+
 ## [2.12.9] - 2026-03-29
 
 ### Fixed

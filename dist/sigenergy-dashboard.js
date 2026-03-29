@@ -26,22 +26,22 @@ const _SIGENERGY_SCRIPT_DIR = new URL('.', _SIGENERGY_SCRIPT_URL).pathname.repla
 const STORAGE_KEY = 'sigenergy-dashboard-config';
 
 const DEFAULT_ENTITIES = {
-  solar_power: 'sensor.deyeinvertermaster_pv_power',
-  load_power: 'sensor.deyeinvertermaster_load_power',
-  battery_power: 'sensor.deyeinvertermaster_battery_output_power',
-  battery_soc: 'sensor.deyeinvertermaster_battery_soc',
-  grid_power: 'sensor.deyeinvertermaster_grid_load_l1',
-  solar_energy_today: 'sensor.deyeinvertermaster_summary_day_pv',
-  load_energy_today: 'sensor.deyeinvertermaster_summary_day_load',
-  battery_charge_today: 'sensor.deyeinvertermaster_summary_day_battery_charge',
-  battery_discharge_today: 'sensor.deyeinvertermaster_summary_day_battery_discharge',
-  grid_import_today: 'sensor.deyeinvertermaster_summary_day_grid_import_buy',
-  grid_export_today: 'sensor.deyeinvertermaster_summary_day_grid_export_sell',
+  solar_power: '',
+  load_power: '',
+  battery_power: '',
+  battery_soc: '',
+  grid_power: '',
+  solar_energy_today: '',
+  load_energy_today: '',
+  battery_charge_today: '',
+  battery_discharge_today: '',
+  grid_import_today: '',
+  grid_export_today: '',
   grid_import_high_tariff: '',
   grid_import_low_tariff: '',
   grid_export_high_tariff: '',
   grid_export_low_tariff: '',
-  weather: 'weather.forecast_home',
+  weather: '',
   ev_charger_power: '',
   ev_charger_state: '',
   ev_soc: '',
@@ -60,38 +60,38 @@ const DEFAULT_ENTITIES = {
   emhass_savings_today: '',
   emhass_net_cost_today: '',
   emhass_battery_action: '',
-  nordpool: 'sensor.nordpool_kwh_be_eur_3_10_0',
-  battery_pack1_soc: 'sensor.battery_monitor_pack_01_view_soc',
-  battery_pack2_soc: 'sensor.battery_monitor_pack_02_view_soc',
-  battery_pack3_soc: 'sensor.battery_monitor_pack_03_view_soc',
+  nordpool: '',
+  battery_pack1_soc: '',
+  battery_pack2_soc: '',
+  battery_pack3_soc: '',
   battery_pack4_soc: '',
   battery_pack5_soc: '',
   battery_pack6_soc: '',
   battery_pack7_soc: '',
   battery_pack8_soc: '',
-  inverter_temp: 'sensor.deyeinvertermaster_temperature_dc_transformer',
-  battery_temp: 'sensor.deyeinvertermaster_battery_temperature',
-  grid_voltage: 'sensor.deyeinvertermaster_grid_voltage_l1',
+  inverter_temp: '',
+  battery_temp: '',
+  grid_voltage: '',
   grid_voltage_l2: '',
   grid_voltage_l3: '',
-  grid_frequency: 'sensor.deyeinvertermaster_grid_frequency',
+  grid_frequency: '',
   // Additional system entities
-  grid_power_ct: 'sensor.deyeinvertermaster_grid_power_ct_clamp',
-  grid_active_power: 'sensor.net_grid_power',
+  grid_power_ct: '',
+  grid_active_power: '',
   emhass_enabled: '',
   // Device/inverter entities
-  battery_voltage: 'sensor.deyeinvertermaster_battery_voltage',
-  battery_current: 'sensor.deyeinvertermaster_battery_output_current',
-  pv1_power: 'sensor.deyeinvertermaster_pv1_power',
-  pv2_power: 'sensor.deyeinvertermaster_pv2_power',
+  battery_voltage: '',
+  battery_current: '',
+  pv1_power: '',
+  pv2_power: '',
   pv3_power: '',
   pv4_power: '',
   pv5_power: '',
   pv6_power: '',
-  inverter_rated_power: 'sensor.deyeinvertermaster_inverter_rated_power',
-  inverter_output_power: 'sensor.deyeinvertermaster_inverter_output_power',
-  inverter_internal_temp: 'sensor.deyeinvertermaster_inverter_internal_temperature',
-  rated_power: 'sensor.deyeinvertermaster_rated_power',
+  inverter_rated_power: '',
+  inverter_output_power: '',
+  inverter_internal_temp: '',
+  rated_power: '',
   // EMHASS financial entities
   emhass_net_cost_month: '',
   emhass_savings_month: '',
@@ -155,13 +155,13 @@ const DEFAULT_CONFIG = {
     heat_pump: false,
     grid_connection: true,
     hide_cables: false,
-    battery_packs: 2,
-    emhass: true,
+    battery_packs: 0,
+    emhass: false,
     emhass_forecasts: true,
     deferrable_loads: false,
-    ems_provider: 'emhass',
+    ems_provider: 'none',
     haeo_forecasts: true,
-    financial_tracking: true,
+    financial_tracking: false,
     solar_forecast: false,
     weather_widget: true,
     sunrise_sunset: false,
@@ -176,7 +176,7 @@ const DEFAULT_CONFIG = {
     pv_strings: 2,
   },
   pricing: {
-    source: 'nordpool',
+    source: 'custom',
     cheap_threshold: 0.10,
     expensive_threshold: 0.25,
     currency: '€',
@@ -2996,7 +2996,7 @@ class SigenergySettingsCard extends HTMLElement {
     });
     // Always: actual grid
     series.push({
-      entity: e.grid_active_power || e.grid_power || 'sensor.net_grid_power',
+      entity: e.grid_active_power || e.grid_power,
       name: 'Grid', color: '#D32F2F', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
@@ -3565,9 +3565,9 @@ return forecast.map(function(d) {
         },
         {
           type: 'custom:mushroom-template-card',
-          entity: e.grid_active_power || e.grid_power || 'sensor.net_grid_power',
+          entity: e.grid_active_power || e.grid_power,
           primary: 'Grid', icon: 'mdi:transmission-tower', icon_color: 'red',
-          secondary: _powerTpl(e.grid_active_power || e.grid_power || 'sensor.net_grid_power'),
+          secondary: _powerTpl(e.grid_active_power || e.grid_power),
           card_mod: { style: _cardStyle }
         }
       ];
@@ -4195,8 +4195,8 @@ class SigenergyDeviceCard extends HTMLElement {
     if (!this._hass) return;
     const store = window.SigenergyConfig;
     const packs = store ? store.getFeature('battery_packs') : (this._config.battery_packs || 2);
-    const battSocEntity = store ? store.getEntity('battery_soc') : 'sensor.deyeinvertermaster_battery_soc';
-    const invPowerEntity = this._config.inverter_power || (store ? store.getEntity('inverter_output_power') : null) || 'sensor.deyeinvertermaster_inverter_output_power';
+    const battSocEntity = store ? store.getEntity('battery_soc') : '';
+    const invPowerEntity = this._config.inverter_power || (store ? store.getEntity('inverter_output_power') : '') || '';
     const invPower = this._getPowerInWatts(invPowerEntity);
     const battSocFallback = this._getVal(battSocEntity);
     const packSocs = [];
@@ -4355,15 +4355,15 @@ class SigenergyDeviceCard extends HTMLElement {
 
     if (this._expanded['inverter']) {
       // FIX(bug4): Read entity IDs from config store instead of hardcoding Deye names
-      var invTemp = store ? store.getEntity('inverter_temp') : 'sensor.deyeinvertermaster_temperature_dc_transformer';
+      var invTemp = store ? store.getEntity('inverter_temp') : '';
       var invIntTemp = store ? store.getEntity('inverter_internal_temp') : '';
-      var invOutput = store ? store.getEntity('inverter_output_power') : 'sensor.deyeinvertermaster_inverter_output_power';
-      var invRated = store ? store.getEntity('inverter_rated_power') : 'sensor.deyeinvertermaster_inverter_rated_power';
-      var pvOne = store ? store.getEntity('pv1_power') : 'sensor.deyeinvertermaster_pv1_power';
-      var pvTwo = store ? store.getEntity('pv2_power') : 'sensor.deyeinvertermaster_pv2_power';
+      var invOutput = store ? store.getEntity('inverter_output_power') : '';
+      var invRated = store ? store.getEntity('inverter_rated_power') : '';
+      var pvOne = store ? store.getEntity('pv1_power') : '';
+      var pvTwo = store ? store.getEntity('pv2_power') : '';
       var pvStrings = store ? (store.getFeature && store.getFeature('pv_strings')) || 2 : 2;
-      var gridV = store ? store.getEntity('grid_voltage') : 'sensor.deyeinvertermaster_grid_voltage_l1';
-      var gridHz = store ? store.getEntity('grid_frequency') : 'sensor.deyeinvertermaster_grid_frequency';
+      var gridV = store ? store.getEntity('grid_voltage') : '';
+      var gridHz = store ? store.getEntity('grid_frequency') : '';
       var gridVL2 = store ? store.getEntity('grid_voltage_l2') : '';
       var gridVL3 = store ? store.getEntity('grid_voltage_l3') : '';
       var threePhase = store ? (store.getFeature && store.getFeature('three_phase')) : false;
@@ -4401,7 +4401,21 @@ class SigenergyDeviceCard extends HTMLElement {
     for (var p = 1; p <= np; p++) {
       if (!this._expanded['battery' + p]) continue;
       var pad = p < 10 ? '0' + p : '' + p;
-      var prefix = 'sensor.battery_monitor_pack_' + pad + '_view_';
+      // Derive battery pack entity prefix from the configured SoC entity
+      var packSocEntity = store ? store.getEntity('battery_pack' + p + '_soc') : '';
+      var prefix = '';
+      if (packSocEntity && packSocEntity.endsWith('_soc')) {
+        prefix = packSocEntity.slice(0, -3); // remove 'soc' to get 'sensor.xxx_view_'
+      }
+      var cellPrefix = '';
+      if (prefix) {
+        // Derive cell prefix from view prefix: sensor.xxx_view_ → sensor.xxx_cell_voltage_
+        cellPrefix = prefix.replace(/_view_$/, '_cell_voltage_');
+      }
+      var tempEntity = '';
+      if (prefix) {
+        tempEntity = prefix.replace(/_view_$/, '_temperature_01');
+      }
       panels += '<div style="' + panelStyle + '">';
       panels += '<div style="' + headerStyle + '">🔋 Battery ' + p + ' Details</div>';
       panels += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
@@ -4414,7 +4428,6 @@ class SigenergyDeviceCard extends HTMLElement {
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'remain_capacity', dps, 'Ah') + '</span><span style="' + statLbl + '">Remain</span></div>';
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(prefix + 'full_capacity', dps, 'Ah') + '</span><span style="' + statLbl + '">Full Cap</span></div>';
       // Cell voltage spread (values are in mV, convert to V)
-      var cellPrefix = 'sensor.battery_monitor_pack_' + pad + '_cell_voltage_';
       var fmtCellV = function(eid) {
         if (!self._hass || !eid) return '—';
         var s = self._hass.states[eid];
@@ -4423,11 +4436,11 @@ class SigenergyDeviceCard extends HTMLElement {
         if (isNaN(v)) return s.state;
         return (v / 1000).toFixed(3) + 'V';
       };
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtCellV(cellPrefix + 'min') + '</span><span style="' + statLbl + '">Cell Min</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtCellV(cellPrefix + 'max') + '</span><span style="' + statLbl + '">Cell Max</span></div>';
-      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(cellPrefix + 'diff', 0, 'mV') + '</span><span style="' + statLbl + '">Cell Diff</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtCellV(cellPrefix ? cellPrefix + 'min' : '') + '</span><span style="' + statLbl + '">Cell Min</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtCellV(cellPrefix ? cellPrefix + 'max' : '') + '</span><span style="' + statLbl + '">Cell Max</span></div>';
+      panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + fmtEntity(cellPrefix ? cellPrefix + 'diff' : '', 0, 'mV') + '</span><span style="' + statLbl + '">Cell Diff</span></div>';
       // Temperature
-      var temp1 = fmtEntity('sensor.battery_monitor_pack_' + pad + '_temperature_01', dps, '°C');
+      var temp1 = fmtEntity(tempEntity, dps, '°C');
       panels += '<div style="' + statStyle + '"><span style="' + statVal + '">' + temp1 + '</span><span style="' + statLbl + '">Temp</span></div>';
       panels += '</div></div>';
     }
