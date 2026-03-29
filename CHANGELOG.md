@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.5] - 2026-03-29
+
+### Fixed
+- **Price Lines Now Visible on Chart** — Changed the price Y-axis from `show: false` to `show: true`. ApexCharts.js has a known issue where hidden Y-axes don't properly map series data to independent scales — price values (~0.2 $/kWh) were being plotted against the power axis (-100 to 10 kW) making them invisible at the zero line. The price axis now renders as a subtle secondary axis on the right side with muted styling.
+
 ## [2.12.4] - 2026-03-29
 
 ### Fixed

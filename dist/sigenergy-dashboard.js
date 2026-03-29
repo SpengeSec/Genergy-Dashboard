@@ -3375,10 +3375,11 @@ return forecast.map(function(d) {
         }
       });
       yaxis.push({
-        id: 'price', min: 'auto', max: 'auto', decimals: 2, show: false,
+        id: 'price', min: 'auto', max: 'auto', decimals: 2,
         opposite: true,
         apex_config: {
-          title: { text: 'Price (' + currency + '/kWh)', style: { fontSize: '12px' } },
+          title: { text: 'Price (' + currency + '/kWh)', style: { fontSize: '11px', color: '#888' } },
+          labels: { style: { fontSize: '10px', colors: ['#888'] } },
           forceNiceScale: true, tickAmount: 4
         }
       });
@@ -3394,10 +3395,11 @@ return forecast.map(function(d) {
       }
       if (!yaxis.find(y => y.id === 'price')) {
         yaxis.push({
-          id: 'price', min: 'auto', max: 'auto', decimals: 2, show: false,
+          id: 'price', min: 'auto', max: 'auto', decimals: 2,
           opposite: true,
           apex_config: {
-            title: { text: 'Price (' + currency + '/kWh)', style: { fontSize: '12px' } },
+            title: { text: 'Price (' + currency + '/kWh)', style: { fontSize: '11px', color: '#888' } },
+            labels: { style: { fontSize: '10px', colors: ['#888'] } },
             forceNiceScale: true, tickAmount: 4
           }
         });
@@ -3407,10 +3409,11 @@ return forecast.map(function(d) {
     const ent = cfg?.entities || {};
     if (!yaxis.find(y => y.id === 'price') && (ent.buy_price || ent.sell_price || ent.current_import_price || ent.current_export_price)) {
       yaxis.push({
-        id: 'price', min: 'auto', max: 'auto', decimals: 2, show: false,
+        id: 'price', min: 'auto', max: 'auto', decimals: 2,
         opposite: true,
         apex_config: {
-          title: { text: 'Price (' + currency + '/kWh)', style: { fontSize: '12px' } },
+          title: { text: 'Price (' + currency + '/kWh)', style: { fontSize: '11px', color: '#888' } },
+          labels: { style: { fontSize: '10px', colors: ['#888'] } },
           forceNiceScale: true, tickAmount: 4
         }
       });
