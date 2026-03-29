@@ -1806,6 +1806,15 @@ class SigenergySettingsCard extends HTMLElement {
                 found.push('Nordpool: ' + npKey);
               }
             }
+            // Auto-set currency for known providers
+            if (cfg2.entities.buy_price && cfg2.entities.buy_price.includes('amber')) {
+              if (!cfg2.pricing) cfg2.pricing = {};
+              if (cfg2.pricing.currency === '€' || !cfg2.pricing.currency) {
+                cfg2.pricing.currency = '$';
+                cfg2.pricing.source = 'amber';
+                found.push('✓ Currency set to $ (Amber Electric)');
+              }
+            }
           }
 
           // Auto-detect device consumption entities for EV and Heat Pump
@@ -2108,16 +2117,26 @@ class SigenergySettingsCard extends HTMLElement {
               const regEntities = this._registryEntities || [];
               // Price candidates
               const buyCandidates = this._findEntityCandidates(allK, [
-                (k) => k === 'sensor.amber_general_price', (k) => k === 'sensor.electricity_price',
+                (k) => k === 'sensor.amber_general_price', /amber.*general.*price/i, /amber.*price/i,
+                (k) => k === 'sensor.electricity_price',
                 /nordpool.*kwh/i, /energi_data_service/i, /octopus.*current.*rate/i,
                 /energy.*price.*import/i, /electricity.*price/i, /buy.*price/i, /spot.*price/i,
-              ], { domainFilter: 'sensor', excludes: ['feed_in', 'export', 'sell'] });
+                /general.*price/i, /import.*price/i,
+              ], { domainFilter: 'sensor', excludes: ['feed_in', 'export', 'sell', 'forecast', 'descriptor', 'controlled'] });
               if (buyCandidates.length > 1) this._candidates.buy_price = buyCandidates;
               const sellCandidates = this._findEntityCandidates(allK, [
-                (k) => k === 'sensor.amber_feed_in_price',
+                (k) => k === 'sensor.amber_feed_in_price', /amber.*feed.*in.*price/i,
                 /feed.in.*price/i, /export.*price/i, /sell.*price/i, /octopus.*export.*rate/i,
-              ], { domainFilter: 'sensor' });
+              ], { domainFilter: 'sensor', excludes: ['forecast', 'descriptor'] });
               if (sellCandidates.length > 1) this._candidates.sell_price = sellCandidates;
+              // Auto-set currency for Amber
+              if (cfg2.entities.buy_price && cfg2.entities.buy_price.includes('amber')) {
+                if (cfg2.pricing.currency === '€' || !cfg2.pricing.currency) {
+                  cfg2.pricing.currency = '$';
+                  cfg2.pricing.source = 'amber';
+                  found.push('✓ Amber Electric detected — currency set to $');
+                }
+              }
               // Weather candidates
               const weatherC = this._findEntityCandidates(allK, [(k) => k.startsWith('weather.') && !k.includes('forecast')], {});
               if (weatherC.length > 1) this._candidates.weather = weatherC;
@@ -2418,17 +2437,30 @@ class SigenergySettingsCard extends HTMLElement {
     // Buy price candidates
     const buyCandidates = this._findEntityCandidates(allKeys, [
       (k) => k === 'sensor.amber_general_price',
+      /amber.*general.*price/i, /amber.*price/i,
       (k) => k === 'sensor.electricity_price',
       /nordpool.*kwh/i, /energi_data_service/i, /octopus.*current.*rate/i,
       /energy.*price.*import/i, /electricity.*price/i, /buy.*price/i, /spot.*price/i,
-    ], { domainFilter: 'sensor', excludes: ['feed_in', 'export', 'sell'] });
+      /general.*price/i, /import.*price/i,
+    ], { domainFilter: 'sensor', excludes: ['feed_in', 'export', 'sell', 'forecast', 'descriptor', 'controlled'] });
     this._assignCandidate('buy_price', buyCandidates, cfg2, found);
+
+    // Auto-set currency to AUD if Amber detected
+    if (cfg2.entities.buy_price && cfg2.entities.buy_price.includes('amber')) {
+      if (!cfg2.pricing) cfg2.pricing = {};
+      if (cfg2.pricing.currency === '€' || !cfg2.pricing.currency) {
+        cfg2.pricing.currency = '$';
+        cfg2.pricing.source = 'amber';
+        found.push('✓ Amber Electric detected — currency set to $');
+      }
+    }
 
     // Sell price candidates
     const sellCandidates = this._findEntityCandidates(allKeys, [
       (k) => k === 'sensor.amber_feed_in_price',
+      /amber.*feed.*in.*price/i,
       /feed.in.*price/i, /export.*price/i, /sell.*price/i, /octopus.*export.*rate/i,
-    ], { domainFilter: 'sensor' });
+    ], { domainFilter: 'sensor', excludes: ['forecast', 'descriptor'] });
     this._assignCandidate('sell_price', sellCandidates, cfg2, found);
 
     // Nordpool candidates
@@ -2862,11 +2894,11 @@ class SigenergySettingsCard extends HTMLElement {
       <div class="section">
         <div class="section-title">Thresholds</div>
         <div class="row">
-          <span class="row-label">Cheap (€/kWh)</span>
+          <span class="row-label">Cheap (${this._esc(p.currency||'€')}/kWh)</span>
           <input class="row-input" type="number" step="0.01" value="${p.cheap_threshold||0.10}" data-key="cheap_threshold" />
         </div>
         <div class="row">
-          <span class="row-label">Expensive (€/kWh)</span>
+          <span class="row-label">Expensive (${this._esc(p.currency||'€')}/kWh)</span>
           <input class="row-input" type="number" step="0.01" value="${p.expensive_threshold||0.25}" data-key="expensive_threshold" />
         </div>
         <div class="row">
@@ -2887,6 +2919,22 @@ class SigenergySettingsCard extends HTMLElement {
       btn.addEventListener('click', () => {
         const cfg2 = this._storeGet();
         cfg2.pricing.source = btn.dataset.src;
+        // Auto-set currency and entities for known providers
+        if (btn.dataset.src === 'amber') {
+          cfg2.pricing.currency = '$';
+          if (this._hass?.states) {
+            const allK = Object.keys(this._hass.states);
+            const amberBuy = allK.find(k => k.includes('amber') && k.includes('general') && k.includes('price'));
+            const amberSell = allK.find(k => k.includes('amber') && k.includes('feed_in') && k.includes('price'));
+            if (amberBuy) cfg2.entities.buy_price = amberBuy;
+            if (amberSell) cfg2.entities.sell_price = amberSell;
+          }
+        } else if (btn.dataset.src === 'nordpool') {
+          if (this._hass?.states) {
+            const npKey = Object.keys(this._hass.states).find(k => k.startsWith('sensor.nordpool'));
+            if (npKey) cfg2.entities.nordpool = npKey;
+          }
+        }
         this._storeSave(cfg2);
         this._render();
       });
@@ -2919,7 +2967,7 @@ class SigenergySettingsCard extends HTMLElement {
   // Dashboard Builder — generates conditional card config
   // ═══════════════════════════════════════════════════════════
 
-  _buildApexSeries(e, features) {
+  _buildApexSeries(e, features, cfg) {
     const series = [];
     // Unit-aware power transform: only divide by 1000 if sensor reports in W (not kW)
     const powerTransform = "const u = entity?.attributes?.unit_of_measurement || ''; return (u === 'kW' || u === 'MW') ? x : x / 1000;";
@@ -3032,42 +3080,72 @@ class SigenergySettingsCard extends HTMLElement {
         });
       }
       // Price forecast overlays
+      const priceUnit = ' ' + (cfg.pricing?.currency || '€') + '/kWh';
       if (e.buy_price) {
+        // Universal data_generator: tries EMHASS attributes, then Amber forecast, then falls back to history
+        const buyDG = `var d = entity.attributes.unit_load_cost_forecasts;
+if (d && d.length) return d.map(function(p){ return [new Date(p.date).getTime(), parseFloat(p.mpc_general_price || p.price || 0)]; });
+var fc = entity.attributes.forecasts || entity.attributes.forecast;
+if (fc && Array.isArray(fc) && fc.length) return fc.map(function(p){ return [new Date(p.start_time || p.time || p.date).getTime(), parseFloat(p.per_kwh || p.price || p.value || 0)]; });
+return [];`;
         series.push({
           entity: e.buy_price, name: 'Import Price (plan)', color: '#EF9A9A',
-          type: 'line', extend_to: false, unit: ' EUR/kWh',
+          type: 'line', extend_to: false, unit: priceUnit,
           float_precision: 4, stroke_width: 1, opacity: 0.9,
           show: { in_header: false, legend_value: false },
-          data_generator: "const data = entity.attributes.unit_load_cost_forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_general_price)]);",
+          data_generator: buyDG,
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
+        });
+        // Also add as state-tracked line (actual price, not just forecast)
+        series.push({
+          entity: e.buy_price, name: 'Import Price', color: '#EF5350',
+          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          unit: priceUnit, float_precision: 4,
+          group_by: { func: 'avg', duration: '30min' },
+          show: { in_header: false, legend_value: true },
+          yaxis_id: 'price', curve: 'stepline'
         });
       }
       if (e.sell_price) {
+        const sellDG = `var d = entity.attributes.unit_prod_price_forecasts;
+if (d && d.length) return d.map(function(p){ return [new Date(p.date).getTime(), parseFloat(p.mpc_feed_in_price || p.price || 0)]; });
+var fc = entity.attributes.forecasts || entity.attributes.forecast;
+if (fc && Array.isArray(fc) && fc.length) return fc.map(function(p){ return [new Date(p.start_time || p.time || p.date).getTime(), parseFloat(p.per_kwh || p.price || p.value || 0)]; });
+return [];`;
         series.push({
           entity: e.sell_price, name: 'Export Price (plan)', color: '#90CAF9',
-          type: 'line', extend_to: false, unit: ' EUR/kWh',
+          type: 'line', extend_to: false, unit: priceUnit,
           float_precision: 4, stroke_width: 1, opacity: 0.9,
           show: { in_header: false, legend_value: false },
-          data_generator: "const data = entity.attributes.unit_prod_price_forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_feed_in_price)]);",
+          data_generator: sellDG,
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
         });
+        // Also add as state-tracked line
+        series.push({
+          entity: e.sell_price, name: 'Export Price', color: '#42A5F5',
+          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          unit: priceUnit, float_precision: 4,
+          group_by: { func: 'avg', duration: '30min' },
+          show: { in_header: false, legend_value: true },
+          yaxis_id: 'price', curve: 'stepline'
+        });
       }
-      // Actual prices
-      if (e.current_import_price) {
+      // Actual prices (separate entities — used when buy/sell are EMHASS and these are the actual Amber/Nordpool sensors)
+      if (e.current_import_price && e.current_import_price !== e.buy_price) {
         series.push({
           entity: e.current_import_price, name: 'Import Price', color: '#EF5350',
           type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: ' EUR/kWh', float_precision: 4,
+          unit: priceUnit, float_precision: 4,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline'
         });
       }
-      if (e.current_export_price) {
+      if (e.current_export_price && e.current_export_price !== e.sell_price) {
         series.push({
           entity: e.current_export_price, name: 'Export Price', color: '#42A5F5',
           type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: ' EUR/kWh', float_precision: 4,
+          unit: priceUnit, float_precision: 4,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline'
@@ -3156,11 +3234,12 @@ class SigenergySettingsCard extends HTMLElement {
         });
       }
       // Actual prices (shared with EMHASS)
+      const emhassPriceUnit = ' ' + (cfg.pricing?.currency || '€') + '/kWh';
       if (e.current_import_price) {
         series.push({
           entity: e.current_import_price, name: 'Import Price', color: '#EF5350',
           type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: ' EUR/kWh', float_precision: 4,
+          unit: emhassPriceUnit, float_precision: 4,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline'
@@ -3170,7 +3249,7 @@ class SigenergySettingsCard extends HTMLElement {
         series.push({
           entity: e.current_export_price, name: 'Export Price', color: '#42A5F5',
           type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
-          unit: ' EUR/kWh', float_precision: 4,
+          unit: emhassPriceUnit, float_precision: 4,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline'
@@ -3272,14 +3351,14 @@ return forecast.map(function(d) {
     if (features.emhass && features.financial_tracking) {
       if (e.emhass_net_cost_today) {
         series.push({
-          entity: e.emhass_net_cost_today, name: 'Cost Today', unit: ' EUR',
+          entity: e.emhass_net_cost_today, name: 'Cost Today', unit: ' ' + (cfg.pricing?.currency || '€'),
           show: { legend_value: true, in_chart: false, in_header: true },
           float_precision: 2, yaxis_id: 'power'
         });
       }
       if (e.emhass_savings_today) {
         series.push({
-          entity: e.emhass_savings_today, name: 'Savings Today', unit: ' EUR',
+          entity: e.emhass_savings_today, name: 'Savings Today', unit: ' ' + (cfg.pricing?.currency || '€'),
           color: '#4CAF50',
           show: { legend_value: true, in_chart: false, in_header: true },
           float_precision: 2, yaxis_id: 'power'
@@ -3290,7 +3369,8 @@ return forecast.map(function(d) {
     return series;
   }
 
-  _buildYAxes(features) {
+  _buildYAxes(features, cfg) {
+    const currency = cfg?.pricing?.currency || '€';
     const yaxis = [
       {
         id: 'power', min: 'auto', max: 'auto', decimals: 1,
@@ -3311,7 +3391,7 @@ return forecast.map(function(d) {
         id: 'price', min: 'auto', max: 'auto', decimals: 2, show: false,
         opposite: true,
         apex_config: {
-          title: { text: 'Price (EUR/kWh)', style: { fontSize: '12px' } },
+          title: { text: 'Price (' + currency + '/kWh)', style: { fontSize: '12px' } },
           forceNiceScale: true, tickAmount: 4
         }
       });
@@ -3330,7 +3410,7 @@ return forecast.map(function(d) {
           id: 'price', min: 'auto', max: 'auto', decimals: 2, show: false,
           opposite: true,
           apex_config: {
-            title: { text: 'Price (EUR/kWh)', style: { fontSize: '12px' } },
+            title: { text: 'Price (' + currency + '/kWh)', style: { fontSize: '12px' } },
             forceNiceScale: true, tickAmount: 4
           }
         });
@@ -3355,8 +3435,8 @@ return forecast.map(function(d) {
       const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
 
       // Build the apex chart with conditional series
-      const series = this._buildApexSeries(e, f);
-      const yaxis = this._buildYAxes(f);
+      const series = this._buildApexSeries(e, f, cfg);
+      const yaxis = this._buildYAxes(f, cfg);
       const emsP = f.ems_provider || (f.emhass !== false ? 'emhass' : 'none');
       const hasEmhassForecasts = emsP === 'emhass' && f.emhass_forecasts;
       const hasHaeoForecasts = emsP === 'haeo' && f.haeo_forecasts;

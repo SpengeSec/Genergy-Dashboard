@@ -2,6 +2,19 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.1] - 2026-03-29
+
+### Fixed
+- **Amber Electric Price Support** — Price chart series now use universal data_generators that handle EMHASS forecast attributes, Amber Electric forecast arrays (`per_kwh`, `start_time`), and plain state-history price sensors. Previously only EMHASS-specific `unit_load_cost_forecasts` attributes were supported, causing Amber entities to show no data.
+- **Dynamic Currency** — Replaced all hardcoded `EUR` references in charts, Y-axis titles, and EMHASS financial headers with the user's configured currency symbol from Pricing tab. Thresholds now display the configured currency.
+- **Buy/Sell Price as Actual Lines** — When `buy_price`/`sell_price` entities are set, they now also render as state-tracked history lines (not just forecast overlays). This means any simple price sensor (Amber, Tibber, Nordpool) shows actual price history on the chart.
+- **Duplicate Price Lines** — When `current_import_price` is the same entity as `buy_price`, only one line is rendered (prevents duplicate series).
+
+### Added
+- **Amber Auto-Setup** — Selecting "Amber Electric" on the Pricing tab now auto-populates `buy_price` and `sell_price` with detected Amber entities and sets currency to `$`.
+- **Amber Auto-Detect** — Price auto-detect now sets currency to `$` and source to `amber` when Amber Electric entities are found.
+- **Broader Price Patterns** — Added `general_price`, `import_price`, and Amber-specific patterns to price auto-detection.
+
 ## [2.12.0] - 2026-03-29
 
 ### Added
