@@ -147,7 +147,7 @@ You can also install them manually:
 
 The integration will **automatically detect** missing HACS frontend plugins and guide you through installation (see [Prerequisites](#prerequisites)). You can also pre-install them via the install links above.
 
-Restart Home Assistant after installing any new plugins.
+> 🔴 **RESTART REQUIRED**: After installing any new HACS plugins, you **must restart Home Assistant** (Settings → System → Restart). Without a restart, the integration cannot detect the newly installed cards and auto-detection will not work.
 
 ### Step 2: Install Genergy Dashboard
 
@@ -158,7 +158,7 @@ Restart Home Assistant after installing any new plugins.
 1. Click the button above, or open **HACS** → **Integrations** → click the three dots (⋮) → **Custom repositories**
 2. Paste the GitHub repository URL, select **Integration** as category, click **Add**
 3. Search for **Genergy Dashboard** and click **Install**
-4. Restart Home Assistant
+4. **🔴 Restart Home Assistant** (Settings → System → Restart)
 
 #### Manual Installation
 
@@ -167,7 +167,7 @@ Restart Home Assistant after installing any new plugins.
    ```
    custom_components/genergy_dashboard/ → /config/custom_components/genergy_dashboard/
    ```
-3. Restart Home Assistant
+3. **🔴 Restart Home Assistant** (Settings → System → Restart)
 
 ### Step 3: Add the Integration
 
@@ -189,6 +189,8 @@ Restart Home Assistant after installing any new plugins.
 > **Sigenergy users only**: Check the "I have a Sigenergy inverter" toggle on the first step. This pre-fills all entity IDs with the correct Sigenergy naming convention (`sensor.sigen_plant_*` / `sensor.sigen_inverter_*`) and creates the dashboard immediately — no manual entity mapping required.
 
 > **Note**: The dashboard is created with URL path `dashboard-sigenergy`. The settings card uses this path to persist your configuration.
+
+> 🟡 **IMPORTANT — Save & Apply**: After changing any entities or feature toggles, you **must click "🔄 Apply Settings to Dashboard"** at the bottom of the Settings card. This button is visible on every tab. Without applying, the dashboard will not reflect your changes. Settings are saved automatically, but the dashboard layout only rebuilds when you explicitly Apply.
 
 ---
 
@@ -212,7 +214,7 @@ When you open the Settings tab, the dashboard checks if required custom elements
 
 ![Prerequisite Detection Banner](screenshots/prereq-banner.png)
 
-> **After installing missing cards**: Restart Home Assistant, then hard-refresh your browser (Ctrl+Shift+R / Cmd+Shift+R). The banner will automatically disappear once all cards are detected.
+> 🔴 **After installing missing cards**: You **must restart Home Assistant** (Settings → System → Restart), then hard-refresh your browser (Ctrl+Shift+R / Cmd+Shift+R). The banner will automatically disappear once all cards are detected.
 
 ---
 
@@ -226,11 +228,40 @@ After adding the integration, the dashboard is pre-configured with your entity m
    - **⚡ Entities** — Adjust or add entity mappings (each field shows a live state badge)
    - **🔧 Features** — Toggle EV charger, heat pump, EMS provider (EMHASS/HAEO), solar forecast, etc.
    - **💰 Pricing** — Configure price entities, thresholds, currency
-   - **🎨 Display** — Decimal places, chart range, SoC thresholds, power auto-scaling
-4. Click **💾 Save & Apply** at the bottom of the Display tab
+   - **🎨 Display** — Theme, decimal places, chart range
+4. **🟡 Click "🔄 Apply Settings to Dashboard" at the bottom** of any tab to rebuild the dashboard with your settings
 5. The dashboard rebuilds automatically with your updated configuration
 
 > **Tip**: If you skipped any optional entities during the config flow, you can add them later in the Settings tab.
+
+---
+
+## 🔴 When to Restart Home Assistant
+
+Restarting HA is required for the integration to register its JS resources, detect prerequisites, and load new versions. **You must restart after:**
+
+| Scenario | Restart Required? |
+|---|---|
+| **First install** of Genergy Dashboard | ✅ **Yes** |
+| **Updating** Genergy Dashboard to a new version | ✅ **Yes** |
+| **Installing** a missing HACS frontend plugin (ApexCharts, Mushroom, etc.) | ✅ **Yes** |
+| Changing entities or toggling features in Settings | ❌ No — click **🔄 Apply Settings to Dashboard** instead |
+| Changing display/pricing settings | ❌ No — settings save automatically |
+
+> 💡 **After every restart**, do a **hard-refresh** in your browser (Ctrl+Shift+R / Cmd+Shift+R) to clear cached JS files.
+
+---
+
+## 🟡 Save & Apply — Don't Forget!
+
+After changing entities or feature toggles, you **must** click **"🔄 Apply Settings to Dashboard"** to rebuild the dashboard. This button is now visible **at the bottom of every tab** (Entities, Features, Pricing, Display).
+
+**Without clicking Apply**, the dashboard will continue showing the old configuration, even though your settings are saved.
+
+What "Apply" does:
+- Rebuilds the overview chart (adds/removes forecast series, financial tracking, etc.)
+- Updates the Sankey energy flow diagram with your entity mappings
+- Regenerates all cards based on enabled features (EV, heat pump, EMS, etc.)
 
 ---
 
