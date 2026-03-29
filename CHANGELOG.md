@@ -2,6 +2,14 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.11.1] - 2026-03-29
+
+### Added
+- **Multi-Candidate SoC Entity Picker** — When auto-detecting SoC limit entities (Max SoC, Min SoC, Reserved SoC), the system now queries the HA entity registry to discover both enabled and disabled entities. If multiple candidates are found, a clickable candidate picker appears below each entity input showing entity ID, current value, and a "disabled" badge for entities that are disabled in HA. Single candidates are auto-assigned; multiple candidates let the user choose.
+
+### Fixed
+- **SoC Auto-Detect for Sigenergy Users** — Previously, SoC limit entities (charge/discharge cutoff) would not auto-detect when those entities were disabled (common for Sigenergy users using HAEO). Now disabled entities are shown as candidates with guidance to enable them in HA or set values manually on the Features tab.
+
 ## [2.11.0] - 2026-03-29
 
 ### Added
