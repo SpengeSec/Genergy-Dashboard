@@ -2,6 +2,18 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.9.0] - 2026-03-29
+
+### Added
+- **Reserved SoC (Backup Reserve)** — New "Reserved SoC" concept for grid outage backup reserves. Supports both entity-based (`battery_reserved_soc`) and manual percentage (`battery_reserved_soc_pct`) configuration. When discharging, runtime estimate shows time-to-reserve instead of time-to-min. Auto-detected for Sigenergy (`ess_backup_state_of_charge`) and generic patterns (`*backup*soc*`, `*reserve*soc*`).
+- **SoC Entity Rows in Entities Tab** — Added entity selector rows for `battery_max_soc`, `battery_min_soc`, and `battery_reserved_soc` in the Entities tab. Previously these were only auto-detected with no way to set them manually.
+- **Reserved SoC % Manual Input** — Added "Reserved SoC (%)" input in Features → Battery section alongside existing Max/Min SoC targets.
+- **Generic Reserved SoC Auto-Detection** — The auto-detect button now searches for backup/reserve SoC entities across all brands using pattern matching.
+
+### Improved
+- **README Clarity** — Rewrote Step 3 instructions with explicit guidance for non-Sigenergy users (leave toggle off, pick entities from dropdowns). Added all-brands instructions before the Sigenergy note. Updated entity reference with Reserved SoC. Added battery_label and runtime toggle to documented settings.
+- **Sigenergy Auto-Detect** — Backup SoC (`ess_backup_state_of_charge`) is now mapped to `battery_reserved_soc` (separate from `battery_min_soc`), and discharge cutoff (`ess_discharge_cut_off_state_of_charge`) is mapped to `battery_min_soc`.
+
 ## [2.8.4] - 2026-03-29
 
 ### Fixed

@@ -342,6 +342,20 @@ class SigenergyHouseCard extends LitElement {
     return 0;
   }
 
+  get _batteryReservedSoc() {
+    // Manual numeric override takes precedence
+    if (this._config.battery_reserved_soc_pct != null) {
+      const pct = parseFloat(this._config.battery_reserved_soc_pct);
+      if (pct >= 0 && pct <= 100) return pct;
+    }
+    const entity = this._config.entities.battery_reserved_soc;
+    if (entity) {
+      const val = this._stateNum(entity);
+      if (val >= 0 && val <= 100) return val;
+    }
+    return null; // null means not configured
+  }
+
   get _batteryRuntime() {
     if (!this._config.features?.battery_runtime) return null;
     const capacity = this._batteryCapacityKwh;
@@ -350,12 +364,20 @@ class SigenergyHouseCard extends LitElement {
     const soc = this._batterySoc;
     const absPowerKw = Math.abs(pwr) / 1000;
     if (absPowerKw < 0.01) return null; // idle
-    let remainingKwh, targetSoc;
+    let remainingKwh, targetSoc, targetLabel;
     if (pwr > 0) { // charging → target is max SoC (charge cutoff)
       targetSoc = this._batteryMaxSoc;
+      targetLabel = '';
       remainingKwh = (targetSoc - soc) / 100 * capacity;
-    } else { // discharging → target is min SoC (reserve/discharge cutoff)
-      targetSoc = this._batteryMinSoc;
+    } else { // discharging → target is reserved SoC (backup) if set, else min SoC
+      const reserved = this._batteryReservedSoc;
+      if (reserved != null && reserved > this._batteryMinSoc && soc > reserved) {
+        targetSoc = reserved;
+        targetLabel = ' reserve';
+      } else {
+        targetSoc = this._batteryMinSoc;
+        targetLabel = '';
+      }
       remainingKwh = (soc - targetSoc) / 100 * capacity;
     }
     if (remainingKwh <= 0) return null;
@@ -363,7 +385,7 @@ class SigenergyHouseCard extends LitElement {
     const h = Math.floor(hours);
     const m = Math.round((hours - h) * 60);
     const timeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
-    return { timeStr, targetSoc, isCharging: pwr > 0 };
+    return { timeStr, targetSoc, targetLabel, isCharging: pwr > 0 };
   }
   get _isImporting() { return this._gridPower > 1; }
   get _isExporting() { return this._gridPower < -1; }
@@ -971,11 +993,11 @@ class SigenergyHouseCard extends LitElement {
         const rt = this._batteryRuntime;
         if (this._isDischarging) {
           statusLine = "Discharging";
-          if (rt) runtimeLine = `${rt.timeStr} to ${rt.targetSoc}%`;
+          if (rt) runtimeLine = `${rt.timeStr} to ${rt.targetSoc}%${rt.targetLabel || ''}`;
           color = this._config.colors.battery_discharge;
         } else if (this._isCharging) {
           statusLine = "Charging";
-          if (rt) runtimeLine = `${rt.timeStr} to ${rt.targetSoc}%`;
+          if (rt) runtimeLine = `${rt.timeStr} to ${rt.targetSoc}%${rt.targetLabel || ''}`;
           color = this._config.colors.battery_charge;
         }
         break;

@@ -111,6 +111,7 @@ const DEFAULT_ENTITIES = {
   battery_capacity: '',
   battery_max_soc: '',
   battery_min_soc: '',
+  battery_reserved_soc: '',
   // EMHASS Deferrable Loads
   mpc_deferrable0: '',
   mpc_deferrable1: '',
@@ -899,6 +900,10 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Battery SoC', 'battery_soc', e)}
         ${this._entityRow('Battery Capacity', 'battery_capacity', e)}
         <div style="font-size:10px;color:#666;padding:0 0 4px 4px;">Rated capacity sensor (<b>kWh</b>, <b>Wh</b>, or <b>Ah</b>). Used for runtime estimation. Leave blank if you set manual capacity on Features tab.</div>
+        ${this._entityRow('Max SoC Entity', 'battery_max_soc', e)}
+        ${this._entityRow('Min SoC Entity', 'battery_min_soc', e)}
+        ${this._entityRow('Reserved SoC Entity', 'battery_reserved_soc', e)}
+        <div style="font-size:10px;color:#666;padding:0 0 4px 4px;">SoC limit entities (typically <b>number.*</b> domain). Max = charge cutoff, Min = discharge cutoff, Reserved = backup reserve for outages. Auto-detected or set manually on the Features → Battery section.</div>
         ${this._entityRow('Grid Power', 'grid_power', e)}
       </div>
       <div class="section">
@@ -1470,19 +1475,34 @@ class SigenergySettingsCard extends HTMLElement {
               const lower = k.toLowerCase();
               const st = this._hass.states[k];
               const uom = st?.attributes?.unit_of_measurement || '';
-              // Must be a % entity related to discharge limits / reserve
+              // Must be a % entity related to discharge limits
               return uom === '%' && (
                 (lower.includes('discharge') && lower.includes('cut_off') && lower.includes('soc')) ||
                 (lower.includes('discharge_cutoff') && lower.includes('soc')) ||
                 (lower.includes('min_soc') && !lower.includes('emhass')) ||
-                (lower.includes('backup') && lower.includes('soc')) ||
-                (lower.includes('battery_shutdown') && !lower.includes('voltage')) ||
-                (lower.includes('reserve') && lower.includes('soc'))
+                (lower.includes('battery_shutdown') && !lower.includes('voltage'))
               );
             });
             if (minSocKeys.length > 0) {
               cfg2.entities.battery_min_soc = minSocKeys[0];
               found.push('Battery min SoC: ' + minSocKeys[0]);
+            }
+
+            // Auto-detect battery reserved/backup SoC entity (grid outage reserve)
+            const reservedSocKeys = Object.keys(this._hass.states).filter(k => {
+              const lower = k.toLowerCase();
+              const st = this._hass.states[k];
+              const uom = st?.attributes?.unit_of_measurement || '';
+              return uom === '%' && (
+                (lower.includes('backup') && lower.includes('soc')) ||
+                (lower.includes('reserve') && lower.includes('soc')) ||
+                (lower.includes('backup') && lower.includes('state_of_charge')) ||
+                (lower.includes('reserved') && lower.includes('soc'))
+              );
+            });
+            if (reservedSocKeys.length > 0 && !cfg2.entities.battery_reserved_soc) {
+              cfg2.entities.battery_reserved_soc = reservedSocKeys[0];
+              found.push('Battery reserved SoC: ' + reservedSocKeys[0]);
             }
 
             // Auto-detect forecast.solar entities
@@ -1655,14 +1675,13 @@ class SigenergySettingsCard extends HTMLElement {
                 cfg2.entities.battery_max_soc = sigenMaxSoc;
                 found.push('Sigenergy max SoC: ' + sigenMaxSoc);
               }
-              if (!cfg2.entities.battery_min_soc) {
-                if (sigenMinSoc) {
-                  cfg2.entities.battery_min_soc = sigenMinSoc;
-                  found.push('Sigenergy min SoC (discharge cutoff): ' + sigenMinSoc);
-                } else if (sigenBackupSoc) {
-                  cfg2.entities.battery_min_soc = sigenBackupSoc;
-                  found.push('Sigenergy min SoC (backup): ' + sigenBackupSoc);
-                }
+              if (sigenMinSoc && !cfg2.entities.battery_min_soc) {
+                cfg2.entities.battery_min_soc = sigenMinSoc;
+                found.push('Sigenergy min SoC (discharge cutoff): ' + sigenMinSoc);
+              }
+              if (sigenBackupSoc && !cfg2.entities.battery_reserved_soc) {
+                cfg2.entities.battery_reserved_soc = sigenBackupSoc;
+                found.push('Sigenergy reserved SoC (backup): ' + sigenBackupSoc);
               }
 
               let sigenCount = 0;
@@ -1924,7 +1943,11 @@ class SigenergySettingsCard extends HTMLElement {
             <span class="row-label" style="font-size:12px;color:#8892a4;">Min SoC Target (%)</span>
             <input class="row-input" type="number" min="0" max="50" step="1" value="${cfg.entities?.battery_min_soc_pct || ''}" data-key="battery_min_soc_pct" placeholder="0" style="width:80px;" />
           </div>
-          <div style="font-size:10px;color:#666;padding:2px 0 0 4px;">Charge/discharge cutoff targets for runtime estimation. E.g. 95% max, 10% min. Leave blank for 100%/0%.</div>
+          <div class="row" style="margin-top:4px;">
+            <span class="row-label" style="font-size:12px;color:#8892a4;">Reserved SoC (%)</span>
+            <input class="row-input" type="number" min="0" max="50" step="1" value="${cfg.entities?.battery_reserved_soc_pct || ''}" data-key="battery_reserved_soc_pct" placeholder="" style="width:80px;" />
+          </div>
+          <div style="font-size:10px;color:#666;padding:2px 0 0 4px;">Charge/discharge cutoff targets for runtime estimation. E.g. 95% max, 10% min. Leave blank for 100%/0%.<br><b>Reserved SoC</b> = backup reserve for grid outages (e.g. 15–20%). When discharging, runtime shows time to this level. Leave blank to disable.</div>
         </div>
       </div>
       <div class="section">
@@ -2008,6 +2031,16 @@ class SigenergySettingsCard extends HTMLElement {
         this._syncSocTargetsToDashboard(cfg2);
       });
     }
+    const reservedSocInput = el.querySelector('input[data-key="battery_reserved_soc_pct"]');
+    if (reservedSocInput) {
+      reservedSocInput.addEventListener('change', () => {
+        const cfg2 = this._storeGet();
+        const val = parseInt(reservedSocInput.value);
+        cfg2.entities.battery_reserved_soc_pct = (val >= 0 && val <= 50) ? val.toString() : '';
+        this._storeSave(cfg2);
+        this._syncSocTargetsToDashboard(cfg2);
+      });
+    }
   }
 
   async _syncBatteryCapacityKwhToDashboard(value) {
@@ -2062,6 +2095,7 @@ class SigenergySettingsCard extends HTMLElement {
       const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
       const maxPct = (cfg.entities?.battery_max_soc_pct != null && cfg.entities.battery_max_soc_pct !== '') ? parseInt(cfg.entities.battery_max_soc_pct) : undefined;
       const minPct = (cfg.entities?.battery_min_soc_pct != null && cfg.entities.battery_min_soc_pct !== '') ? parseInt(cfg.entities.battery_min_soc_pct) : undefined;
+      const reservedPct = (cfg.entities?.battery_reserved_soc_pct != null && cfg.entities.battery_reserved_soc_pct !== '') ? parseInt(cfg.entities.battery_reserved_soc_pct) : undefined;
       const patchHouse = (obj) => {
         if (!obj || typeof obj !== 'object') return false;
         if (obj.type === 'custom:sigenergy-house-card') {
@@ -2069,6 +2103,8 @@ class SigenergySettingsCard extends HTMLElement {
           else delete obj.battery_max_soc_pct;
           if (minPct >= 0 && minPct <= 50) obj.battery_min_soc_pct = minPct;
           else delete obj.battery_min_soc_pct;
+          if (reservedPct >= 0 && reservedPct <= 50) obj.battery_reserved_soc_pct = reservedPct;
+          else delete obj.battery_reserved_soc_pct;
           return true;
         }
         for (const v of Object.values(obj)) {
@@ -2669,7 +2705,8 @@ return forecast.map(function(d) {
         heat_pump_power: e.heat_pump_power || e.deferrable0_power || '',
         battery_capacity: e.battery_capacity || '',
         battery_max_soc: e.battery_max_soc || '',
-        battery_min_soc: e.battery_min_soc || ''
+        battery_min_soc: e.battery_min_soc || '',
+        battery_reserved_soc: e.battery_reserved_soc || ''
       };
       // Sync manual battery capacity override — always set or clear explicitly
       if (e.battery_capacity_kwh) {
@@ -2687,6 +2724,11 @@ return forecast.map(function(d) {
         houseCardOrig.battery_min_soc_pct = parseInt(e.battery_min_soc_pct);
       } else {
         delete houseCardOrig.battery_min_soc_pct;
+      }
+      if (e.battery_reserved_soc_pct != null && e.battery_reserved_soc_pct !== '') {
+        houseCardOrig.battery_reserved_soc_pct = parseInt(e.battery_reserved_soc_pct);
+      } else {
+        delete houseCardOrig.battery_reserved_soc_pct;
       }
       // Sync ALL features from config store to house card
       if (!houseCardOrig.features) houseCardOrig.features = {};

@@ -181,9 +181,11 @@ Restart Home Assistant after installing any new plugins.
    - Generates the full dashboard configuration from the template + your entity mappings
    - Installs the bundled `sigenergy_dark` theme
    - Registers the JS resources for custom cards (house card, settings card, device card)
-5. The **Sigenergy** dashboard appears in the sidebar immediately — no restart required
+5. The **Genergy** dashboard appears in the sidebar immediately — no restart required
 
-> **Sigenergy users**: Check the "Use Sigenergy defaults" checkbox on the first step. This pre-fills all entity IDs with the correct Sigenergy naming convention (`sensor.sigen_plant_*` / `sensor.sigen_inverter_*`) and creates the dashboard immediately — no manual entity mapping required.
+> **All inverter brands (Huawei, Deye, Goodwe, SolarEdge, Fronius, Enphase, etc.)**: Leave the Sigenergy toggle **OFF** on the first step. The config flow walks you through selecting your entities manually — just pick the right sensors from the dropdowns. After setup, the Settings card's **Auto-Detect** button can find common entities automatically.
+
+> **Sigenergy users only**: Check the "I have a Sigenergy inverter" toggle on the first step. This pre-fills all entity IDs with the correct Sigenergy naming convention (`sensor.sigen_plant_*` / `sensor.sigen_inverter_*`) and creates the dashboard immediately — no manual entity mapping required.
 
 > **Note**: The dashboard is created with URL path `dashboard-sigenergy`. The settings card uses this path to persist your configuration.
 
@@ -217,7 +219,7 @@ When you open the Settings tab, the dashboard checks if required custom elements
 
 After adding the integration, the dashboard is pre-configured with your entity mappings:
 
-1. Navigate to the **Sigenergy** dashboard in the sidebar
+1. Navigate to the **Genergy** dashboard in the sidebar
 2. Verify your data is showing correctly in the overview
 3. Open the **Settings** tab (⚙️ gear icon) to fine-tune:
    - **⚡ Entities** — Adjust or add entity mappings (each field shows a live state badge)
@@ -265,7 +267,7 @@ If you have a **Sigenergy** inverter system, the integration includes a comprehe
 - **Battery sign convention**: Automatically sets `battery_positive_charging: true` (Sigenergy uses positive values for charging)
 - **PV string count**: Detects how many PV strings are connected and sets the count accordingly
 
-To use: check the "**Use Sigenergy defaults**" checkbox on the first step of the config flow. Or in the Settings tab, click **Auto-Detect** and the Sigenergy entities will be mapped automatically.
+To use: check the "**I have a Sigenergy inverter**" toggle on the first step of the config flow. Or in the Settings tab, click **Auto-Detect** and the Sigenergy entities will be mapped automatically.
 
 ---
 
@@ -287,9 +289,10 @@ To use: check the "**Use Sigenergy defaults**" checkbox on the first step of the
 |---|---|---|
 | `battery_capacity` | Battery rated capacity (kWh, Wh, or Ah) | `sensor.battery_rated_capacity_kwh` |
 | `battery_max_soc` | Charge cutoff / max SoC target (%) | `number.ess_charge_cut_off_soc` |
-| `battery_min_soc` | Discharge reserve / min SoC target (%) | `number.battery_shutdown` |
+| `battery_min_soc` | Discharge cutoff / min SoC target (%) | `number.ess_discharge_cut_off_soc` |
+| `battery_reserved_soc` | Backup reserve SoC for grid outages (%) | `number.ess_backup_state_of_charge` |
 
-> **Tip**: If no capacity entity is available, enter the value manually in Settings → Display → Battery → "Manual Capacity (kWh)". Ah-based entities are auto-converted using nominal battery voltage (default 51.2V for LFP).
+> **Tip**: If no capacity entity is available, enter the value manually in Settings → Features → Battery → "Manual Capacity (kWh)". SoC targets can also be set as manual percentages in the same section. Ah-based entities are auto-converted using nominal battery voltage (default 51.2V for LFP).
 
 ### Solcast Solar Forecast (Optional — Enable in Display)
 
@@ -417,6 +420,8 @@ Configure in Settings → **🔧 Features** tab:
 | **Hide Cables** | Off | Hides static cable lines, shows only animated power flow comets |
 | **Battery Packs** | 2 | Number of battery modules (1–8) — controls device card layout and entity slots |
 | **PV Strings** | 2 | Number of PV strings (1–6) — controls individual PV string entity slots in Settings |
+| **Battery Runtime** | On | Shows estimated time-to-full/empty on the house card. Configurable SoC targets |
+| **Positive = Charging** | On | Battery sign convention. On: positive = charging (Sigenergy, Huawei). Off: positive = discharging (Deye, Goodwe) |
 | **EMHASS** | On | Enables EMHASS status card, forecast overlays on chart, and financial tracking |
 | **EMHASS Forecasts** | On | Adds MPC forecast dashed lines to energy chart |
 | **Deferrable Loads** | Off | Enables 3 deferrable load entity slots and schedule display |
@@ -455,6 +460,7 @@ Configure in Settings → **🎨 Display** tab:
 |---|---|---|
 | **Power Threshold** | 1000 W | Below: show Watts. Above: auto-scale to kW |
 | **Decimal Places** | 1 | Number formatting precision (0, 1, or 2) |
+| **Battery Label** | BATTERY | Name displayed on house card battery (e.g. "SigenStor", "LUNA 2000", "PowerWall") |
 | **Chart Range** | Today | Default chart time span: Today, 24h, or 7 days |
 | **SoC Ring Low** | 40% | Below this: SoC ring pulses red on house card |
 | **SoC Ring High** | 60% | Above this: green ring. Between low and high: orange |
