@@ -47,19 +47,19 @@ const DEFAULT_ENTITIES = {
   ev_soc: '',
   ev_range: '',
   heat_pump_power: '',
-  emhass_mode: 'sensor.emhass_current_mode',
-  emhass_reason: 'sensor.emhass_decision_reason',
-  mpc_battery: 'sensor.mpc_batt_power',
-  mpc_grid: 'sensor.mpc_grid_power',
-  mpc_pv: 'sensor.mpc_pv_power',
-  buy_price: 'sensor.mpc_general_price',
-  sell_price: 'sensor.mpc_feed_in_price',
-  mpc_soc: 'sensor.mpc_batt_soc',
-  mpc_load: 'sensor.mpc_load_power',
-  mpc_optim_status: 'sensor.mpc_optim_status',
-  emhass_savings_today: 'sensor.emhass_savings_today',
-  emhass_net_cost_today: 'sensor.emhass_net_cost_today',
-  emhass_battery_action: 'sensor.emhass_battery_action_summary',
+  emhass_mode: '',
+  emhass_reason: '',
+  mpc_battery: '',
+  mpc_grid: '',
+  mpc_pv: '',
+  buy_price: '',
+  sell_price: '',
+  mpc_soc: '',
+  mpc_load: '',
+  mpc_optim_status: '',
+  emhass_savings_today: '',
+  emhass_net_cost_today: '',
+  emhass_battery_action: '',
   nordpool: 'sensor.nordpool_kwh_be_eur_3_10_0',
   battery_pack1_soc: 'sensor.battery_monitor_pack_01_view_soc',
   battery_pack2_soc: 'sensor.battery_monitor_pack_02_view_soc',
@@ -78,7 +78,7 @@ const DEFAULT_ENTITIES = {
   // Additional system entities
   grid_power_ct: 'sensor.deyeinvertermaster_grid_power_ct_clamp',
   grid_active_power: 'sensor.net_grid_power',
-  emhass_enabled: 'input_boolean.emhass_enabled',
+  emhass_enabled: '',
   // Device/inverter entities
   battery_voltage: 'sensor.deyeinvertermaster_battery_voltage',
   battery_current: 'sensor.deyeinvertermaster_battery_output_current',
@@ -93,14 +93,14 @@ const DEFAULT_ENTITIES = {
   inverter_internal_temp: 'sensor.deyeinvertermaster_inverter_internal_temperature',
   rated_power: 'sensor.deyeinvertermaster_rated_power',
   // EMHASS financial entities
-  emhass_net_cost_month: 'sensor.emhass_net_cost_this_month',
-  emhass_savings_month: 'sensor.emhass_savings_monthly',
-  emhass_projected_bill: 'sensor.emhass_projected_monthly_bill',
-  emhass_projected_savings: 'sensor.emhass_projected_monthly_savings',
-  emhass_last_decision: 'sensor.emhass_last_decision',
+  emhass_net_cost_month: '',
+  emhass_savings_month: '',
+  emhass_projected_bill: '',
+  emhass_projected_savings: '',
+  emhass_last_decision: '',
   // Automation entities
-  automation_mpc_optimizer: 'automation.emhass_run_mpc_optimizer',
-  automation_battery_control: 'automation.emhass_battery_control',
+  automation_mpc_optimizer: '',
+  automation_battery_control: '',
   // Solar forecast entities (Solcast / forecast.solar)
   solcast_today: '',
   solcast_tomorrow: '',
@@ -1293,7 +1293,7 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Grid Frequency', 'grid_frequency', e)}
         ${this._entityRow('Grid CT Clamp', 'grid_power_ct', e)}
         ${this._entityRow('Net Grid Power', 'grid_active_power', e)}
-        ${this._entityRow('EMHASS Enabled', 'emhass_enabled', e)}
+        ${emhassOn ? this._entityRow('EMHASS Enabled', 'emhass_enabled', e) : ''}
       </div>
       <div class="section">
         <div class="section-title">🔌 Inverter & PV</div>

@@ -2,6 +2,12 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.9] - 2026-03-29
+
+### Fixed
+- **EMHASS Entities No Longer Pre-Filled by Default** — Cleared all EMHASS-specific entity defaults (28 entities: `sensor.emhass_*`, `sensor.mpc_*`, `automation.emhass_*`, `input_boolean.emhass_enabled`). Non-EMHASS users no longer see “❌ Not found” errors on fields they never configured. The auto-detect button fills these in when EMHASS is actually installed.
+- **EMHASS Enabled Field Now Conditional** — The "EMHASS Enabled" entity row under the System section now only appears when EMHASS is selected as the EMS provider, eliminating confusion about duplicate EMHASS on/off controls.
+
 ## [2.12.8] - 2026-03-29
 
 ### Fixed
