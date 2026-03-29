@@ -296,7 +296,7 @@ async def _create_or_update_dashboard(
 
         dashboard_item = {
             "allow_single_word": True,
-            "icon": "mdi:solar-power-variant",
+            "icon": "mdi:home-lightning-bolt",
             "title": DASHBOARD_TITLE,
             "url_path": DASHBOARD_URL_PATH,
             "require_admin": False,
@@ -342,7 +342,7 @@ async def _create_or_update_dashboard(
                 config={"mode": MODE_STORAGE},
                 update=False,
                 sidebar_title=DASHBOARD_TITLE,
-                sidebar_icon="mdi:solar-power-variant",
+                sidebar_icon="mdi:home-lightning-bolt",
             )
             _LOGGER.info(
                 "Genergy Dashboard: Registered panel '%s'",
