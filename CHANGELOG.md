@@ -2,6 +2,15 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.13.3] - 2025-07-15
+
+### Fixed
+- **MWh/Wh Unit Handling** — Inverters reporting energy in MWh or Wh (instead of kWh) now display correctly across the entire dashboard:
+  - Settings card converts MWh→kWh (×1000) and Wh→kWh (÷1000) automatically
+  - Six mushroom status cards (Solar, Load, Charge, Discharge, Import, Export) dynamically detect the entity's unit via `state_attr()` and convert to kWh
+  - Sankey chart respects entity native units instead of forcing kWh via hardcoded `unit_prefix`
+  - EV/HP auto-detect now matches MWh and Wh energy entities, not just kWh
+
 ## [2.13.2] - 2025-07-15
 
 ### Improved
