@@ -53,6 +53,7 @@ from .const import (
     CONF_FEATURE_EV,
     CONF_FEATURE_HEAT_PUMP,
     CONF_FEATURE_EMHASS,
+    CONF_FEATURE_HAEO,
     CONF_FEATURE_SOLCAST,
     CONF_BATTERY_PACKS,
     CONF_INVERTER_RATED_POWER,
@@ -193,6 +194,10 @@ def _extras_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 default=d.get(CONF_FEATURE_EMHASS, False),
             ): BooleanSelector(),
             vol.Optional(
+                CONF_FEATURE_HAEO,
+                default=d.get(CONF_FEATURE_HAEO, False),
+            ): BooleanSelector(),
+            vol.Optional(
                 CONF_FEATURE_SOLCAST,
                 default=d.get(CONF_FEATURE_SOLCAST, False),
             ): BooleanSelector(),
@@ -241,6 +246,7 @@ class GenergyDashboardConfigFlow(
                 self._data[CONF_FEATURE_EV] = False
                 self._data[CONF_FEATURE_HEAT_PUMP] = False
                 self._data[CONF_FEATURE_EMHASS] = False
+                self._data[CONF_FEATURE_HAEO] = False
                 self._data[CONF_FEATURE_SOLCAST] = False
                 self._data[CONF_BATTERY_PACKS] = 1
                 return self.async_create_entry(

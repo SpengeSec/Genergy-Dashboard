@@ -129,6 +129,16 @@ const DEFAULT_ENTITIES = {
   emhass_import_cost_daily: '',
   emhass_grid_only_cost_daily: '',
   emhass_projected_bill_without_opt: '',
+  // HAEO (Home Assistant Energy Optimizer) entities
+  haeo_battery_charge: '',
+  haeo_battery_discharge: '',
+  haeo_battery_soc: '',
+  haeo_grid_power: '',
+  haeo_solar_power: '',
+  haeo_load_power: '',
+  haeo_optim_status: '',
+  haeo_optim_cost: '',
+  haeo_optim_duration: '',
   // EV / Heat Pump daily energy (for Sankey)
   ev_energy_today: '',
   heat_pump_energy_today: '',
@@ -149,6 +159,8 @@ const DEFAULT_CONFIG = {
     emhass: true,
     emhass_forecasts: true,
     deferrable_loads: false,
+    ems_provider: 'emhass',
+    haeo_forecasts: true,
     financial_tracking: true,
     solar_forecast: false,
     weather_widget: true,
@@ -305,6 +317,10 @@ class SigConfigStore {
       } else {
         result[key] = overrides[key] !== undefined ? overrides[key] : defaults[key];
       }
+    }
+    // Backward compat: migrate old boolean emhass flag to ems_provider
+    if (result.features && result.features.ems_provider === undefined) {
+      result.features.ems_provider = result.features.emhass !== false ? 'emhass' : 'none';
     }
     return result;
   }
@@ -802,7 +818,7 @@ class SigenergySettingsCard extends HTMLElement {
 
   // Features that should be synced to the house card's dashboard config
   static get SYNCED_FEATURES() {
-    return { ev_charger: 'ev_charger', ev_vehicle: 'ev_vehicle', heat_pump: 'heat_pump', grid_connection: 'grid', hide_cables: 'hide_cables', emhass: 'emhass', solar_forecast: 'solar_forecast', emhass_forecasts: 'emhass_forecasts', deferrable_loads: 'deferrable_loads', financial_tracking: 'financial_tracking', battery_runtime: 'battery_runtime' };
+    return { ev_charger: 'ev_charger', ev_vehicle: 'ev_vehicle', heat_pump: 'heat_pump', grid_connection: 'grid', hide_cables: 'hide_cables', emhass: 'emhass', solar_forecast: 'solar_forecast', emhass_forecasts: 'emhass_forecasts', deferrable_loads: 'deferrable_loads', financial_tracking: 'financial_tracking', battery_runtime: 'battery_runtime', ems_provider: 'ems_provider', haeo_forecasts: 'haeo_forecasts' };
   }
 
   async _syncFeatureToDashboard(settingsKey, value) {
@@ -879,7 +895,9 @@ class SigenergySettingsCard extends HTMLElement {
 
   _renderEntities(el, cfg) {
     const e = cfg.entities || {};
-    const emhassOn = cfg.features?.emhass !== false;
+    const emsProvider = cfg.features?.ems_provider || (cfg.features?.emhass !== false ? 'emhass' : 'none');
+    const emhassOn = emsProvider === 'emhass';
+    const haeoOn = emsProvider === 'haeo';
     el.innerHTML = `
       <div style="margin-bottom:16px;padding:12px;background:rgba(0,212,184,0.08);border:1px solid rgba(0,212,184,0.25);border-radius:10px;">
         <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -947,13 +965,15 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Sell Price', 'sell_price', e)}
         ${this._entityRow('Nordpool', 'nordpool', e)}
       </div>
-      <div class="section" style="border:1px solid ${emhassOn ? '#00d4b8' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${emhassOn ? '12' : '0'}px;">
-          <div>
-            <div style="font-size:14px;font-weight:700;color:${emhassOn ? '#00d4b8' : '#8892a4'};">🤖 EMHASS Integration</div>
-            <div style="font-size:11px;color:#8892a4;margin-top:2px;">Enable to configure EMHASS optimizer entities and unlock advanced features (forecasts, MPC targets, savings tracking)</div>
+      <div class="section" style="border:1px solid ${emhassOn ? '#00d4b8' : haeoOn ? '#7c4dff' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
+        <div style="margin-bottom:${emhassOn || haeoOn ? '12' : '0'}px;">
+          <div style="font-size:14px;font-weight:700;color:${emhassOn ? '#00d4b8' : haeoOn ? '#7c4dff' : '#8892a4'};">🤖 Energy Management System (EMS)</div>
+          <div style="font-size:11px;color:#8892a4;margin-top:2px;">Select your energy optimizer. Configure entities below after selecting a provider.</div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button class="ems-btn ${emsProvider === 'none' ? 'active' : ''}" data-ems="none" style="flex:1;padding:8px 6px;border:1px solid ${emsProvider === 'none' ? '#8892a4' : '#2d3451'};background:${emsProvider === 'none' ? 'rgba(136,146,164,0.15)' : 'transparent'};color:${emsProvider === 'none' ? '#fff' : '#8892a4'};border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;">None</button>
+            <button class="ems-btn ${emhassOn ? 'active' : ''}" data-ems="emhass" style="flex:1;padding:8px 6px;border:1px solid ${emhassOn ? '#00d4b8' : '#2d3451'};background:${emhassOn ? 'rgba(0,212,184,0.15)' : 'transparent'};color:${emhassOn ? '#00d4b8' : '#8892a4'};border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;">EMHASS</button>
+            <button class="ems-btn ${haeoOn ? 'active' : ''}" data-ems="haeo" style="flex:1;padding:8px 6px;border:1px solid ${haeoOn ? '#7c4dff' : '#2d3451'};background:${haeoOn ? 'rgba(124,77,255,0.15)' : 'transparent'};color:${haeoOn ? '#7c4dff' : '#8892a4'};border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;">HAEO</button>
           </div>
-          <div class="switch ${emhassOn ? 'on' : 'off'}" data-key="emhass_toggle" style="flex-shrink:0;margin-left:12px;"></div>
         </div>
         ${emhassOn ? `
           <div style="border-top:1px solid rgba(0,212,184,0.2);padding-top:10px;">
@@ -1012,6 +1032,35 @@ class SigenergySettingsCard extends HTMLElement {
             ${this._entityRow('Actual Power 1', 'deferrable1_power', e)}
           </div>
           ` : ''}
+        ` : ''}
+        ${haeoOn ? `
+          <div style="border-top:1px solid rgba(124,77,255,0.2);padding-top:10px;">
+            <div style="font-size:10px;color:#666;margin-bottom:8px;">Requires the <a href="https://github.com/hass-energy/haeo" target="_blank" style="color:#7c4dff;">HAEO integration</a> (HACS). Sensors are named <b>sensor.{element_name}_{type}</b>.</div>
+            <div class="section-title" style="font-size:11px;">HAEO Schedule Entities</div>
+            <div class="toggle-desc" style="margin-bottom:4px;color:#8892a4;font-size:10px;">Optimization output sensors — each includes a <code>forecast</code> attribute with future schedule</div>
+            ${this._entityRow('Battery Charge', 'haeo_battery_charge', e)}
+            <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">sensor.{battery_name}_power_consumed — optimal charge power (kW)</div>
+            ${this._entityRow('Battery Discharge', 'haeo_battery_discharge', e)}
+            <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">sensor.{battery_name}_power_produced — optimal discharge power (kW)</div>
+            ${this._entityRow('Battery SoC', 'haeo_battery_soc', e)}
+            <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">sensor.{battery_name}_soc — planned state of charge (%)</div>
+            ${this._entityRow('Grid Power', 'haeo_grid_power', e)}
+            ${this._entityRow('Solar Power', 'haeo_solar_power', e)}
+            ${this._entityRow('Load Power', 'haeo_load_power', e)}
+          </div>
+          <div style="margin-top:8px;">
+            <div class="section-title" style="font-size:11px;">HAEO Network Status</div>
+            ${this._entityRow('Optim Status', 'haeo_optim_status', e)}
+            <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">sensor.{network_name}_optimization_status — success / failed / pending</div>
+            ${this._entityRow('Optim Cost', 'haeo_optim_cost', e)}
+            ${this._entityRow('Optim Duration', 'haeo_optim_duration', e)}
+          </div>
+          <div style="margin-top:8px;">
+            <div class="section-title" style="font-size:11px;">Price Entities</div>
+            <div class="toggle-desc" style="margin-bottom:4px;color:#8892a4;font-size:10px;">Live electricity prices for chart overlays (shared with EMHASS)</div>
+            ${this._entityRow('Import Price', 'current_import_price', e)}
+            ${this._entityRow('Export Price', 'current_export_price', e)}
+          </div>
         ` : ''}
       </div>
       <div class="section" style="border:1px solid ${cfg.features?.show_ev_in_sankey ? '#ff69b4' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
@@ -1163,17 +1212,20 @@ class SigenergySettingsCard extends HTMLElement {
       'heat_pump_power', 'battery_capacity',
     ]);
 
-    // EMHASS toggle handler
-    const emhassToggle = el.querySelector('[data-key="emhass_toggle"]');
-    if (emhassToggle) {
-      emhassToggle.addEventListener('click', () => {
+    // EMS provider selector handler (None / EMHASS / HAEO)
+    el.querySelectorAll('.ems-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const provider = btn.dataset.ems;
         const cfg2 = this._storeGet();
-        cfg2.features.emhass = !cfg2.features.emhass;
+        cfg2.features.ems_provider = provider;
+        // Keep backward-compat emhass boolean in sync
+        cfg2.features.emhass = (provider === 'emhass');
         this._storeSave(cfg2);
+        this._syncFeatureToDashboard('ems_provider', provider);
         this._syncFeatureToDashboard('emhass', cfg2.features.emhass);
         this._render();
       });
-    }
+    });
 
     // Solar forecast toggle handler
     const solarToggle = el.querySelector('[data-key="solar_forecast_toggle"]');
@@ -1814,6 +1866,57 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
+          // ── HAEO auto-detect ─────────────────────────────────────────
+          if (this._hass && this._hass.states) {
+            const allKeys = Object.keys(this._hass.states);
+            // Look for HAEO optimization_status sensor pattern
+            const haeoStatusKeys = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_optimization_status'));
+            if (haeoStatusKeys.length > 0) {
+              const statusKey = haeoStatusKeys[0];
+              // Derive network name prefix (e.g. "sensor.home_energy_" from "sensor.home_energy_optimization_status")
+              const networkPrefix = statusKey.replace('_optimization_status', '');
+              cfg2.entities.haeo_optim_status = statusKey;
+              found.push('HAEO optimization status: ' + statusKey);
+              // Try optimization cost and duration
+              const costKey = networkPrefix + '_optimization_cost';
+              const durKey = networkPrefix + '_optimization_duration';
+              if (allKeys.includes(costKey)) {
+                cfg2.entities.haeo_optim_cost = costKey;
+                found.push('HAEO optimization cost: ' + costKey);
+              }
+              if (allKeys.includes(durKey)) {
+                cfg2.entities.haeo_optim_duration = durKey;
+                found.push('HAEO optimization duration: ' + durKey);
+              }
+              // Find HAEO battery sensors (power_consumed = charge, power_produced = discharge)
+              const haeoBattCharge = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_power_consumed') && !k.includes('grid') && !k.includes('load'));
+              const haeoBattDischarge = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_power_produced') && !k.includes('grid') && !k.includes('solar') && !k.includes('pv'));
+              const haeoBattSoc = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_soc') && k !== (cfg2.entities.battery_soc || ''));
+              // Check for forecast attribute to confirm these are HAEO sensors
+              const isHaeoSensor = (key) => {
+                const st = this._hass.states[key];
+                return st && st.attributes && (st.attributes.forecast !== undefined || st.attributes.horizon !== undefined);
+              };
+              const haeoCharge = haeoBattCharge.find(k => isHaeoSensor(k));
+              const haeoDischarge = haeoBattDischarge.find(k => isHaeoSensor(k));
+              const haeoSoc = haeoBattSoc.find(k => isHaeoSensor(k));
+              if (haeoCharge) { cfg2.entities.haeo_battery_charge = haeoCharge; found.push('HAEO battery charge: ' + haeoCharge); }
+              if (haeoDischarge) { cfg2.entities.haeo_battery_discharge = haeoDischarge; found.push('HAEO battery discharge: ' + haeoDischarge); }
+              if (haeoSoc) { cfg2.entities.haeo_battery_soc = haeoSoc; found.push('HAEO battery SoC: ' + haeoSoc); }
+              // Find HAEO grid, solar, load sensors
+              const haeoGridKeys = allKeys.filter(k => k.startsWith('sensor.') && (k.includes('grid') || k.includes('import') || k.includes('export')) && isHaeoSensor(k));
+              const haeoSolarKeys = allKeys.filter(k => k.startsWith('sensor.') && (k.includes('solar') || k.includes('pv')) && k.endsWith('_power_produced') && isHaeoSensor(k));
+              const haeoLoadKeys = allKeys.filter(k => k.startsWith('sensor.') && k.includes('load') && isHaeoSensor(k));
+              if (haeoGridKeys.length > 0 && !cfg2.entities.haeo_grid_power) { cfg2.entities.haeo_grid_power = haeoGridKeys[0]; found.push('HAEO grid: ' + haeoGridKeys[0]); }
+              if (haeoSolarKeys.length > 0 && !cfg2.entities.haeo_solar_power) { cfg2.entities.haeo_solar_power = haeoSolarKeys[0]; found.push('HAEO solar: ' + haeoSolarKeys[0]); }
+              if (haeoLoadKeys.length > 0 && !cfg2.entities.haeo_load_power) { cfg2.entities.haeo_load_power = haeoLoadKeys[0]; found.push('HAEO load: ' + haeoLoadKeys[0]); }
+              // Auto-enable HAEO as EMS provider
+              cfg2.features.ems_provider = 'haeo';
+              cfg2.features.haeo_forecasts = true;
+              found.push('✓ HAEO detected — EMS provider set to HAEO');
+            }
+          }
+
           if (found.length > 0) {
             this._storeSave(cfg2);
             if (statusEl) statusEl.innerHTML = '✅ Detected ' + found.length + ' entities:<br>' + found.map(f => '• ' + f).join('<br>');
@@ -1885,6 +1988,7 @@ class SigenergySettingsCard extends HTMLElement {
 
   _renderFeatures(el, cfg) {
     const f = cfg.features || {};
+    const emsProvider = f.ems_provider || (f.emhass !== false ? 'emhass' : 'none');
     el.innerHTML = `
       <div style="margin-bottom:12px;padding:10px;background:rgba(63,81,181,0.08);border:1px solid rgba(63,81,181,0.2);border-radius:8px;">
         <div style="font-size:11px;color:#8892a4;line-height:1.5;">
@@ -1898,12 +2002,22 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._toggleHtml('Hide Cable Lines', 'Show only animated flow dots, hide the static cable backbone on the house card', 'hide_cables', f.hide_cables)}
       </div>
       <div class="section">
-        <div class="section-title">🤖 EMHASS Optimizer</div>
-        <div style="font-size:10px;color:#666;margin-bottom:6px;">Requires the <a href="https://emhass.readthedocs.io/" target="_blank" style="color:#00d4b8;">EMHASS add-on</a>. Configure entities on the Entities tab → EMHASS section.</div>
-        ${this._toggleHtml('EMHASS Integration', 'Enable EMHASS optimizer stats and controls', 'emhass', f.emhass)}
-        ${this._toggleHtml('EMHASS Forecasts', 'Overlay MPC forecast series (PV/Battery/Grid/Load) on energy charts', 'emhass_forecasts', f.emhass_forecasts)}
-        ${this._toggleHtml('Deferrable Loads', 'Show heat pump/boiler schedule forecasts from EMHASS', 'deferrable_loads', f.deferrable_loads)}
-        ${this._toggleHtml('Financial Tracking', 'Show cost/savings cards and chart annotations', 'financial_tracking', f.financial_tracking)}
+        <div class="section-title">🤖 Energy Management (EMS)</div>
+        <div style="font-size:10px;color:#666;margin-bottom:8px;">Choose your energy optimizer. <a href="https://emhass.readthedocs.io/" target="_blank" style="color:#00d4b8;">EMHASS</a> (add-on) or <a href="https://github.com/hass-energy/haeo" target="_blank" style="color:#7c4dff;">HAEO</a> (HACS integration). Configure entities on the Entities tab → EMS section.</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <button class="ems-feature-btn ${emsProvider === 'none' ? 'active' : ''}" data-ems="none" style="flex:1;padding:10px 8px;border:1px solid ${emsProvider === 'none' ? '#8892a4' : '#2d3451'};background:${emsProvider === 'none' ? 'rgba(136,146,164,0.15)' : 'transparent'};color:${emsProvider === 'none' ? '#fff' : '#8892a4'};border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">None</button>
+          <button class="ems-feature-btn ${emsProvider === 'emhass' ? 'active' : ''}" data-ems="emhass" style="flex:1;padding:10px 8px;border:1px solid ${emsProvider === 'emhass' ? '#00d4b8' : '#2d3451'};background:${emsProvider === 'emhass' ? 'rgba(0,212,184,0.15)' : 'transparent'};color:${emsProvider === 'emhass' ? '#00d4b8' : '#8892a4'};border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">EMHASS</button>
+          <button class="ems-feature-btn ${emsProvider === 'haeo' ? 'active' : ''}" data-ems="haeo" style="flex:1;padding:10px 8px;border:1px solid ${emsProvider === 'haeo' ? '#7c4dff' : '#2d3451'};background:${emsProvider === 'haeo' ? 'rgba(124,77,255,0.15)' : 'transparent'};color:${emsProvider === 'haeo' ? '#7c4dff' : '#8892a4'};border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">HAEO</button>
+        </div>
+        ${emsProvider === 'emhass' ? `
+          ${this._toggleHtml('EMHASS Forecasts', 'Overlay MPC forecast series (PV/Battery/Grid/Load) on energy charts', 'emhass_forecasts', f.emhass_forecasts)}
+          ${this._toggleHtml('Deferrable Loads', 'Show heat pump/boiler schedule forecasts from EMHASS', 'deferrable_loads', f.deferrable_loads)}
+          ${this._toggleHtml('Financial Tracking', 'Show cost/savings cards and chart annotations', 'financial_tracking', f.financial_tracking)}
+        ` : ''}
+        ${emsProvider === 'haeo' ? `
+          ${this._toggleHtml('HAEO Forecasts', 'Overlay HAEO optimization schedule on energy charts (via forecast attributes)', 'haeo_forecasts', f.haeo_forecasts)}
+          ${this._toggleHtml('Financial Tracking', 'Show optimization cost in chart annotations', 'financial_tracking', f.financial_tracking)}
+        ` : ''}
       </div>
       <div class="section">
         <div class="section-title">☀️ Solar Forecast</div>
@@ -1988,6 +2102,31 @@ class SigenergySettingsCard extends HTMLElement {
 
     // Bind battery packs input
     const bpInput = el.querySelector('input[data-key="battery_packs"]');
+
+    // EMS provider button handler (Features tab)
+    el.querySelectorAll('.ems-feature-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const provider = btn.dataset.ems;
+        const cfg2 = this._storeGet();
+        cfg2.features.ems_provider = provider;
+        cfg2.features.emhass = (provider === 'emhass');
+        this._storeSave(cfg2);
+        this._syncFeatureToDashboard('ems_provider', provider);
+        this._syncFeatureToDashboard('emhass', cfg2.features.emhass);
+        if (this._hass) {
+          this._buildDashboard().then(ok => {
+            if (ok) console.log('Dashboard rebuilt after EMS provider change to', provider);
+            this._render();
+          }).catch(e => {
+            console.error('Dashboard rebuild failed:', e);
+            this._render();
+          });
+        } else {
+          this._render();
+        }
+      });
+    });
+
     if (bpInput) {
       bpInput.addEventListener('change', () => {
         const cfg2 = this._storeGet();
@@ -2347,6 +2486,117 @@ class SigenergySettingsCard extends HTMLElement {
       }
     }
 
+    // HAEO Forecast overlays (conditional) — reads forecast attribute from HAEO sensors
+    const emsProvider = features.ems_provider || (features.emhass !== false ? 'emhass' : 'none');
+    if (emsProvider === 'haeo' && features.haeo_forecasts) {
+      // HAEO Battery charge forecast
+      if (e.haeo_battery_charge) {
+        series.push({
+          entity: e.haeo_battery_charge, name: 'Charge (plan)', color: '#A5D6A7',
+          type: 'area', opacity: 0.06, curve: 'stepline', extend_to: false,
+          unit: ' kW', stroke_width: 1, stroke_dash: 5,
+          show: { in_header: false, legend_value: false },
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          yaxis_id: 'power', float_precision: 2
+        });
+      }
+      // HAEO Battery discharge forecast (inverted to match EMHASS convention)
+      if (e.haeo_battery_discharge) {
+        series.push({
+          entity: e.haeo_battery_discharge, name: 'Discharge (plan)', color: '#FFCC80',
+          type: 'area', opacity: 0.06, curve: 'stepline', extend_to: false,
+          unit: ' kW', stroke_width: 1, stroke_dash: 5,
+          show: { in_header: false, legend_value: false },
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), -(parseFloat(e[1]) || 0)]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          yaxis_id: 'power', float_precision: 2
+        });
+      }
+      // HAEO Solar forecast
+      if (e.haeo_solar_power) {
+        series.push({
+          entity: e.haeo_solar_power, name: 'Solar (plan)', color: '#FFF59D',
+          type: 'area', opacity: 0.06, curve: 'smooth', extend_to: false,
+          unit: ' kW', float_precision: fp, stroke_width: 1, stroke_dash: 5,
+          show: { in_header: false, legend_value: false },
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          yaxis_id: 'power'
+        });
+      }
+      // HAEO Grid forecast
+      if (e.haeo_grid_power) {
+        series.push({
+          entity: e.haeo_grid_power, name: 'Grid (plan)', color: '#EF5350',
+          type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
+          extend_to: false, unit: ' kW',
+          show: { in_header: false, legend_value: false },
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          yaxis_id: 'power', float_precision: 2
+        });
+      }
+      // HAEO Load forecast (inverted)
+      if (e.haeo_load_power) {
+        series.push({
+          entity: e.haeo_load_power, name: 'Load (plan)', color: '#CE93D8',
+          type: 'line', curve: 'smooth', extend_to: false, unit: ' kW',
+          float_precision: fp, stroke_width: 1, stroke_dash: 4,
+          show: { in_header: false, legend_value: false, in_chart: true },
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          yaxis_id: 'power', invert: true, opacity: 0.6
+        });
+      }
+      // HAEO SOC forecast (secondary axis)
+      if (e.haeo_battery_soc) {
+        series.push({
+          entity: e.haeo_battery_soc, name: 'SOC (plan)', color: '#81C784',
+          type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
+          extend_to: false, unit: ' %',
+          show: { in_header: false, legend_value: false },
+          data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
+          yaxis_id: 'soc', float_precision: 1
+        });
+      }
+      // Actual SOC
+      if (e.battery_soc) {
+        series.push({
+          entity: e.battery_soc, name: 'SOC', color: '#2196F3',
+          type: 'area', opacity: 0.2, stroke_width: 2.5,
+          extend_to: false, unit: ' %',
+          group_by: { func: 'avg', duration: '5min' },
+          show: { in_header: true, legend_value: true },
+          yaxis_id: 'soc', float_precision: 1
+        });
+      }
+      // Actual prices (shared with EMHASS)
+      if (e.current_import_price) {
+        series.push({
+          entity: e.current_import_price, name: 'Import Price', color: '#EF5350',
+          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          unit: ' EUR/kWh', float_precision: 4,
+          group_by: { func: 'avg', duration: '1h' },
+          show: { in_header: false, legend_value: true },
+          yaxis_id: 'price', curve: 'stepline'
+        });
+      }
+      if (e.current_export_price) {
+        series.push({
+          entity: e.current_export_price, name: 'Export Price', color: '#42A5F5',
+          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          unit: ' EUR/kWh', float_precision: 4,
+          group_by: { func: 'avg', duration: '1h' },
+          show: { in_header: false, legend_value: true },
+          yaxis_id: 'price', curve: 'stepline'
+        });
+      }
+      // HAEO optimization cost in header
+      if (features.financial_tracking && e.haeo_optim_cost) {
+        series.push({
+          entity: e.haeo_optim_cost, name: 'Optim Cost', unit: ' $',
+          show: { legend_value: true, in_chart: false, in_header: true },
+          float_precision: 2, yaxis_id: 'power'
+        });
+      }
+    }
+
     // Solar forecast overlay (Solcast / forecast.solar) — separate from EMHASS
     if (features.solar_forecast) {
       // Solcast detailed forecast from detailedForecast attribute
@@ -2477,6 +2727,26 @@ return forecast.map(function(d) {
         }
       });
     }
+    const emsP = features.ems_provider || (features.emhass !== false ? 'emhass' : 'none');
+    if (emsP === 'haeo' && features.haeo_forecasts) {
+      // Add SOC and price axes for HAEO (only if not already added by EMHASS block above)
+      if (!yaxis.find(y => y.id === 'soc')) {
+        yaxis.push({
+          id: 'soc', min: 0, max: 100, decimals: 0, show: false,
+          apex_config: { title: { text: 'SOC (%)' }, opposite: true }
+        });
+      }
+      if (!yaxis.find(y => y.id === 'price')) {
+        yaxis.push({
+          id: 'price', min: 'auto', max: 'auto', decimals: 2, show: false,
+          opposite: true,
+          apex_config: {
+            title: { text: 'Price (EUR/kWh)', style: { fontSize: '12px' } },
+            forceNiceScale: true, tickAmount: 4
+          }
+        });
+      }
+    }
     return yaxis;
   }
 
@@ -2498,7 +2768,10 @@ return forecast.map(function(d) {
       // Build the apex chart with conditional series
       const series = this._buildApexSeries(e, f);
       const yaxis = this._buildYAxes(f);
-      const hasForecasts = f.emhass && f.emhass_forecasts;
+      const emsP = f.ems_provider || (f.emhass !== false ? 'emhass' : 'none');
+      const hasEmhassForecasts = emsP === 'emhass' && f.emhass_forecasts;
+      const hasHaeoForecasts = emsP === 'haeo' && f.haeo_forecasts;
+      const hasForecasts = hasEmhassForecasts || hasHaeoForecasts;
       const hasSolarForecast = f.solar_forecast && (e.solcast_today || e.solcast_remaining || e.forecast_solar_today);
       const showExtendedChart = hasForecasts || hasSolarForecast;
 
@@ -2509,7 +2782,7 @@ return forecast.map(function(d) {
         },
         header: {
           show: true, show_states: true, colorize_states: true,
-          title: hasForecasts ? 'Energy + EMHASS Forecast' : hasSolarForecast ? 'Energy + Solar Forecast' : 'Energy Overview'
+          title: hasEmhassForecasts ? 'Energy + EMHASS Forecast' : hasHaeoForecasts ? 'Energy + HAEO Forecast' : hasSolarForecast ? 'Energy + Solar Forecast' : 'Energy Overview'
         },
         graph_span: showExtendedChart ? '48h' : '24h',
         update_interval: '60s',
@@ -2549,21 +2822,39 @@ return forecast.map(function(d) {
         series: series
       };
 
-      // Build EMHASS status card (conditional)
-      const emhassStatusCard = (f.emhass && e.emhass_mode) ? {
-        type: 'conditional',
-        conditions: [{ entity: e.emhass_mode, state_not: 'unavailable' }],
-        card: {
-          type: 'custom:mushroom-template-card',
-          entity: e.emhass_mode,
-          primary: "{{ states('" + e.emhass_mode + "') }}",
-          secondary: e.emhass_reason ? "{{ states('" + e.emhass_reason + "')[:60] }}" : '',
-          icon: "{% if states('" + e.emhass_mode + "') == 'CHARGE' %}mdi:battery-charging{% elif states('" + e.emhass_mode + "') == 'DISCHARGE' %}mdi:battery-arrow-down{% else %}mdi:battery-clock{% endif %}",
-          icon_color: "{% if states('" + e.emhass_mode + "') == 'CHARGE' %}green{% elif states('" + e.emhass_mode + "') == 'DISCHARGE' %}orange{% else %}grey{% endif %}",
-          fill_container: true, multiline_secondary: true,
-          card_mod: { style: 'ha-card { background: linear-gradient(135deg, rgba(0,180,120,0.15), rgba(0,120,80,0.08)) !important; border: 1px solid rgba(0,180,120,0.25) !important; border-radius: 12px !important; color: var(--primary-text-color, #fff); } mushroom-state-info { --card-primary-font-size: 15px; --card-secondary-font-size: 11px; overflow: visible !important; white-space: normal !important; }' }
-        }
-      } : null;
+      // Build EMS status card (EMHASS or HAEO — conditional)
+      let emsStatusCard = null;
+      if (emsP === 'emhass' && e.emhass_mode) {
+        emsStatusCard = {
+          type: 'conditional',
+          conditions: [{ entity: e.emhass_mode, state_not: 'unavailable' }],
+          card: {
+            type: 'custom:mushroom-template-card',
+            entity: e.emhass_mode,
+            primary: "{{ states('" + e.emhass_mode + "') }}",
+            secondary: e.emhass_reason ? "{{ states('" + e.emhass_reason + "')[:60] }}" : '',
+            icon: "{% if states('" + e.emhass_mode + "') == 'CHARGE' %}mdi:battery-charging{% elif states('" + e.emhass_mode + "') == 'DISCHARGE' %}mdi:battery-arrow-down{% else %}mdi:battery-clock{% endif %}",
+            icon_color: "{% if states('" + e.emhass_mode + "') == 'CHARGE' %}green{% elif states('" + e.emhass_mode + "') == 'DISCHARGE' %}orange{% else %}grey{% endif %}",
+            fill_container: true, multiline_secondary: true,
+            card_mod: { style: 'ha-card { background: linear-gradient(135deg, rgba(0,180,120,0.15), rgba(0,120,80,0.08)) !important; border: 1px solid rgba(0,180,120,0.25) !important; border-radius: 12px !important; color: var(--primary-text-color, #fff); } mushroom-state-info { --card-primary-font-size: 15px; --card-secondary-font-size: 11px; overflow: visible !important; white-space: normal !important; }' }
+          }
+        };
+      } else if (emsP === 'haeo' && e.haeo_optim_status) {
+        emsStatusCard = {
+          type: 'conditional',
+          conditions: [{ entity: e.haeo_optim_status, state_not: 'unavailable' }],
+          card: {
+            type: 'custom:mushroom-template-card',
+            entity: e.haeo_optim_status,
+            primary: "HAEO: {{ states('" + e.haeo_optim_status + "') }}",
+            secondary: e.haeo_optim_cost ? "Cost: {{ states('" + e.haeo_optim_cost + "') | round(2) }}" + (e.haeo_optim_duration ? " | {{ states('" + e.haeo_optim_duration + "') | round(1) }}s" : '') : '',
+            icon: "{% if states('" + e.haeo_optim_status + "') == 'success' %}mdi:check-circle{% elif states('" + e.haeo_optim_status + "') == 'failed' %}mdi:alert-circle{% else %}mdi:timer-sand{% endif %}",
+            icon_color: "{% if states('" + e.haeo_optim_status + "') == 'success' %}green{% elif states('" + e.haeo_optim_status + "') == 'failed' %}red{% else %}amber{% endif %}",
+            fill_container: true, multiline_secondary: true,
+            card_mod: { style: 'ha-card { background: linear-gradient(135deg, rgba(124,77,255,0.15), rgba(80,50,180,0.08)) !important; border: 1px solid rgba(124,77,255,0.25) !important; border-radius: 12px !important; color: var(--primary-text-color, #fff); } mushroom-state-info { --card-primary-font-size: 15px; --card-secondary-font-size: 11px; overflow: visible !important; white-space: normal !important; }' }
+          }
+        };
+      }
 
       // Build status mushroom cards
       // Helper: build Jinja template that shows value + unit from the sensor itself
@@ -2670,7 +2961,7 @@ return forecast.map(function(d) {
       // Build new cards array
       const newCards = [];
 
-      // Card 0: House + optional EMHASS status
+      // Card 0: House + optional EMS status
       // Get existing house card or create default, sync entities from store, and add min-height
       const houseCardOrig = mainLayout.cards[0]?.cards?.[0] || { type: 'custom:sigenergy-house-card' };
       // Auto-fill battery_capacity if empty and a capacity entity exists (for runtime estimation)
@@ -2752,7 +3043,7 @@ return forecast.map(function(d) {
       if (!houseCardOrig.card_mod) houseCardOrig.card_mod = {};
       houseCardOrig.card_mod.style = 'ha-card { overflow: hidden !important; }\n.house-container { width: 100% !important; overflow: hidden !important; }\n.house-container img { width: 100% !important; height: auto !important; }\n.house-container svg { width: 100% !important; height: auto !important; }';
       const houseStack = [houseCardOrig];
-      if (emhassStatusCard) houseStack.push(emhassStatusCard);
+      if (emsStatusCard) houseStack.push(emsStatusCard);
       if (solcastCard) houseStack.push(solcastCard);
       newCards.push({ type: 'vertical-stack', cards: houseStack });
 
@@ -3021,8 +3312,8 @@ return forecast.map(function(d) {
         <div style="font-size:12px;font-weight:600;color:#7986CB;margin-bottom:4px;">ℹ️ How "Apply Settings to Dashboard" works</div>
         <div style="font-size:11px;color:#8892a4;line-height:1.5;">
           This rebuilds the Overview cards using your current entity and feature settings:
-          <br>• <b>EMHASS Forecasts</b>: Adds MPC forecast overlays (PV/Battery/Grid/Load/SOC/Prices) to the main chart
-          <br>• <b>Deferrable Loads</b>: Shows heat pump/boiler schedule forecasts on the chart
+          <br>• <b>EMS Forecasts</b>: Adds EMHASS MPC or HAEO optimization schedule overlays (PV/Battery/Grid/Load/SOC/Prices) to the main chart
+          <br>• <b>Deferrable Loads</b>: Shows heat pump/boiler schedule forecasts on the chart (EMHASS only)
           <br>• <b>Financial Tracking</b>: Adds cost/savings in chart header
           <br>• <b>Solar Forecast</b>: Shows Solcast/forecast.solar chips
           <br>• <b>EV / Heat Pump</b>: Conditional display based on enabled features

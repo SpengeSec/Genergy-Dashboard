@@ -123,8 +123,20 @@ CONF_USE_SIGENERGY_DEFAULTS = "use_sigenergy_defaults"
 CONF_FEATURE_EV = "feature_ev"
 CONF_FEATURE_HEAT_PUMP = "feature_heat_pump"
 CONF_FEATURE_EMHASS = "feature_emhass"
+CONF_FEATURE_HAEO = "feature_haeo"
 CONF_FEATURE_SOLCAST = "feature_solcast"
 CONF_BATTERY_PACKS = "battery_packs"
+
+# HAEO (Home Assistant Energy Optimizer) entities
+CONF_HAEO_BATTERY_CHARGE = "haeo_battery_charge"
+CONF_HAEO_BATTERY_DISCHARGE = "haeo_battery_discharge"
+CONF_HAEO_BATTERY_SOC = "haeo_battery_soc"
+CONF_HAEO_GRID_POWER = "haeo_grid_power"
+CONF_HAEO_SOLAR_POWER = "haeo_solar_power"
+CONF_HAEO_LOAD_POWER = "haeo_load_power"
+CONF_HAEO_OPTIM_STATUS = "haeo_optim_status"
+CONF_HAEO_OPTIM_COST = "haeo_optim_cost"
+CONF_HAEO_OPTIM_DURATION = "haeo_optim_duration"
 
 # ---------------------------------------------------------------------------
 # Placeholder mapping: config key -> template placeholder string

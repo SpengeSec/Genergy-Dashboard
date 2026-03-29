@@ -2,6 +2,20 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.10.0] - 2026-03-29
+
+### Added
+- **HAEO (Home Assistant Energy Optimizer) Support** — Full integration of HAEO as an alternative energy management system alongside EMHASS. HAEO is a native HA integration using HiGHS linear programming for energy optimization with a flexible graph-based topology.
+- **EMS Provider Selector** — Replaced the single EMHASS toggle with a 3-way EMS provider selector (None / EMHASS / HAEO) in both the Entities and Features tabs. Backward-compatible: existing configs with `emhass: true` automatically migrate to `ems_provider: 'emhass'`.
+- **HAEO Entity Slots** — 9 new entity fields in the Entities tab when HAEO is selected: battery charge/discharge/SoC, grid power, solar power, load power, optimization status/cost/duration.
+- **HAEO Forecast Overlays** — When EMS = HAEO and HAEO Forecasts enabled, the energy chart shows 7 dashed forecast series (battery charge, battery discharge, solar, grid, load, SoC on secondary axis, prices) read from HAEO sensor `forecast` attributes.
+- **HAEO Status Card** — Purple-gradient status card showing optimization status, cost, and solve duration (parallel to the green EMHASS status card showing mode/reason).
+- **HAEO Auto-Detection** — The auto-detect button now searches for `*_optimization_status` sensors to identify HAEO networks, then automatically maps battery, grid, solar, and load sensors with `forecast` attributes.
+- **HAEO Feature Toggle in Config Flow** — Added "Enable HAEO" checkbox in the config flow extras step.
+
+### Improved
+- **README Documentation** — Added HAEO entity reference table, updated Feature Toggles table with EMS Provider row, updated troubleshooting section for HAEO forecasts, added HAEO to optional integrations table.
+
 ## [2.9.0] - 2026-03-29
 
 ### Added
