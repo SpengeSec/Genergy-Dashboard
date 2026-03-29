@@ -2,6 +2,19 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.12.0] - 2026-03-29
+
+### Added
+- **Universal Multi-Candidate Entity Picker** — All auto-detect methods (Core Power, Prices, EMS, System) now support multi-candidate selection. When multiple matching entities are found, a clickable picker appears below the entity input showing entity ID, friendly name, current value, and disabled badge. Users choose the correct entity for their setup.
+- **Generic Inverter Support** — Core Power auto-detect no longer requires Sigenergy-specific entities. Generic power/SoC/capacity patterns match entities from Deye, Goodwe, Huawei, SolarEdge, Fronius, and other inverter brands with candidate picker for disambiguation.
+- **Universal `_findEntityCandidates()` Helper** — Centralized entity search supporting string, regex, and function pattern matchers with unit filtering, domain filtering, exclude patterns, and HA entity registry lookup for disabled entities.
+- **Universal `_assignCandidate()` Helper** — Automatic single-match assignment with multi-candidate picker fallback for all entity keys.
+- **Detect All Candidate Integration** — The main "Detect All" button now also populates candidate pickers for price, weather, and SoC entities when multiple matches exist.
+
+### Improved
+- **Entity Picker UX** — Candidate items now show friendly name (italic) alongside entity ID for easier identification.
+- **Refactored Auto-Detect** — All 5 per-section detect methods plus Detect All now use the same candidate infrastructure, ensuring consistent behavior across all entity types.
+
 ## [2.11.1] - 2026-03-29
 
 ### Added

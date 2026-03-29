@@ -677,6 +677,7 @@ class SigenergySettingsCard extends HTMLElement {
         .candidate-item:hover { border-color: #00d4b8; background: rgba(0,212,184,0.1); cursor: pointer; }
         .candidate-item.cand-disabled { opacity: 0.5; cursor: help; }
         .candidate-item .ci-id { font-family: monospace; font-size: 10px; }
+        .candidate-item .ci-fn { font-family: sans-serif; color: #8892a4; font-style: italic; }
         .candidate-item .ci-val { font-size: 10px; color: #8892a4; }
         .candidate-item .ci-badge {
           font-size: 9px; padding: 1px 4px; border-radius: 3px;
@@ -858,10 +859,11 @@ class SigenergySettingsCard extends HTMLElement {
     const id = entities[key] || '';
     const state = this._getState(id);
     const isErr = state.startsWith('❌');
-    const candidates = this._socCandidates && this._socCandidates[key] ? this._socCandidates[key] : [];
+    const candidates = this._candidates && this._candidates[key] ? this._candidates[key] : [];
     const candidateHTML = candidates.length > 1 || (candidates.length > 0 && !id) ? `
       <div class="candidate-picker" data-cand-key="${key}">
-        ${candidates.map(c => `<div class="candidate-item${c.disabled ? ' cand-disabled' : ''}" data-cand-id="${this._esc(c.id)}"><span class="ci-id">${this._esc(c.id)}</span><span class="ci-val">= ${this._esc(String(c.value))}</span>${c.disabled ? '<span class="ci-badge">disabled</span>' : ''}</div>`).join('')}
+        <div class="cp-header">Choose entity:</div>
+        ${candidates.map(c => `<div class="candidate-item${c.disabled ? ' cand-disabled' : ''}" data-cand-id="${this._esc(c.id)}"><span class="ci-id">${this._esc(c.id)}${c.friendly_name ? ' <span class="ci-fn">(' + this._esc(c.friendly_name) + ')</span>' : ''}</span><span class="ci-val">= ${this._esc(String(c.value))}</span>${c.disabled ? '<span class="ci-badge">disabled</span>' : ''}</div>`).join('')}
       </div>` : '';
     return `
       <div class="row">
@@ -1388,7 +1390,7 @@ class SigenergySettingsCard extends HTMLElement {
         const inp = el.querySelector(`.entity-ac-input[data-key="${candKey}"]`);
         if (inp) { inp.value = candId; inp.dispatchEvent(new Event('change', { bubbles: true })); }
         // Clear candidates for this key
-        if (this._socCandidates) delete this._socCandidates[candKey];
+        if (this._candidates) delete this._candidates[candKey];
         this._render();
       });
     });
@@ -2096,6 +2098,31 @@ class SigenergySettingsCard extends HTMLElement {
 
           if (found.length > 0) {
             this._storeSave(cfg2);
+
+            // Run candidate detection for ambiguous entities so picker UI shows
+            if (!this._candidates) this._candidates = {};
+            try { await this._autoDetectSocLimits(); } catch (e) { /* non-critical */ }
+            // Run generic candidate detection for entities that may have multiple matches
+            try {
+              const allK = Object.keys(this._hass.states);
+              const regEntities = this._registryEntities || [];
+              // Price candidates
+              const buyCandidates = this._findEntityCandidates(allK, [
+                (k) => k === 'sensor.amber_general_price', (k) => k === 'sensor.electricity_price',
+                /nordpool.*kwh/i, /energi_data_service/i, /octopus.*current.*rate/i,
+                /energy.*price.*import/i, /electricity.*price/i, /buy.*price/i, /spot.*price/i,
+              ], { domainFilter: 'sensor', excludes: ['feed_in', 'export', 'sell'] });
+              if (buyCandidates.length > 1) this._candidates.buy_price = buyCandidates;
+              const sellCandidates = this._findEntityCandidates(allK, [
+                (k) => k === 'sensor.amber_feed_in_price',
+                /feed.in.*price/i, /export.*price/i, /sell.*price/i, /octopus.*export.*rate/i,
+              ], { domainFilter: 'sensor' });
+              if (sellCandidates.length > 1) this._candidates.sell_price = sellCandidates;
+              // Weather candidates
+              const weatherC = this._findEntityCandidates(allK, [(k) => k.startsWith('weather.') && !k.includes('forecast')], {});
+              if (weatherC.length > 1) this._candidates.weather = weatherC;
+            } catch (e) { /* non-critical */ }
+
             if (statusEl) statusEl.innerHTML = '✅ Detected ' + found.length + ' entities:<br>' + found.map(f => '• ' + f).join('<br>');
             // Auto-apply detected entities to dashboard so house card and overview immediately work
             try {
@@ -2185,8 +2212,10 @@ class SigenergySettingsCard extends HTMLElement {
     if (!this._hass?.states) return found;
     const cfg2 = this._storeGet();
     const allKeys = Object.keys(this._hass.states);
+    if (!this._candidates) this._candidates = {};
     const sigenKeys = allKeys.filter(k => k.startsWith('sensor.sigen_'));
     if (sigenKeys.length > 0) {
+      // Sigenergy: specific naming → first-match is reliable
       const map = {
         solar_power: sigenKeys.find(k => k.includes('plant_pv_power') || k.endsWith('_pv_power')),
         load_power: sigenKeys.find(k => k.includes('plant_load_power') || k.endsWith('_load_power')),
@@ -2198,17 +2227,118 @@ class SigenergySettingsCard extends HTMLElement {
       for (const [key, eid] of Object.entries(map)) {
         if (eid) { cfg2.entities[key] = eid; found.push(key + ': ' + eid); }
       }
+    } else {
+      // Generic inverter: find candidates with multi-select support
+      const powerOpts = { unitFilter: ['W', 'kW'], domainFilter: 'sensor' };
+      const socOpts = { unitFilter: '%', domainFilter: 'sensor' };
+      const capOpts = { unitFilter: ['kWh', 'Wh', 'Ah'], domainFilter: 'sensor' };
+      const genericCandidates = {
+        solar_power: this._findEntityCandidates(allKeys, [
+          /solar.*power/, /pv.*power/, /photovoltaic.*power/,
+        ], { ...powerOpts, excludes: ['forecast', 'solcast', 'energy', 'today', 'daily', 'monthly', 'yield', 'haeo'] }),
+        load_power: this._findEntityCandidates(allKeys, [
+          /load.*power/, /consumption.*power/, /home.*power/, /house.*power/,
+          (k) => k.includes('consumed_power') && !k.includes('daily'),
+        ], { ...powerOpts, excludes: ['energy', 'today', 'daily', 'monthly', 'haeo'] }),
+        battery_power: this._findEntityCandidates(allKeys, [
+          /battery.*power/, /batt.*power/, /ess.*power/,
+        ], { ...powerOpts, excludes: ['energy', 'today', 'daily', 'monthly', 'charge_today', 'discharge_today', 'haeo'] }),
+        battery_soc: this._findEntityCandidates(allKeys, [
+          /battery.*soc/, /battery.*state_of_charge/, /batt.*soc/,
+        ], { ...socOpts, excludes: ['haeo', 'emhass', 'mpc_', 'max', 'min', 'reserved', 'backup', 'cutoff', 'cut_off', 'limit', 'shutdown'] }),
+        grid_power: this._findEntityCandidates(allKeys, [
+          /grid.*power/, /grid.*active/, /meter.*power/,
+        ], { ...powerOpts, excludes: ['energy', 'today', 'daily', 'monthly', 'import', 'export', 'haeo', 'reactive', 'apparent'] }),
+        battery_capacity: this._findEntityCandidates(allKeys, [
+          /battery.*capacity/, /rated.*capacity/, /battery.*rated/,
+        ], { ...capOpts, excludes: ['remaining', 'available'] }),
+      };
+      for (const [key, candidates] of Object.entries(genericCandidates)) {
+        this._assignCandidate(key, candidates, cfg2, found);
+      }
     }
-    // Battery capacity fallback
+    // Battery capacity fallback (both Sigenergy and generic)
     if (!cfg2.entities.battery_capacity) {
-      const capKeys = allKeys.filter(k => k.toLowerCase().includes('battery') && (k.toLowerCase().includes('rated_capacity') || k.toLowerCase().includes('capacity_kwh')));
-      if (capKeys.length > 0) { cfg2.entities.battery_capacity = capKeys[0]; found.push('battery_capacity: ' + capKeys[0]); }
+      const capCandidates = this._findEntityCandidates(allKeys, [
+        (k) => k.includes('battery') && (k.includes('rated_capacity') || k.includes('capacity_kwh')),
+      ], { unitFilter: ['kWh', 'Wh', 'Ah'] });
+      this._assignCandidate('battery_capacity', capCandidates, cfg2, found);
     }
     if (found.length > 0) this._storeSave(cfg2);
     // Also run SoC limit detection (with candidate picker support)
     const socFound = await this._autoDetectSocLimits();
     found.push(...socFound);
     return found;
+  }
+
+  // Universal candidate finder: searches enabled entities + optionally disabled entities from registry.
+  // patterns: array of string/regex/function matchers applied to entity_id (lowercase)
+  // options: { excludes, unitFilter, domainFilter, registryEntities, requireState }
+  _findEntityCandidates(allKeys, patterns, options = {}) {
+    const { excludes = [], unitFilter, domainFilter, registryEntities, requireState } = options;
+    const candidates = [];
+    const seen = new Set();
+    // Enabled entities from hass.states
+    for (const k of allKeys) {
+      const lower = k.toLowerCase();
+      if (domainFilter && !lower.startsWith(domainFilter + '.')) continue;
+      if (excludes.some(p => typeof p === 'function' ? p(lower) : lower.includes(p))) continue;
+      const st = this._hass.states[k];
+      if (unitFilter) {
+        const uom = st?.attributes?.unit_of_measurement || '';
+        if (Array.isArray(unitFilter) ? !unitFilter.includes(uom) : uom !== unitFilter) continue;
+      }
+      if (requireState && (st?.state === 'unavailable' || st?.state === 'unknown')) continue;
+      if (patterns.some(p => {
+        if (typeof p === 'function') return p(lower);
+        if (typeof p === 'string') return lower.includes(p);
+        if (p instanceof RegExp) return p.test(lower);
+        return false;
+      })) {
+        const fn = st?.attributes?.friendly_name || '';
+        candidates.push({ id: k, value: st?.state || '?', disabled: false, friendly_name: fn });
+        seen.add(k);
+      }
+    }
+    // Disabled entities from entity registry
+    if (registryEntities && registryEntities.length > 0) {
+      for (const re of registryEntities) {
+        if (!re.disabled_by) continue;
+        if (seen.has(re.entity_id)) continue;
+        const lower = (re.entity_id || '').toLowerCase();
+        if (domainFilter && !lower.startsWith(domainFilter + '.')) continue;
+        if (excludes.some(p => typeof p === 'function' ? p(lower) : lower.includes(p))) continue;
+        if (patterns.some(p => {
+          if (typeof p === 'function') return p(lower);
+          if (typeof p === 'string') return lower.includes(p);
+          if (p instanceof RegExp) return p.test(lower);
+          return false;
+        })) {
+          candidates.push({ id: re.entity_id, value: 'disabled', disabled: true, friendly_name: re.name || '' });
+        }
+      }
+    }
+    return candidates;
+  }
+
+  // Assign a candidate to a config key. If 1 enabled → auto-assign. If >1 → store for picker.
+  _assignCandidate(key, candidates, cfg2, found) {
+    if (!this._candidates) this._candidates = {};
+    const enabled = candidates.filter(c => !c.disabled);
+    if (enabled.length === 1 && !cfg2.entities[key]) {
+      cfg2.entities[key] = enabled[0].id;
+      found.push(key + ': ' + enabled[0].id);
+    } else if (enabled.length > 1 && !cfg2.entities[key]) {
+      this._candidates[key] = candidates;
+      found.push(key + ': ' + enabled.length + ' candidates — choose below');
+    } else if (candidates.length > 0 && enabled.length === 0 && !cfg2.entities[key]) {
+      this._candidates[key] = candidates;
+      found.push(key + ': found disabled entities — enable in HA or set manually');
+    }
+    // If already set, still store candidates for manual override
+    if (cfg2.entities[key] && candidates.length > 1) {
+      this._candidates[key] = candidates;
+    }
   }
 
   async _autoDetectSocLimits() {
@@ -2222,80 +2352,31 @@ class SigenergySettingsCard extends HTMLElement {
     try {
       registryEntities = await this._hass.callWS({ type: 'config/entity_registry/list' });
     } catch (e) { /* not critical */ }
+    this._registryEntities = registryEntities; // cache for other detect methods
 
-    // Build candidate lists for max SoC, min SoC, reserved SoC
-    const isPercent = (k) => {
-      const st = this._hass.states[k];
-      return st && (st.attributes?.unit_of_measurement === '%' || st.attributes?.unit_of_measurement === '%');
-    };
+    const opts = { unitFilter: '%', excludes: ['emhass', 'mpc_'], registryEntities };
 
-    // Helper: find candidates from both enabled and disabled entities
-    const findCandidates = (patterns, excludePatterns = []) => {
-      const candidates = [];
-      // Enabled entities
-      for (const k of allKeys) {
-        const lower = k.toLowerCase();
-        if (!isPercent(k)) continue;
-        if (excludePatterns.some(p => lower.includes(p))) continue;
-        if (patterns.some(p => typeof p === 'function' ? p(lower) : lower.includes(p))) {
-          const st = this._hass.states[k];
-          candidates.push({ id: k, value: st?.state || '?', disabled: false });
-        }
-      }
-      // Disabled entities from registry
-      if (registryEntities && registryEntities.length > 0) {
-        for (const re of registryEntities) {
-          if (!re.disabled_by) continue;
-          const lower = (re.entity_id || '').toLowerCase();
-          if (excludePatterns.some(p => lower.includes(p))) continue;
-          if (patterns.some(p => typeof p === 'function' ? p(lower) : lower.includes(p))) {
-            if (!candidates.find(c => c.id === re.entity_id)) {
-              candidates.push({ id: re.entity_id, value: 'disabled', disabled: true });
-            }
-          }
-        }
-      }
-      return candidates;
-    };
-
-    // Max SoC candidates
-    const maxSocCandidates = findCandidates([
+    const maxSocCandidates = this._findEntityCandidates(allKeys, [
       (k) => k.includes('charge') && k.includes('cut_off') && (k.includes('soc') || k.includes('state_of_charge')),
       (k) => k.includes('charge_cutoff') && (k.includes('soc') || k.includes('state_of_charge')),
       'max_soc', 'charge_limit_soc',
       (k) => k.includes('battery_soc_max'),
-    ], ['emhass', 'mpc_']);
-    // Min SoC candidates
-    const minSocCandidates = findCandidates([
+    ], opts);
+    const minSocCandidates = this._findEntityCandidates(allKeys, [
       (k) => k.includes('discharge') && k.includes('cut_off') && (k.includes('soc') || k.includes('state_of_charge')),
       (k) => k.includes('discharge_cutoff') && (k.includes('soc') || k.includes('state_of_charge')),
       'min_soc', 'battery_shutdown',
       (k) => k.includes('battery_soc_min'),
-    ], ['emhass', 'mpc_', 'voltage']);
-    // Reserved SoC candidates
-    const reservedSocCandidates = findCandidates([
+    ], { ...opts, excludes: ['emhass', 'mpc_', 'voltage'] });
+    const reservedSocCandidates = this._findEntityCandidates(allKeys, [
       (k) => k.includes('backup') && (k.includes('soc') || k.includes('state_of_charge')),
       (k) => k.includes('reserve') && (k.includes('soc') || k.includes('state_of_charge')),
       'reserved_soc',
-    ], ['emhass']);
+    ], { ...opts, excludes: ['emhass'] });
 
-    // For each: if exactly 1 enabled candidate, auto-assign. If 0 or >1, store for picker UI.
-    this._socCandidates = { battery_max_soc: maxSocCandidates, battery_min_soc: minSocCandidates, battery_reserved_soc: reservedSocCandidates };
-
-    const autoAssign = (key, candidates) => {
-      const enabled = candidates.filter(c => !c.disabled);
-      if (enabled.length === 1 && !cfg2.entities[key]) {
-        cfg2.entities[key] = enabled[0].id;
-        found.push(key + ': ' + enabled[0].id);
-      } else if (enabled.length > 1) {
-        found.push(key + ': ' + enabled.length + ' candidates — choose below');
-      } else if (candidates.length > 0 && enabled.length === 0) {
-        found.push(key + ': found disabled entities — enable in HA or set manually');
-      }
-    };
-    autoAssign('battery_max_soc', maxSocCandidates);
-    autoAssign('battery_min_soc', minSocCandidates);
-    autoAssign('battery_reserved_soc', reservedSocCandidates);
+    this._assignCandidate('battery_max_soc', maxSocCandidates, cfg2, found);
+    this._assignCandidate('battery_min_soc', minSocCandidates, cfg2, found);
+    this._assignCandidate('battery_reserved_soc', reservedSocCandidates, cfg2, found);
 
     if (found.length > 0) this._storeSave(cfg2);
     return found;
@@ -2332,22 +2413,30 @@ class SigenergySettingsCard extends HTMLElement {
     if (!this._hass?.states) return found;
     const cfg2 = this._storeGet();
     const allKeys = Object.keys(this._hass.states);
-    const buyPatterns = [
-      'sensor.amber_general_price', 'sensor.electricity_price',
+    if (!this._candidates) this._candidates = {};
+
+    // Buy price candidates
+    const buyCandidates = this._findEntityCandidates(allKeys, [
+      (k) => k === 'sensor.amber_general_price',
+      (k) => k === 'sensor.electricity_price',
       /nordpool.*kwh/i, /energi_data_service/i, /octopus.*current.*rate/i,
       /energy.*price.*import/i, /electricity.*price/i, /buy.*price/i, /spot.*price/i,
-    ];
-    for (const p of buyPatterns) {
-      const m = typeof p === 'string' ? allKeys.find(k => k === p) : allKeys.find(k => p.test(k) && !k.includes('feed_in') && !k.includes('export') && !k.includes('sell'));
-      if (m) { cfg2.entities.buy_price = m; found.push('Buy price: ' + m); break; }
-    }
-    const sellPatterns = ['sensor.amber_feed_in_price', /feed.in.*price/i, /export.*price/i, /sell.*price/i, /octopus.*export.*rate/i];
-    for (const p of sellPatterns) {
-      const m = typeof p === 'string' ? allKeys.find(k => k === p) : allKeys.find(k => p.test(k));
-      if (m) { cfg2.entities.sell_price = m; found.push('Sell price: ' + m); break; }
-    }
-    const npKey = allKeys.find(k => k.startsWith('sensor.nordpool'));
-    if (npKey) { cfg2.entities.nordpool = npKey; found.push('Nordpool: ' + npKey); }
+    ], { domainFilter: 'sensor', excludes: ['feed_in', 'export', 'sell'] });
+    this._assignCandidate('buy_price', buyCandidates, cfg2, found);
+
+    // Sell price candidates
+    const sellCandidates = this._findEntityCandidates(allKeys, [
+      (k) => k === 'sensor.amber_feed_in_price',
+      /feed.in.*price/i, /export.*price/i, /sell.*price/i, /octopus.*export.*rate/i,
+    ], { domainFilter: 'sensor' });
+    this._assignCandidate('sell_price', sellCandidates, cfg2, found);
+
+    // Nordpool candidates
+    const npCandidates = this._findEntityCandidates(allKeys, [
+      (k) => k.startsWith('sensor.nordpool'),
+    ], { domainFilter: 'sensor' });
+    this._assignCandidate('nordpool', npCandidates, cfg2, found);
+
     if (found.length > 0) this._storeSave(cfg2);
     return found;
   }
@@ -2357,34 +2446,66 @@ class SigenergySettingsCard extends HTMLElement {
     if (!this._hass?.states) return found;
     const cfg2 = this._storeGet();
     const allKeys = Object.keys(this._hass.states);
-    // HAEO detection
-    const haeoStatusKeys = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_network_optimization_status'));
-    if (haeoStatusKeys.length > 0) {
-      const statusKey = haeoStatusKeys[0];
-      cfg2.entities.haeo_optim_status = statusKey; found.push('HAEO status: ' + statusKey);
+    if (!this._candidates) this._candidates = {};
+
+    // HAEO detection — with candidate support for multi-instance
+    const haeoStatusCandidates = this._findEntityCandidates(allKeys, [
+      (k) => k.endsWith('_network_optimization_status'),
+    ], { domainFilter: 'sensor' });
+    this._assignCandidate('haeo_optim_status', haeoStatusCandidates, cfg2, found);
+
+    // If HAEO status found (single or picked), derive related entities
+    const statusKey = cfg2.entities.haeo_optim_status;
+    if (statusKey) {
       const costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
       const durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
       if (allKeys.includes(costKey)) { cfg2.entities.haeo_optim_cost = costKey; found.push('HAEO cost: ' + costKey); }
       if (allKeys.includes(durKey)) { cfg2.entities.haeo_optim_duration = durKey; found.push('HAEO duration: ' + durKey); }
-      const haeoBattCharge = allKeys.find(k => k.startsWith('sensor.') && (k.endsWith('_battery_power_charge') || k.endsWith('_power_consumed')) && !k.includes('grid') && !k.includes('load'));
-      const haeoBattDischarge = allKeys.find(k => k.startsWith('sensor.') && (k.endsWith('_battery_power_discharge') || k.endsWith('_power_produced')) && !k.includes('grid') && !k.includes('solar'));
-      const haeoBattSoc = allKeys.find(k => k.startsWith('sensor.') && (k.endsWith('_battery_state_of_charge') || k.endsWith('_soc')) && k !== (cfg2.entities.battery_soc || ''));
-      if (haeoBattCharge) { cfg2.entities.haeo_battery_charge = haeoBattCharge; found.push('HAEO charge: ' + haeoBattCharge); }
-      if (haeoBattDischarge) { cfg2.entities.haeo_battery_discharge = haeoBattDischarge; found.push('HAEO discharge: ' + haeoBattDischarge); }
-      if (haeoBattSoc) { cfg2.entities.haeo_battery_soc = haeoBattSoc; found.push('HAEO SoC: ' + haeoBattSoc); }
-      const haeoGrid = allKeys.find(k => k.startsWith('sensor.') && k.includes('_grid_') && (k.endsWith('_power') || k.endsWith('_power_import')));
-      const haeoSolar = allKeys.find(k => k.startsWith('sensor.') && k.includes('_solar_') && (k.endsWith('_power') || k.endsWith('_power_produced')));
-      const haeoLoad = allKeys.find(k => k.startsWith('sensor.') && k.includes('_load_') && (k.endsWith('_power') || k.endsWith('_power_consumed')));
-      if (haeoGrid) { cfg2.entities.haeo_grid_power = haeoGrid; found.push('HAEO grid: ' + haeoGrid); }
-      if (haeoSolar) { cfg2.entities.haeo_solar_power = haeoSolar; found.push('HAEO solar: ' + haeoSolar); }
-      if (haeoLoad) { cfg2.entities.haeo_load_power = haeoLoad; found.push('HAEO load: ' + haeoLoad); }
+
+      // Battery charge/discharge/SoC with candidate support
+      const bChargeC = this._findEntityCandidates(allKeys, [
+        (k) => k.endsWith('_battery_power_charge') || (k.endsWith('_power_consumed') && k.includes('batt')),
+      ], { domainFilter: 'sensor', excludes: ['grid', 'load'] });
+      this._assignCandidate('haeo_battery_charge', bChargeC, cfg2, found);
+
+      const bDischargeC = this._findEntityCandidates(allKeys, [
+        (k) => k.endsWith('_battery_power_discharge') || (k.endsWith('_power_produced') && k.includes('batt')),
+      ], { domainFilter: 'sensor', excludes: ['grid', 'solar', 'pv'] });
+      this._assignCandidate('haeo_battery_discharge', bDischargeC, cfg2, found);
+
+      const bSocC = this._findEntityCandidates(allKeys, [
+        (k) => k.endsWith('_battery_state_of_charge'),
+      ], { domainFilter: 'sensor', excludes: [cfg2.entities.battery_soc || '___'] });
+      this._assignCandidate('haeo_battery_soc', bSocC, cfg2, found);
+
+      // Grid/Solar/Load
+      const gridC = this._findEntityCandidates(allKeys, [
+        (k) => k.includes('_grid_') && (k.endsWith('_power') || k.endsWith('_power_import') || k.endsWith('_power_export')),
+      ], { domainFilter: 'sensor' });
+      this._assignCandidate('haeo_grid_power', gridC, cfg2, found);
+
+      const solarC = this._findEntityCandidates(allKeys, [
+        (k) => k.includes('_solar_') && (k.endsWith('_power') || k.endsWith('_power_produced') || k.endsWith('_power_available')),
+      ], { domainFilter: 'sensor' });
+      this._assignCandidate('haeo_solar_power', solarC, cfg2, found);
+
+      const loadC = this._findEntityCandidates(allKeys, [
+        (k) => k.includes('_load_') && (k.endsWith('_power') || k.endsWith('_power_consumed')),
+      ], { domainFilter: 'sensor' });
+      this._assignCandidate('haeo_load_power', loadC, cfg2, found);
+
       cfg2.features.ems_provider = 'haeo'; cfg2.features.haeo_forecasts = true;
       found.push('✓ HAEO detected');
     }
     // EMHASS detection fallback
-    if (haeoStatusKeys.length === 0) {
-      const emhassMode = allKeys.find(k => k.includes('emhass') && (k.includes('_mode') || k.includes('_status')));
-      if (emhassMode) { cfg2.entities.emhass_mode = emhassMode; cfg2.features.ems_provider = 'emhass'; found.push('EMHASS: ' + emhassMode); }
+    if (!statusKey) {
+      const emhassC = this._findEntityCandidates(allKeys, [
+        (k) => k.includes('emhass') && (k.includes('_mode') || k.includes('_status')),
+      ], { domainFilter: 'sensor' });
+      this._assignCandidate('emhass_mode', emhassC, cfg2, found);
+      if (cfg2.entities.emhass_mode) {
+        cfg2.features.ems_provider = 'emhass';
+      }
     }
     if (found.length > 0) this._storeSave(cfg2);
     return found;
@@ -2395,8 +2516,10 @@ class SigenergySettingsCard extends HTMLElement {
     if (!this._hass?.states) return found;
     const cfg2 = this._storeGet();
     const allKeys = Object.keys(this._hass.states);
+    if (!this._candidates) this._candidates = {};
     const sigenKeys = allKeys.filter(k => k.startsWith('sensor.sigen_'));
     if (sigenKeys.length > 0) {
+      // Sigenergy: specific naming
       const map = {
         inverter_temp: sigenKeys.find(k => k.includes('_radiator_temperature') || k.includes('inverter_temp')),
         battery_temp: sigenKeys.find(k => k.includes('_battery_temperature') || k.includes('cell_temperature')),
@@ -2407,10 +2530,36 @@ class SigenergySettingsCard extends HTMLElement {
       for (const [key, eid] of Object.entries(map)) {
         if (eid) { cfg2.entities[key] = eid; found.push(key + ': ' + eid); }
       }
+    } else {
+      // Generic: candidate-based detection for system entities
+      const tempOpts = { unitFilter: '°C', domainFilter: 'sensor' };
+      const invTempC = this._findEntityCandidates(allKeys, [
+        /inverter.*temp/, /pcs.*temp/,
+      ], tempOpts);
+      this._assignCandidate('inverter_temp', invTempC, cfg2, found);
+
+      const battTempC = this._findEntityCandidates(allKeys, [
+        /battery.*temp/, /batt.*cell.*temp/, /ess.*temp/,
+      ], { ...tempOpts, excludes: ['ambient'] });
+      this._assignCandidate('battery_temp', battTempC, cfg2, found);
+
+      const vOpts = { unitFilter: 'V', domainFilter: 'sensor' };
+      const gridVC = this._findEntityCandidates(allKeys, [
+        /grid.*voltage/, /phase.*voltage/, /mains.*voltage/,
+      ], { ...vOpts, excludes: ['battery', 'pv', 'solar', 'string'] });
+      this._assignCandidate('grid_voltage', gridVC, cfg2, found);
+
+      const freqC = this._findEntityCandidates(allKeys, [
+        /grid.*frequency/, /mains.*frequency/,
+      ], { unitFilter: 'Hz', domainFilter: 'sensor' });
+      this._assignCandidate('grid_frequency', freqC, cfg2, found);
     }
-    // Weather
-    const weatherKey = allKeys.find(k => k.startsWith('weather.') && !k.includes('forecast'));
-    if (weatherKey && !cfg2.entities.weather) { cfg2.entities.weather = weatherKey; found.push('weather: ' + weatherKey); }
+    // Weather with candidate support
+    const weatherCandidates = this._findEntityCandidates(allKeys, [
+      (k) => k.startsWith('weather.') && !k.includes('forecast'),
+    ], {});
+    this._assignCandidate('weather', weatherCandidates, cfg2, found);
+
     if (found.length > 0) this._storeSave(cfg2);
     return found;
   }
