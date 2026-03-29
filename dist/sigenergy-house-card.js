@@ -257,8 +257,9 @@ class SigenergyHouseCard extends LitElement {
   _toWatts(entityId) {
     const val = this._stateNum(entityId);
     const unit = this._stateUnit(entityId);
+    if (unit === "MW") return val * 1000000;
     if (unit === "kW" || unit === "KW") return val * 1000;
-    if (unit === "kWh" || unit === "Wh") return val; // energy sensor — pass through for display
+    if (unit === "kWh" || unit === "Wh" || unit === "MWh") return val; // energy sensor — pass through for display
     return val;
   }
 
@@ -442,9 +443,13 @@ class SigenergyHouseCard extends LitElement {
       const unit = this._stateUnit(entityId);
       if (unit === "kWh") return abs >= 100 ? `${abs.toFixed(0)} kWh` : `${abs.toFixed(1)} kWh`;
       if (unit === "Wh") return abs >= 1000 ? `${(abs / 1000).toFixed(1)} kWh` : `${abs.toFixed(0)} Wh`;
+      if (unit === "MWh") return `${(abs * 1000).toFixed(1)} kWh`;
     }
-    if (abs >= 10000) return `${(abs / 1000).toFixed(1)} kW`;
-    if (abs >= 1000) return `${(abs / 1000).toFixed(2)} kW`;
+    // Read user-configured auto-scale threshold (default 1000 W)
+    let thresh = 1000;
+    try { if (SigConfigStore) { thresh = SigConfigStore.getInstance().config?.display?.power_threshold ?? 1000; } } catch (_) {}
+    if (abs >= thresh * 10) return `${(abs / 1000).toFixed(1)} kW`;
+    if (abs >= thresh) return `${(abs / 1000).toFixed(2)} kW`;
     return `${abs.toFixed(0)} W`;
   }
 
