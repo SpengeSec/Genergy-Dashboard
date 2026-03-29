@@ -2,6 +2,15 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.10.1] - 2026-03-29
+
+### Improved
+- **Global Save & Apply Action Bar** — "Save All Settings" and "Apply Settings to Dashboard" buttons now visible at the bottom of **every tab** (Entities, Features, Pricing, Display), not just the Display tab. Users no longer need to navigate to a specific tab to apply changes.
+- **Apply Reminder Banner** — Prominent yellow warning banner above the action buttons reminds users to click Apply after making changes.
+- **README — Restart Emphasis** — New "When to Restart" section with clear table, red 🔴 callouts on all installation steps, updated prerequisite notes.
+- **README — Save & Apply Section** — New dedicated section explaining what Apply does and why it's essential.
+- **Quick Start Guide Updated** — Apply step emphasized with yellow callout.
+
 ## [2.10.0] - 2026-03-29
 
 ### Added

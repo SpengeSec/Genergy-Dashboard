@@ -717,6 +717,18 @@ class SigenergySettingsCard extends HTMLElement {
           <button class="tab ${tab===3?'active':''}" data-tab="3">🎨 Display</button>
         </div>
         <div id="content"></div>
+        <div id="action-bar" style="margin-top:16px;padding-top:14px;border-top:2px solid rgba(0,212,184,0.3);">
+          <div style="background:rgba(255,165,0,0.1);border:1px solid rgba(255,165,0,0.4);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;">
+            <span style="font-size:20px;">⚠️</span>
+            <div>
+              <div style="font-size:12px;font-weight:700;color:#FFA500;">Don't forget to Apply!</div>
+              <div style="font-size:11px;color:#8892a4;line-height:1.4;">After changing entities or features, click <b>Apply Settings to Dashboard</b> below to rebuild the dashboard with your new settings. Changes are saved automatically, but the dashboard only updates when you Apply.</div>
+            </div>
+          </div>
+          <button class="save-btn" id="global-save-btn">💾 Save All Settings</button>
+          <button class="save-btn" id="global-apply-btn" style="margin-top:8px;background:#3F51B5;">🔄 Apply Settings to Dashboard</button>
+          <div id="global-apply-status" style="text-align:center;margin-top:8px;font-size:12px;color:#8892a4;display:none;"></div>
+        </div>
       </div>
     `;
 
@@ -749,6 +761,55 @@ class SigenergySettingsCard extends HTMLElement {
     else if (tab === 1) this._renderFeatures(content, cfg);
     else if (tab === 2) this._renderPricing(content, cfg);
     else if (tab === 3) this._renderDisplay(content, cfg);
+
+    // Global Save button
+    const globalSaveBtn = this.shadowRoot.getElementById('global-save-btn');
+    if (globalSaveBtn) {
+      globalSaveBtn.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        this._storeSave(cfg2);
+        globalSaveBtn.textContent = '✅ Saved!';
+        globalSaveBtn.style.background = '#2ecc71';
+        setTimeout(() => {
+          globalSaveBtn.textContent = '💾 Save All Settings';
+          globalSaveBtn.style.background = '#00d4b8';
+        }, 2000);
+      });
+    }
+
+    // Global Apply to Dashboard button
+    const globalApplyBtn = this.shadowRoot.getElementById('global-apply-btn');
+    if (globalApplyBtn) {
+      globalApplyBtn.addEventListener('click', async () => {
+        const statusEl = this.shadowRoot.getElementById('global-apply-status');
+        statusEl.style.display = 'block';
+        statusEl.textContent = '⏳ Rebuilding dashboard...';
+        statusEl.style.color = '#FFA500';
+        globalApplyBtn.disabled = true;
+        globalApplyBtn.style.opacity = '0.5';
+        try {
+          const ok = await this._buildDashboard();
+          if (ok) {
+            statusEl.textContent = '✅ Dashboard rebuilt! Refresh the page to see changes.';
+            statusEl.style.color = '#2ecc71';
+            globalApplyBtn.textContent = '✅ Applied!';
+            globalApplyBtn.style.background = '#2ecc71';
+          } else {
+            statusEl.textContent = '❌ Failed to rebuild dashboard. Check console.';
+            statusEl.style.color = '#e74c3c';
+          }
+        } catch (err) {
+          statusEl.textContent = '❌ Error: ' + err.message;
+          statusEl.style.color = '#e74c3c';
+        }
+        globalApplyBtn.disabled = false;
+        globalApplyBtn.style.opacity = '1';
+        setTimeout(() => {
+          globalApplyBtn.textContent = '🔄 Apply Settings to Dashboard';
+          globalApplyBtn.style.background = '#3F51B5';
+        }, 3000);
+      });
+    }
   }
 
   _entityRow(label, key, entities) {
@@ -1992,7 +2053,7 @@ class SigenergySettingsCard extends HTMLElement {
     el.innerHTML = `
       <div style="margin-bottom:12px;padding:10px;background:rgba(63,81,181,0.08);border:1px solid rgba(63,81,181,0.2);border-radius:8px;">
         <div style="font-size:11px;color:#8892a4;line-height:1.5;">
-          <b>💡 Tip:</b> Enable features here, then configure their entities on the <b>⚡ Entities</b> tab. Click <b>Apply Settings to Dashboard</b> on the Display tab after changes.
+          <b>💡 Tip:</b> Enable features here, then configure their entities on the <b>⚡ Entities</b> tab. Click <b>🔄 Apply Settings to Dashboard</b> at the bottom of any tab to rebuild.
         </div>
       </div>
       <div class="section">
@@ -3305,20 +3366,6 @@ return forecast.map(function(d) {
           </select>
         </div>
       </div>
-      <button class="save-btn" id="save-btn">💾 Save All Settings</button>
-      <button class="save-btn" id="apply-btn" style="margin-top:8px;background:#3F51B5;">🔄 Apply Settings to Dashboard</button>
-      <div id="apply-status" style="text-align:center;margin-top:8px;font-size:12px;color:#8892a4;display:none;"></div>
-      <div style="margin-top:12px;padding:12px;background:rgba(63,81,181,0.1);border:1px solid rgba(63,81,181,0.3);border-radius:8px;">
-        <div style="font-size:12px;font-weight:600;color:#7986CB;margin-bottom:4px;">ℹ️ How "Apply Settings to Dashboard" works</div>
-        <div style="font-size:11px;color:#8892a4;line-height:1.5;">
-          This rebuilds the Overview cards using your current entity and feature settings:
-          <br>• <b>EMS Forecasts</b>: Adds EMHASS MPC or HAEO optimization schedule overlays (PV/Battery/Grid/Load/SOC/Prices) to the main chart
-          <br>• <b>Deferrable Loads</b>: Shows heat pump/boiler schedule forecasts on the chart (EMHASS only)
-          <br>• <b>Financial Tracking</b>: Adds cost/savings in chart header
-          <br>• <b>Solar Forecast</b>: Shows Solcast/forecast.solar chips
-          <br>• <b>EV / Heat Pump</b>: Conditional display based on enabled features
-          <br>All entity IDs from Settings → Entities tab are used.
-        </div>
       </div>
     `;
 
@@ -3346,55 +3393,6 @@ return forecast.map(function(d) {
           this._syncBatteryLabelToDashboard(val);
         }
       });
-    });
-
-    // Apply to Dashboard button
-    const applyBtn = el.querySelector('#apply-btn');
-    if (applyBtn) {
-      applyBtn.addEventListener('click', async () => {
-        const statusEl = el.querySelector('#apply-status');
-        statusEl.style.display = 'block';
-        statusEl.textContent = '⏳ Rebuilding dashboard...';
-        statusEl.style.color = '#FFA500';
-        applyBtn.disabled = true;
-        applyBtn.style.opacity = '0.5';
-        try {
-          const ok = await this._buildDashboard();
-          if (ok) {
-            statusEl.textContent = '✅ Dashboard rebuilt! Refresh the page to see changes.';
-            statusEl.style.color = '#2ecc71';
-            applyBtn.textContent = '✅ Applied!';
-            applyBtn.style.background = '#2ecc71';
-          } else {
-            statusEl.textContent = '❌ Failed to rebuild dashboard. Check console.';
-            statusEl.style.color = '#e74c3c';
-          }
-        } catch (err) {
-          statusEl.textContent = '❌ Error: ' + err.message;
-          statusEl.style.color = '#e74c3c';
-        }
-        applyBtn.disabled = false;
-        applyBtn.style.opacity = '1';
-        setTimeout(() => {
-          applyBtn.textContent = '🔄 Apply Settings to Dashboard';
-          applyBtn.style.background = '#3F51B5';
-        }, 3000);
-      });
-    }
-
-    // Save button
-    el.querySelector('#save-btn').addEventListener('click', () => {
-      // Force a full save + notify
-      const cfg2 = this._storeGet();
-      this._storeSave(cfg2);
-      // Flash confirmation
-      const btn = el.querySelector('#save-btn');
-      btn.textContent = '✅ Saved!';
-      btn.style.background = '#2ecc71';
-      setTimeout(() => {
-        btn.textContent = '💾 Save All Settings';
-        btn.style.background = '#00d4b8';
-      }, 2000);
     });
   }
 }
