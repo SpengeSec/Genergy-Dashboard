@@ -2,6 +2,13 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.13.9] - 2026-03-30
+
+### Fixed
+- **Sankey CSS Accumulation Bug** — The Jinja :host{} block cleanup regex failed to strip accumulated CSS fragments, causing the CSS to grow to 38KB+ across rebuilds. Source percentage labels (Solar 0.00%, Battery 70.61%) were broken because stale Jinja fragments overrode the fresh calculations. Replaced the entire regex-cleanup approach with a nuclear CSS rebuild: the card_mod CSS is now built from scratch on every dashboard save, preserving only the ha-card background theme rule from the original config. This eliminates all accumulated fragments and ensures correct percentage display
+- **Sankey min_state Threshold** — Increased min_state from 0.01 to 0.1 kWh so entities below 0.1 kWh (like HP at 0.04 kWh) are hidden from the chart, reducing visual clutter and preventing tiny orphaned boxes
+- **Sankey Source Percentage Labels** — The nuclear CSS rebuild now includes proper source percentage `::after` rules for Solar, Battery, and Grid source nodes, plus all destination percentage selectors (Home, Battery, Grid, EV, HP). Previously these were only in the user's original card_mod and got lost during partial CSS rebuilds
+
 ## [2.13.8] - 2026-03-30
 
 ### Fixed
