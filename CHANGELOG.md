@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.14.1] - 2026-03-30
+
+### Fixed
+- **Sankey CSS on Fresh Installs** — The nuclear CSS rebuild was gated by `if (sankeyChart.card_mod?.style?.['sankey-chart-base$'])` which meant fresh installs (no existing card_mod) got **no CSS styling at all**. Removed the guard so the CSS is always built from scratch, with `card_mod` structure initialized if absent. Existing installs also benefit: CSS rebuild is unconditional, ensuring consistent styling regardless of prior state
+
 ## [2.14.0] - 2026-03-30
 
 ### Fixed

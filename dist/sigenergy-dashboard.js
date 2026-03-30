@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.14.0 — Bundled Distribution
+ * Genergy Dashboard v2.14.1 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -4043,11 +4043,12 @@ return forecast.map(function(d) {
       }
       jinjaHost += "}\n";
 
-      // Fix sankey CSS: completely rebuild from scratch to prevent accumulated fragments.
-      // Preserve only the user's ha-card background rule from original card_mod.
-      if (sankeyChart.card_mod?.style?.['sankey-chart-base$']) {
-        let oldCss = sankeyChart.card_mod.style['sankey-chart-base$'];
-        // Extract the user's ha-card background rule if it exists (theme-aware transparent)
+      // Build sankey CSS completely from scratch every time.
+      // This prevents accumulated fragments from prior rebuilds and ensures
+      // fresh installs also get proper styling.
+      {
+        // Extract ha-card background from existing CSS if present
+        const oldCss = sankeyChart.card_mod?.style?.['sankey-chart-base$'] || '';
         let haCardBg = '';
         const bgMatch = oldCss.match(/ha-card\s*\{[^}]*--ha-card-background[^}]*\}/);
         if (bgMatch) {
@@ -4092,6 +4093,9 @@ return forecast.map(function(d) {
         css += '.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n';
         css += '.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n';
         css += '@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } .box .label .name { font-size: 8px !important; } .box .label::after { font-size: 7px !important; } }\n';
+        // Ensure card_mod structure exists
+        if (!sankeyChart.card_mod) sankeyChart.card_mod = {};
+        if (!sankeyChart.card_mod.style) sankeyChart.card_mod.style = {};
         sankeyChart.card_mod.style['sankey-chart-base$'] = css;
       }
       newCards.push({ type: 'vertical-stack', cards: [sankeyTitle, sankeyChart] });
@@ -4798,7 +4802,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.14.0 ',
+  '%c GENERGY-DASHBOARD %c v2.14.1 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
