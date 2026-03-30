@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.14.2] - 2026-03-30
+
+### Improved
+- **Sankey Chart Box Styling** — Complete visual overhaul of the Sankey energy flow chart. Boxes now have wide colored backgrounds (90px) with prominently displayed large bold values (22px), entity names at the top in uppercase, kWh units below, and percentage labels at the bottom. Matches the polished look with colored card-style boxes instead of thin bars with inline text. Connectors adjusted to span between the wider source/destination boxes. Responsive breakpoint updates for mobile
+
 ## [2.14.1] - 2026-03-30
 
 ### Fixed

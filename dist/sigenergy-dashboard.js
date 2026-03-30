@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.14.1 — Bundled Distribution
+ * Genergy Dashboard v2.14.2 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -4063,36 +4063,53 @@ return forecast.map(function(d) {
         // 2. ha-card background + border-radius + overflow
         css += haCardBg;
         css += 'ha-card { --ha-card-border-radius: 16px !important; overflow: hidden !important; }\n';
-        // 3. Label text styling
-        css += '.box .label .name { font-size: 10px !important; font-weight: 500 !important; color: rgba(255,255,255,0.65) !important; text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important; }\n';
-        css += '.box .label::after { font-size: 9px !important; font-weight: 600 !important; color: rgba(255,255,255,0.55) !important; margin-top: auto !important; text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important; white-space: nowrap !important; }\n';
-        // 4. Source node styling (left side)
-        css += '.section:first-of-type .box > div:first-child { min-width: 65px !important; border-radius: 8px 0 0 8px !important; }\n';
-        css += '.section:first-of-type .box .label { left: 6px !important; align-items: flex-start !important; text-align: left !important; }\n';
-        css += '.section:first-of-type .box > div[title*="Grid"] ~ .label .name { border-color: #6b7fd4 !important; }\n';
-        // 5. Source percentage labels (::after)
+
+        // 3. Box styling — wide colored boxes with labels overlaid
+        // The colored div (first-child) expands to fill the box width
+        css += '.box { position: relative !important; overflow: visible !important; }\n';
+        css += '.box > div:first-child { min-width: 90px !important; border-radius: 8px !important; }\n';
+
+        // Label overlaid on top of the colored box
+        css += '.box .label { position: absolute !important; top: 0 !important; left: 0 !important; right: unset !important; width: 90px !important; height: 100% !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; text-align: center !important; padding: 4px 6px !important; box-sizing: border-box !important; z-index: 2 !important; pointer-events: none !important; gap: 0 !important; }\n';
+
+        // Name at top — uppercase label
+        css += '.box .label .name { font-size: 9px !important; font-weight: 700 !important; color: rgba(255,255,255,0.9) !important; text-transform: uppercase !important; letter-spacing: 0.5px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.6) !important; order: -1 !important; margin-bottom: 2px !important; line-height: 1.2 !important; }\n';
+
+        // State value — large bold number
+        css += '.box .label .state { font-size: 22px !important; font-weight: 800 !important; color: #fff !important; text-shadow: 0 2px 4px rgba(0,0,0,0.5) !important; line-height: 1.1 !important; display: block !important; }\n';
+
+        // Unit — small below value
+        css += '.box .label .unit { font-size: 10px !important; font-weight: 500 !important; color: rgba(255,255,255,0.7) !important; display: block !important; margin-top: 1px !important; }\n';
+
+        // Percentage label after
+        css += '.box .label::after { font-size: 9px !important; font-weight: 600 !important; color: rgba(255,255,255,0.6) !important; text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important; white-space: nowrap !important; order: 10 !important; margin-top: 2px !important; }\n';
+
+        // The value+unit span wrapper — make it stack vertically
+        css += '.box .label > span:first-child { display: flex !important; flex-direction: column !important; align-items: center !important; }\n';
+
+        // 4. Source percentage labels (::after)
         css += '.section:first-of-type .box > div[title*="Solar"] ~ .label::after { content: var(--pct-src-solar); }\n';
         css += '.section:first-of-type .box > div[title*="Battery"] ~ .label::after { content: var(--pct-src-bat); }\n';
         css += '.section:first-of-type .box > div[title*="Grid"] ~ .label::after { content: var(--pct-src-grid); }\n';
-        // 6. Destination percentage labels (::after)
+        // 5. Destination percentage labels (::after)
         css += '.section:last-of-type .box > div[title*="Battery"] ~ .label::after { content: var(--pct-dst-bat); }\n';
         css += '.section:last-of-type .box > div[title*="Load"] ~ .label::after { content: var(--pct-dst-load); }\n';
         css += '.section:last-of-type .box > div[title*="Home"] ~ .label::after { content: var(--pct-dst-load); }\n';
         css += '.section:last-of-type .box > div[title*="Grid"] ~ .label::after { content: var(--pct-dst-grid); }\n';
         css += '.section:last-of-type .box > div[title*="EV"] ~ .label::after { content: var(--pct-dst-ev); }\n';
         css += '.section:last-of-type .box > div[title*="HP"] ~ .label::after { content: var(--pct-dst-hp); }\n';
-        // 7. EV/HP/Home pill border colors
-        css += '.box > div[title*="EV"] ~ .label .name { border-color: #ff69b4 !important; }\n';
-        css += '.box > div[title*="HP"] ~ .label .name { border-color: #e67e22 !important; }\n';
-        css += '.box > div[title*="Home"] ~ .label .name { border-color: #e8337f !important; }\n';
-        // 8. Sankey layout fix
-        css += '\n/* Sankey layout fix */\n';
-        css += '.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n';
-        css += '.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n';
+
+        // 6. Destination side — mirror box position (right-aligned)
         css += '.section:last-of-type .box { flex-direction: row-reverse !important; }\n';
-        css += '.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n';
+        css += '.section:last-of-type .box .label { left: unset !important; right: 0 !important; }\n';
+
+        // 7. Sankey layout — connectors between source and destination boxes
+        css += '\n/* Sankey layout fix */\n';
+        css += '.section:first-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n';
+        css += '.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n';
+        css += '.connectors { left: 90px !important; width: calc(100% - 180px) !important; overflow: visible !important; z-index: 1 !important; }\n';
         css += '.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n';
-        css += '@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } .box .label .name { font-size: 8px !important; } .box .label::after { font-size: 7px !important; } }\n';
+        css += '@media (max-width: 800px) { .box > div:first-child { min-width: 70px !important; } .box .label { width: 70px !important; } .box .label .state { font-size: 18px !important; } .box .label .name { font-size: 7px !important; } .box .label::after { font-size: 7px !important; } .connectors { left: 70px !important; width: calc(100% - 140px) !important; } }\n';
         // Ensure card_mod structure exists
         if (!sankeyChart.card_mod) sankeyChart.card_mod = {};
         if (!sankeyChart.card_mod.style) sankeyChart.card_mod.style = {};
@@ -4802,7 +4819,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.14.1 ',
+  '%c GENERGY-DASHBOARD %c v2.14.2 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
