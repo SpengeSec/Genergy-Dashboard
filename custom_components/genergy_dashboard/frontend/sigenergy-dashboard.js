@@ -876,7 +876,7 @@ class SigenergySettingsCard extends HTMLElement {
       </div>` : '';
     // Check if this is a daily energy field with a cumulative source — offer to create helper
     let helperHTML = '';
-    const dailyKeys = ['solar_energy_today','load_energy_today','battery_charge_today','battery_discharge_today','grid_import_today','grid_export_today','ev_energy_today','heat_pump_energy_today'];
+    const dailyKeys = ['solar_energy_today','load_energy_today','battery_charge_today','battery_discharge_today','grid_import_today','grid_export_today','ev_energy_today','heat_pump_energy_today','grid_import_high_tariff','grid_import_low_tariff','grid_export_high_tariff','grid_export_low_tariff'];
     if (id && dailyKeys.includes(key) && this._hass?.states?.[id]) {
       const st = this._hass.states[id];
       const sc = st?.attributes?.state_class;
@@ -1429,7 +1429,7 @@ class SigenergySettingsCard extends HTMLElement {
         if (!key || !source) return;
         btn.disabled = true;
         btn.textContent = 'Creating...';
-        const meterName = key.replace('_today', '').replace('_energy', '_energy');
+        const meterName = key.replace('_today', '').replace('_energy', '_energy').replace('_tariff', '');
         try {
           const result = await this._ensureDailyMeter(source, meterName);
           if (result.isCumulative && result.dailyEntity) {
@@ -1665,6 +1665,7 @@ class SigenergySettingsCard extends HTMLElement {
           }
           const cfg2 = this._storeGet();
           const found = [];
+          const _flatGridEntries = [];
 
           for (const src of prefs.energy_sources) {
             if (src.type === 'solar' && src.stat_energy_from) {
@@ -1689,7 +1690,7 @@ class SigenergySettingsCard extends HTMLElement {
                 cfg2.features.dual_tariff = false;
                 found.push('Grid import: ' + flowFrom[0].stat_energy_from);
               } else if (flowFrom.length >= 2) {
-                // Multiple tariffs detected
+                // Multiple tariffs detected (flow_from array format)
                 cfg2.features.dual_tariff = true;
                 cfg2.entities.grid_import_high_tariff = flowFrom[0].stat_energy_from || '';
                 cfg2.entities.grid_import_low_tariff = flowFrom[1].stat_energy_from || '';
@@ -1704,6 +1705,34 @@ class SigenergySettingsCard extends HTMLElement {
                 cfg2.entities.grid_export_low_tariff = flowTo[1].stat_energy_to || '';
                 found.push('Grid export (dual tariff): ' + flowTo.map(f => f.stat_energy_to).join(' + '));
               }
+              // Also handle flat format: HA Energy Dashboard may use separate grid entries
+              // with stat_energy_from/stat_energy_to directly on each entry (no flow_from/flow_to)
+              if (flowFrom.length === 0 && flowTo.length === 0 && src.stat_energy_from) {
+                _flatGridEntries.push(src);
+              }
+            }
+          }
+          // Handle flat grid format: multiple grid entries = dual tariff
+          if (_flatGridEntries.length === 1) {
+            if (_flatGridEntries[0].stat_energy_from && !cfg2.entities.grid_import_today) {
+              cfg2.entities.grid_import_today = _flatGridEntries[0].stat_energy_from;
+              found.push('Grid import: ' + _flatGridEntries[0].stat_energy_from);
+            }
+            if (_flatGridEntries[0].stat_energy_to && !cfg2.entities.grid_export_today) {
+              cfg2.entities.grid_export_today = _flatGridEntries[0].stat_energy_to;
+              found.push('Grid export: ' + _flatGridEntries[0].stat_energy_to);
+            }
+          } else if (_flatGridEntries.length >= 2) {
+            cfg2.features.dual_tariff = true;
+            if (!cfg2.entities.grid_import_high_tariff) {
+              cfg2.entities.grid_import_high_tariff = _flatGridEntries[0].stat_energy_from || '';
+              cfg2.entities.grid_import_low_tariff = _flatGridEntries[1].stat_energy_from || '';
+              found.push('Grid import (dual tariff): ' + _flatGridEntries.map(f => f.stat_energy_from).join(' + '));
+            }
+            if (!cfg2.entities.grid_export_high_tariff) {
+              cfg2.entities.grid_export_high_tariff = _flatGridEntries[0].stat_energy_to || '';
+              cfg2.entities.grid_export_low_tariff = _flatGridEntries[1].stat_energy_to || '';
+              found.push('Grid export (dual tariff): ' + _flatGridEntries.map(f => f.stat_energy_to).join(' + '));
             }
           }
 
@@ -3131,7 +3160,7 @@ class SigenergySettingsCard extends HTMLElement {
       name: 'Solar', color: '#FF8F00', type: 'area', opacity: 0.35,
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
-      group_by: { func: 'avg', duration: '5min' },
+      group_by: { func: 'last', duration: '1min' },
       show: { in_header: true, legend_value: true },
       yaxis_id: 'power', float_precision: fp
     });
@@ -3141,7 +3170,7 @@ class SigenergySettingsCard extends HTMLElement {
       name: 'Battery', color: '#00C853', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
-      group_by: { func: 'avg', duration: '5min' },
+      group_by: { func: 'last', duration: '1min' },
       show: { in_header: true, legend_value: true },
       yaxis_id: 'power', float_precision: fp
     });
@@ -3151,7 +3180,7 @@ class SigenergySettingsCard extends HTMLElement {
       name: 'Grid', color: '#D32F2F', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
-      group_by: { func: 'avg', duration: '5min' },
+      group_by: { func: 'last', duration: '1min' },
       show: { in_header: true, legend_value: true },
       yaxis_id: 'power', float_precision: fp
     });
@@ -3161,7 +3190,7 @@ class SigenergySettingsCard extends HTMLElement {
       name: 'Consumption', color: '#8E24AA', type: 'area', opacity: 0.08,
       stroke_width: 1.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
-      group_by: { func: 'avg', duration: '5min' },
+      group_by: { func: 'last', duration: '1min' },
       show: { in_header: true, legend_value: true },
       yaxis_id: 'power', invert: true, float_precision: fp
     });
@@ -3227,7 +3256,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.battery_soc, name: 'SOC', color: '#2196F3',
           type: 'area', opacity: 0.2, stroke_width: 2.5,
           extend_to: false, unit: ' %',
-          group_by: { func: 'avg', duration: '5min' },
+          group_by: { func: 'last', duration: '1min' },
           show: { in_header: true, legend_value: true },
           yaxis_id: 'soc', float_precision: 1
         });
@@ -3309,7 +3338,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.battery_soc, name: 'SOC', color: '#2196F3',
           type: 'area', opacity: 0.2, stroke_width: 2.5,
           extend_to: false, unit: ' %',
-          group_by: { func: 'avg', duration: '5min' },
+          group_by: { func: 'last', duration: '1min' },
           show: { in_header: true, legend_value: true },
           yaxis_id: 'soc', float_precision: 1
         });
@@ -3318,7 +3347,7 @@ class SigenergySettingsCard extends HTMLElement {
       if (features.financial_tracking && e.haeo_optim_cost) {
         series.push({
           entity: e.haeo_optim_cost, name: 'Optim Cost', unit: ' ' + (cfg.pricing?.currency || '$'),
-          show: { legend_value: true, in_chart: false, in_header: true },
+          show: { legend_value: true, in_chart: false, in_header: 'raw' },
           float_precision: 2, yaxis_id: 'power'
         });
       }
@@ -3490,7 +3519,7 @@ return forecast.map(function(d) {
       if (e.emhass_net_cost_today) {
         series.push({
           entity: e.emhass_net_cost_today, name: 'Cost Today', unit: ' ' + (cfg.pricing?.currency || '€'),
-          show: { legend_value: true, in_chart: false, in_header: true },
+          show: { legend_value: true, in_chart: false, in_header: 'raw' },
           float_precision: 2, yaxis_id: 'power'
         });
       }
@@ -3498,7 +3527,7 @@ return forecast.map(function(d) {
         series.push({
           entity: e.emhass_savings_today, name: 'Savings Today', unit: ' ' + (cfg.pricing?.currency || '€'),
           color: '#4CAF50',
-          show: { legend_value: true, in_chart: false, in_header: true },
+          show: { legend_value: true, in_chart: false, in_header: 'raw' },
           float_precision: 2, yaxis_id: 'power'
         });
       }
@@ -3742,6 +3771,13 @@ return forecast.map(function(d) {
       });
 
       // Build stat cards
+      // Helper: build unit-aware energy template that normalises MWh/Wh → kWh
+      const _energyTpl = (eid) => {
+        return "{% set u = (state_attr('" + eid + "', 'unit_of_measurement') or 'kWh') | string %}" +
+               "{% set raw = states('" + eid + "') | float(0) %}" +
+               "{% set kwh = raw * 1000 if u == 'MWh' else raw / 1000 if u == 'Wh' else raw %}" +
+               "{{ kwh | round(1) }} kWh";
+      };
       const statCards = [];
       const addStat = (entity, name, icon, color) => {
         if (!entity) return;
@@ -3749,7 +3785,7 @@ return forecast.map(function(d) {
           type: 'custom:mushroom-template-card',
           entity: entity,
           primary: name, icon: icon, icon_color: color,
-          secondary: "{{ states('" + entity + "') | round(1) }} kWh",
+          secondary: _energyTpl(entity),
           card_mod: { style: _cardStyle }
         });
       };
@@ -3758,13 +3794,18 @@ return forecast.map(function(d) {
       addStat(e.battery_charge_today, 'Charged', 'mdi:battery-arrow-up', 'green');
       addStat(e.battery_discharge_today, 'Discharged', 'mdi:battery-arrow-down', 'teal');
 
-      // Grid import/export mushroom cards — dual tariff sums high+low via Jinja
+      // Grid import/export mushroom cards — dual tariff sums high+low via Jinja (unit-aware)
       if (f.dual_tariff && (e.grid_import_high_tariff || e.grid_import_low_tariff)) {
         const hiI = e.grid_import_high_tariff, loI = e.grid_import_low_tariff;
         const impEntity = hiI || loI;
         const impSecondary = (hiI && loI)
-          ? "{{ (states('" + hiI + "') | float(0) + states('" + loI + "') | float(0)) | round(1) }} kWh"
-          : "{{ states('" + impEntity + "') | round(1) }} kWh";
+          ? "{% set u = (state_attr('" + hiI + "', 'unit_of_measurement') or 'kWh') | string %}" +
+            "{% set hi = states('" + hiI + "') | float(0) %}" +
+            "{% set lo = states('" + loI + "') | float(0) %}" +
+            "{% set total = hi + lo %}" +
+            "{% set kwh = total * 1000 if u == 'MWh' else total / 1000 if u == 'Wh' else total %}" +
+            "{{ kwh | round(1) }} kWh"
+          : _energyTpl(impEntity);
         statCards.push({
           type: 'custom:mushroom-template-card',
           entity: impEntity,
@@ -3779,8 +3820,13 @@ return forecast.map(function(d) {
         const hiE = e.grid_export_high_tariff, loE = e.grid_export_low_tariff;
         const expEntity = hiE || loE;
         const expSecondary = (hiE && loE)
-          ? "{{ (states('" + hiE + "') | float(0) + states('" + loE + "') | float(0)) | round(1) }} kWh"
-          : "{{ states('" + expEntity + "') | round(1) }} kWh";
+          ? "{% set u = (state_attr('" + hiE + "', 'unit_of_measurement') or 'kWh') | string %}" +
+            "{% set hi = states('" + hiE + "') | float(0) %}" +
+            "{% set lo = states('" + loE + "') | float(0) %}" +
+            "{% set total = hi + lo %}" +
+            "{% set kwh = total * 1000 if u == 'MWh' else total / 1000 if u == 'Wh' else total %}" +
+            "{{ kwh | round(1) }} kWh"
+          : _energyTpl(expEntity);
         statCards.push({
           type: 'custom:mushroom-template-card',
           entity: expEntity,
@@ -3792,12 +3838,18 @@ return forecast.map(function(d) {
         addStat(e.grid_export_today, 'Exported', 'mdi:transmission-tower-export', 'blue');
       }
 
-      // Build self-sufficiency card
+      // Build self-sufficiency card (unit-aware: normalise both to kWh before dividing)
       const selfSuffCard = (e.solar_energy_today && e.load_energy_today) ? {
         type: 'custom:mushroom-template-card',
         entity: e.solar_energy_today,
         primary: 'Self-Sufficiency',
-        secondary: "{% set solar = states('" + e.solar_energy_today + "') | float(0) %}{% set load = states('" + e.load_energy_today + "') | float(1) %}{{ ((solar / load) * 100) | round(1) if load > 0 else 0 }}%",
+        secondary: "{% set su = (state_attr('" + e.solar_energy_today + "', 'unit_of_measurement') or 'kWh') | string %}" +
+          "{% set sr = states('" + e.solar_energy_today + "') | float(0) %}" +
+          "{% set solar = sr * 1000 if su == 'MWh' else sr / 1000 if su == 'Wh' else sr %}" +
+          "{% set lu = (state_attr('" + e.load_energy_today + "', 'unit_of_measurement') or 'kWh') | string %}" +
+          "{% set lr = states('" + e.load_energy_today + "') | float(0) %}" +
+          "{% set load = lr * 1000 if lu == 'MWh' else lr / 1000 if lu == 'Wh' else lr %}" +
+          "{{ ((solar / load) * 100) | round(1) if load > 0 else 0 }}%",
         icon: 'mdi:check-decagram', icon_color: 'green',
         card_mod: { style: 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; }' }
       } : null;
@@ -3938,12 +3990,18 @@ return forecast.map(function(d) {
       if (f.show_hp_in_sankey && hpSankeyEntity) sankeyDest.push({ entity_id: hpSankeyEntity, name: 'HP', color: '#e67e22' });
       if (e.battery_charge_today) sankeyDest.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
 
-      // Grid export destination — dual tariff uses add_entities to sum high+low, fallback to grid_export_today
-      const _hasDualExport = f.dual_tariff && (e.grid_export_high_tariff || e.grid_export_low_tariff);
-      const _gridExportId = _hasDualExport ? (e.grid_export_high_tariff || e.grid_export_low_tariff) : e.grid_export_today;
-      const _gridExportAdd = (_hasDualExport && e.grid_export_high_tariff && e.grid_export_low_tariff)
-        ? [e.grid_export_high_tariff === _gridExportId ? e.grid_export_low_tariff : e.grid_export_high_tariff]
-        : undefined;
+      // Grid export destination — prefer the non-tariff total entity for accurate Sankey sizing.
+      // Only fall back to tariff add_entities summation when grid_export_today is missing.
+      let _gridExportId, _gridExportAdd;
+      if (e.grid_export_today) {
+        _gridExportId = e.grid_export_today;
+        _gridExportAdd = undefined;
+      } else if (f.dual_tariff && (e.grid_export_high_tariff || e.grid_export_low_tariff)) {
+        _gridExportId = e.grid_export_high_tariff || e.grid_export_low_tariff;
+        _gridExportAdd = (e.grid_export_high_tariff && e.grid_export_low_tariff)
+          ? [e.grid_export_high_tariff === _gridExportId ? e.grid_export_low_tariff : e.grid_export_high_tariff]
+          : undefined;
+      }
       if (_gridExportId) {
         const exportNode = { entity_id: _gridExportId, name: 'Grid', color: '#7c5cbf' };
         if (_gridExportAdd) exportNode.add_entities = _gridExportAdd;
@@ -3951,29 +4009,30 @@ return forecast.map(function(d) {
       }
 
       // Build source children arrays — sources can flow to all destinations
+      // ha-sankey-chart uses greedy allocation: first child claims energy first.
+      // Put small consumers (EV, HP) before large ones (Home, Grid Export) so they
+      // get visible flow lines even when larger destinations would consume everything.
       const _gridExportChild = _gridExportId || e.grid_export_today;
-      const battDischargeChildren = [_gridExportChild, e.load_energy_today].filter(Boolean);
-      const solarChildren = [e.battery_charge_today, _gridExportChild, e.load_energy_today].filter(Boolean);
-      const gridImportChildren = [e.battery_charge_today, e.load_energy_today].filter(Boolean);
+      const _smallConsumers = [];
+      if (f.show_ev_in_sankey && evSankeyEntity) _smallConsumers.push(evSankeyEntity);
+      if (f.show_hp_in_sankey && hpSankeyEntity) _smallConsumers.push(hpSankeyEntity);
 
-      // Add EV/HP as potential children of all sources (energy can flow from any source)
-      if (f.show_ev_in_sankey && evSankeyEntity) {
-        battDischargeChildren.push(evSankeyEntity);
-        solarChildren.push(evSankeyEntity);
-        gridImportChildren.push(evSankeyEntity);
-      }
-      if (f.show_hp_in_sankey && hpSankeyEntity) {
-        battDischargeChildren.push(hpSankeyEntity);
-        solarChildren.push(hpSankeyEntity);
-        gridImportChildren.push(hpSankeyEntity);
-      }
+      const battDischargeChildren = [..._smallConsumers, e.load_energy_today, _gridExportChild].filter(Boolean);
+      const solarChildren = [e.battery_charge_today, ..._smallConsumers, e.load_energy_today, _gridExportChild].filter(Boolean);
+      const gridImportChildren = [e.battery_charge_today, ..._smallConsumers, e.load_energy_today].filter(Boolean);
 
-      // Grid import source — dual tariff uses add_entities to sum high+low, fallback to grid_import_today
-      const _hasDualImport = f.dual_tariff && (e.grid_import_high_tariff || e.grid_import_low_tariff);
-      const _gridImportId = _hasDualImport ? (e.grid_import_high_tariff || e.grid_import_low_tariff) : e.grid_import_today;
-      const _gridImportAdd = (_hasDualImport && e.grid_import_high_tariff && e.grid_import_low_tariff)
-        ? [e.grid_import_high_tariff === _gridImportId ? e.grid_import_low_tariff : e.grid_import_high_tariff]
-        : undefined;
+      // Grid import source — prefer the non-tariff total entity for accurate Sankey sizing.
+      // Only fall back to tariff add_entities summation when grid_import_today is missing.
+      let _gridImportId, _gridImportAdd;
+      if (e.grid_import_today) {
+        _gridImportId = e.grid_import_today;
+        _gridImportAdd = undefined;
+      } else if (f.dual_tariff && (e.grid_import_high_tariff || e.grid_import_low_tariff)) {
+        _gridImportId = e.grid_import_high_tariff || e.grid_import_low_tariff;
+        _gridImportAdd = (e.grid_import_high_tariff && e.grid_import_low_tariff)
+          ? [e.grid_import_high_tariff === _gridImportId ? e.grid_import_low_tariff : e.grid_import_high_tariff]
+          : undefined;
+      }
       const gridImportNode = { entity_id: _gridImportId, name: 'Grid', color: '#6b7fd4', children: gridImportChildren };
       if (_gridImportAdd) gridImportNode.add_entities = _gridImportAdd;
 
@@ -3984,6 +4043,7 @@ return forecast.map(function(d) {
         round: 1, height: 480, wide: true,
         min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
         min_state: 0.01,
+        throttle: 300,
         energy_date_selection: false,
         sections: [
           {
@@ -4003,14 +4063,20 @@ return forecast.map(function(d) {
         card_mod: sankeyOld.card_mod || {}
       };
       // Rebuild the Jinja :host{} block fresh — includes EV/HP CSS variables when enabled
-      const _j = (eid) => "states('" + eid + "') | float(0)";
-      // Grid import/export Jinja: sum high+low tariffs when dual_tariff is on
-      const _gridImpJinja = (_hasDualImport && e.grid_import_high_tariff && e.grid_import_low_tariff)
-        ? _j(e.grid_import_high_tariff) + " + " + _j(e.grid_import_low_tariff)
-        : _j(e.grid_import_today || _gridImportId || '');
-      const _gridExpJinja = (_hasDualExport && e.grid_export_high_tariff && e.grid_export_low_tariff)
-        ? _j(e.grid_export_high_tariff) + " + " + _j(e.grid_export_low_tariff)
-        : _j(e.grid_export_today || _gridExportId || '');
+      // _j returns a Jinja expression that reads the entity state AND normalises to kWh.
+      // Sensors may report in MWh (genergy utility meters), Wh, or kWh — this handles all.
+      const _j = (eid) => "(states('" + eid + "') | float(0)) * (1000 if state_attr('" + eid + "', 'unit_of_measurement') == 'MWh' else (0.001 if state_attr('" + eid + "', 'unit_of_measurement') == 'Wh' else 1))";
+      // Grid import/export Jinja: prefer the non-tariff total entity to match Sankey sizing
+      const _gridImpJinja = e.grid_import_today
+        ? _j(e.grid_import_today)
+        : (e.grid_import_high_tariff && e.grid_import_low_tariff)
+          ? _j(e.grid_import_high_tariff) + " + " + _j(e.grid_import_low_tariff)
+          : _j(_gridImportId || '');
+      const _gridExpJinja = e.grid_export_today
+        ? _j(e.grid_export_today)
+        : (e.grid_export_high_tariff && e.grid_export_low_tariff)
+          ? _j(e.grid_export_high_tariff) + " + " + _j(e.grid_export_low_tariff)
+          : _j(_gridExportId || '');
       let jinjaHost = "{% set pv = " + _j(e.solar_energy_today || '') + " %}\n";
       jinjaHost += "{% set bat_d = " + _j(e.battery_discharge_today || '') + " %}\n";
       jinjaHost += "{% set grid_i = " + _gridImpJinja + " %}\n";
@@ -4046,10 +4112,22 @@ return forecast.map(function(d) {
       // Fix sankey CSS: strip old :host block + accumulated layout rules, then prepend fresh Jinja
       if (sankeyChart.card_mod?.style?.['sankey-chart-base$']) {
         let css = sankeyChart.card_mod.style['sankey-chart-base$'];
-        // Remove ALL old Jinja :host blocks (can accumulate from repeated builds)
+        // Remove ALL old Jinja :host blocks (can accumulate from repeated builds).
+        // Strategy: find the LAST occurrence of the closing "}\n" from a :host block,
+        // then remove everything from the first "{% set" to that point.
+        // First pass: remove individual blocks
         while (/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/.test(css)) {
           css = css.replace(/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/, '');
         }
+        // Second pass: clean up orphaned Jinja fragments from accumulated blocks
+        // These look like: }%";\n  --pct-src-bat: "...";\n  ...\n}\n
+        while (/\}%\\?";?\s*\n\s*--pct-[\s\S]*?\}\n?/.test(css)) {
+          css = css.replace(/\}%\\?";?\s*\n\s*--pct-[\s\S]*?\}\n?/, '');
+        }
+        // Third pass: remove any leftover orphaned --pct- lines
+        css = css.replace(/^\s*--pct-[^\n]*\n/gm, '');
+        // Fourth pass: remove broken ha-card rules from accumulation (e.g. "ha-card { --ha-card- overflow...")
+        css = css.replace(/ha-card\s*\{\s*--ha-card-\s+overflow[^}]*\}\n?/g, '');
         css = css.replace(/min-width:\s*140px\s*!important/g, 'min-width: 90px !important');
         css = css.replace(/min-width:\s*70px\s*!important/g, 'min-width: 90px !important');
         // Remove the entire .section:first-of-type block (may contain broken CSS or max-width:75%)
@@ -4099,7 +4177,9 @@ return forecast.map(function(d) {
         css = css.replace(/border-radius:\s*var\(--ha-card-border-radius,\s*16px\)\s*!important;?/g, '');
         css = css.replace(/border-radius:\s*16px\s*!important;?/g, '');
         // Remove any old --ha-card-border-radius override to avoid duplication
-        css = css.replace(/ha-card\s*\{\s*--ha-card-border-radius:[^}]*\}\n?/g, '');
+        css = css.replace(/\n?ha-card\s*\{\s*--ha-card-border-radius:[^}]*\}\n?/g, '');
+        // Remove any standalone ha-card overflow rules that accumulated
+        css = css.replace(/\n?ha-card\s*\{\s*overflow:\s*hidden[^}]*\}\n?/g, '');
         // Set the CSS variable on ha-card so its shadow DOM :host picks up 16px
         // Also override overflow to clip content at rounded corners (connectors are inside .container)
         css += '\nha-card { --ha-card-border-radius: 16px !important; overflow: hidden !important; }\n';

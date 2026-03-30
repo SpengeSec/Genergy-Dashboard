@@ -2,6 +2,22 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.15.0] - 2026-05-28
+
+### Fixed
+- **Mushroom Energy Cards MWh/Wh→kWh Normalization** — Mushroom stat cards (Solar, Load, Charged, Discharged, Imported, Exported) now auto-detect `unit_of_measurement` and normalize to kWh. Previously hardcoded `{{ states(entity) | round(1) }} kWh` which showed raw MWh values as near-zero (e.g. 0.0 instead of 14.2 kWh). Also fixes dual-tariff sum cards and the self-sufficiency percentage (was comparing MWh solar vs kWh load)
+- **Sankey Chart Percentage Labels** — Sankey Jinja percentage variables (`--pct-src-solar`, `--pct-dst-load`, etc.) now normalize entity values to kWh before computing ratios. Previously used raw `states()` values, causing MWh entities to appear as <2% while kWh entities dominated (e.g. Solar showing 1.09% instead of 74.88%)
+- **ApexChart Header Values Matching House Card** — Changed power and SOC series from `group_by: { func: 'avg', duration: '5min' }` to `{ func: 'last', duration: '1min' }` so chart header values closely track the real-time house card instead of showing 5-minute rolling averages
+- **ApexChart Financial Headers** — Changed EMHASS Cost Today, Savings Today, and HAEO Optim Cost series to `in_header: 'raw'` so they display the current sensor state directly instead of the last chart data point (which could be stale or affected by group_by transforms)
+- **Sankey CSS Accumulation Cleanup** — Added multi-pass CSS cleanup to strip orphaned Jinja fragments, stale `--pct-` lines, broken `ha-card` rules, and standalone overflow rules that accumulated across repeated dashboard rebuilds
+- **Sankey Grid Entity Selection** — Sankey sources/destinations now prefer the non-tariff total entity (`grid_import_today`/`grid_export_today`) for accurate sizing. Only falls back to tariff `add_entities` summation when the total entity is missing
+- **Sankey EV/HP Child Ordering** — Small consumers (EV, HP) are now placed before large destinations (Home, Grid Export) in the greedy allocation order so they get visible flow lines instead of being starved by larger destinations
+
+### Improved
+- **Auto-Detect Flat Grid Format** — HA Energy Dashboard may use separate grid entries with `stat_energy_from`/`stat_energy_to` directly on each entry (no `flow_from`/`flow_to` arrays). Auto-detect now handles this flat format, correctly identifying single or dual tariff configurations
+- **Daily Helper Creation for Tariff Entities** — The "Create Daily Helper" button now supports tariff entity keys (`grid_import_high_tariff`, `grid_import_low_tariff`, `grid_export_high_tariff`, `grid_export_low_tariff`) in addition to the standard `*_today` keys
+- **Sankey Throttle** — Added `throttle: 300` to reduce Sankey chart re-render frequency during rapid state changes
+
 ## [2.14.3] - 2026-03-30
 
 ### Fixed
