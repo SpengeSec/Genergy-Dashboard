@@ -2,19 +2,13 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
-## [2.13.9] - 2026-03-30
+## [2.14.0] - 2026-03-30
 
 ### Fixed
 - **Sankey CSS Accumulation Bug** — The Jinja :host{} block cleanup regex failed to strip accumulated CSS fragments, causing the CSS to grow to 38KB+ across rebuilds. Source percentage labels (Solar 0.00%, Battery 70.61%) were broken because stale Jinja fragments overrode the fresh calculations. Replaced the entire regex-cleanup approach with a nuclear CSS rebuild: the card_mod CSS is now built from scratch on every dashboard save, preserving only the ha-card background theme rule from the original config. This eliminates all accumulated fragments and ensures correct percentage display
 - **Sankey min_state Threshold** — Increased min_state from 0.01 to 0.1 kWh so entities below 0.1 kWh (like HP at 0.04 kWh) are hidden from the chart, reducing visual clutter and preventing tiny orphaned boxes
 - **Sankey Source Percentage Labels** — The nuclear CSS rebuild now includes proper source percentage `::after` rules for Solar, Battery, and Grid source nodes, plus all destination percentage selectors (Home, Battery, Grid, EV, HP). Previously these were only in the user's original card_mod and got lost during partial CSS rebuilds
-
-## [2.13.8] - 2026-03-30
-
-### Fixed
-- **Sankey Grid Destination Bar Jumping** — Added `throttle: 2000` (2s debounce) to limit chart re-renders when entity values fluctuate. Reduced `min_box_size` from 50 → 30 and `min_box_distance` from 8 → 5 so boxes scale more proportionally and small-value destinations don't dominate the layout. Prevents the Grid export bar from visually jumping up and down as its value changes
-- **Sankey HP/EV "No Source" Orphaned Destinations** — Reordered source children allocation priority from `[grid_export, load, ...ev, ...hp]` to `[load, ev, hp, battery_charge, grid_export]`. Ha-sankey-chart uses greedy allocation where the first child in the list claims source flow first. Previously, grid export consumed source energy before house load/EV/HP, leaving small consumers like HP (0.04 kWh) orphaned with no connecting flow line. Now consumption destinations get priority, grid export gets surplus
-- **Sankey Source/Destination Mismatch Reconciliation** — Added `children_sum: { should_be: 'equal_or_less', reconcile_to: 'max' }` to all source nodes (Grid Import, Battery Discharge, Solar). When independently-measured destination totals exceed source totals (common with separate energy sensors), ha-sankey-chart now scales sources up rather than leaving destinations disconnected
+- **Sankey Flow Allocation Stability** — Reverted the v2.13.8/v2.13.9 children reordering and children_sum changes back to the stable v2.13.7 configuration after they caused flow visualization issues. The original greedy allocation order works correctly for most setups
 
 ## [2.13.7] - 2026-03-30
 

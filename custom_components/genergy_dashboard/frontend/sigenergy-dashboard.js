@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.8.0 — Bundled Distribution
+ * Genergy Dashboard v2.14.0 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -3983,7 +3983,7 @@ return forecast.map(function(d) {
         show_names: true, show_states: true, show_units: true, show_icons: false,
         round: 1, height: 480, wide: true,
         min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
-        min_state: 0.01,
+        min_state: 0.1,
         energy_date_selection: false,
         sections: [
           {
@@ -4798,7 +4798,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.8.0 ',
+  '%c GENERGY-DASHBOARD %c v2.14.0 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
