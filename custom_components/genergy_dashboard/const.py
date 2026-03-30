@@ -257,7 +257,10 @@ SIGENERGY_DEFAULTS = {
     CONF_DC_TRANSFORMER_TEMP: "",  # No separate DC transformer temp in Sigenergy
     CONF_PV1_POWER: "sensor.sigen_inverter_pv1_power",
     CONF_PV2_POWER: "sensor.sigen_inverter_pv2_power",
-    # Grid electrical detail — NOT provided by Sigenergy Local Modbus
+    # Grid electrical detail — Sigenergy Local Modbus now exposes plant-level
+    # grid voltage sensors (sigen_plant_grid_phase_a/b/c_voltage) when available.
+    # Auto-detect in the frontend settings card prefers these over inverter-level
+    # sensors. Leave defaults empty since entity naming varies by installation.
     CONF_GRID_VOLTAGE: "",
     CONF_GRID_FREQUENCY: "",
     CONF_GRID_CT_CLAMP: "",

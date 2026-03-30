@@ -1959,7 +1959,7 @@ class SigenergySettingsCard extends HTMLElement {
                 inverter_rated_power:    sigenKeys.find(k => k.endsWith('_rated_active_power') && !k.includes('plant')),
                 battery_temp:            sigenKeys.find(k => k.endsWith('_ess_average_cell_temperature') || k.endsWith('_battery_average_cell_temperature') || k.endsWith('_average_cell_temperature')),
                 grid_frequency:          sigenKeys.find(k => k.endsWith('_grid_frequency') && !k.includes('rated') && !k.includes('plant')),
-                grid_voltage:            sigenKeys.find(k => k.endsWith('_phase_a_voltage') && !k.includes('plant')),
+                grid_voltage:            sigenKeys.find(k => k.includes('plant_grid_phase_a_voltage')) || sigenKeys.find(k => k.includes('grid_phase_a_voltage')) || sigenKeys.find(k => k.endsWith('_phase_a_voltage') && !k.includes('inverter')),
                 // PV strings (up to 6) — use endsWith() for numbered inverters
                 pv1_power:               sigenKeys.find(k => k.endsWith('_pv1_power')),
                 pv2_power:               sigenKeys.find(k => k.endsWith('_pv2_power')),
@@ -2050,7 +2050,9 @@ class SigenergySettingsCard extends HTMLElement {
             const allKeys = Object.keys(this._hass.states);
             // Common patterns for phase 2/3 voltage entities across brands
             const phase2Patterns = [/_l2_voltage/, /_voltage_l2/, /_phase_2.*voltage/, /voltage.*_l2$/, /voltage.*phase_2/, /_phase_b_voltage/, /spanning.*l2/, /spannung.*l2/];
-            const phase2Key = allKeys.find(k => {
+            // Prefer plant-level grid voltage sensors (e.g. sigen_plant_grid_phase_b_voltage)
+            // over inverter-level sensors (e.g. sigen_inverter_phase_b_voltage)
+            const phase2Candidates = allKeys.filter(k => {
               if (!k.startsWith('sensor.')) return false;
               const st = this._hass.states[k];
               const unit = st?.attributes?.unit_of_measurement || '';
@@ -2058,6 +2060,8 @@ class SigenergySettingsCard extends HTMLElement {
               const lower = k.toLowerCase();
               return phase2Patterns.some(p => p.test(lower));
             });
+            // Prioritize plant grid sensors, then any non-inverter sensor, then any match
+            const phase2Key = phase2Candidates.find(k => k.includes('plant_grid')) || phase2Candidates.find(k => !k.includes('inverter')) || phase2Candidates[0];
             if (phase2Key) {
               cfg2.features.three_phase = true;
               found.push('✓ 3-phase grid detected: ' + phase2Key);
@@ -2703,7 +2707,7 @@ class SigenergySettingsCard extends HTMLElement {
       const map = {
         inverter_temp: sigenKeys.find(k => k.includes('_radiator_temperature') || k.includes('inverter_temp')),
         battery_temp: sigenKeys.find(k => k.includes('_battery_temperature') || k.includes('cell_temperature')),
-        grid_voltage: sigenKeys.find(k => k.includes('_a_phase_voltage') || k.endsWith('_grid_voltage')),
+        grid_voltage: sigenKeys.find(k => k.includes('plant_grid_phase_a_voltage')) || sigenKeys.find(k => k.includes('grid_phase_a_voltage')) || sigenKeys.find(k => (k.includes('_a_phase_voltage') || k.endsWith('_grid_voltage')) && !k.includes('inverter')),
         grid_frequency: sigenKeys.find(k => k.includes('_frequency') || (k.includes('grid') && k.includes('frequency'))),
         inverter_output_power: sigenKeys.find(k => k.includes('_inverter_active_power') || k.endsWith('_active_power')),
       };
@@ -3629,7 +3633,7 @@ return forecast.map(function(d) {
           title: hasEmhassForecasts ? 'Energy + EMHASS Forecast' : hasHaeoForecasts ? 'Energy + HAEO Forecast' : hasSolarForecast ? 'Energy + Solar Forecast' : 'Energy Overview'
         },
         graph_span: showExtendedChart ? '48h' : '24h',
-        update_interval: '60s',
+        update_interval: '10s',
         apex_config: {
           chart: {
             height: showExtendedChart ? '500px' : '350px',

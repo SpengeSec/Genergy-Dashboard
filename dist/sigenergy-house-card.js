@@ -447,9 +447,16 @@ class SigenergyHouseCard extends LitElement {
     }
     // Read user-configured auto-scale threshold (default 1000 W)
     let thresh = 1000;
-    try { if (SigConfigStore) { thresh = SigConfigStore.getInstance().config?.display?.power_threshold ?? 1000; } } catch (_) {}
-    if (abs >= thresh * 10) return `${(abs / 1000).toFixed(1)} kW`;
-    if (abs >= thresh) return `${(abs / 1000).toFixed(2)} kW`;
+    let dp = 2; // decimal places for kW display (default 2)
+    try {
+      if (SigConfigStore) {
+        const cfg = SigConfigStore.getInstance().config;
+        thresh = cfg?.display?.power_threshold ?? 1000;
+        dp = cfg?.display?.decimal_places ?? 2;
+      }
+    } catch (_) {}
+    if (abs >= thresh * 10) return `${(abs / 1000).toFixed(Math.min(dp, 1))} kW`;
+    if (abs >= thresh) return `${(abs / 1000).toFixed(dp)} kW`;
     return `${abs.toFixed(0)} W`;
   }
 

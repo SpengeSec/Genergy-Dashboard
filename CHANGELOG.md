@@ -2,6 +2,13 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.13.7] - 2026-03-30
+
+### Fixed
+- **ApexCharts Update Interval** — Reduced chart refresh from 60s to 10s, matching house card responsiveness. Power, SOC, and price overlay data now updates every 10 seconds instead of every minute
+- **House Card Decimal Places** — The house card's power display (`_formatPower`) now respects your configured Display → Decimal Places setting. Previously hardcoded (0 for W, 2 for kW below 10, 1 for kW above 10), now uses the user-configured decimal count consistently
+- **Grid Voltage Auto-Detect for Sigenergy** — Auto-detect now prefers `plant_grid_phase_*_voltage` sensors (grid-side measurement) over `inverter_phase_*_voltage` (inverter-side). The `!k.includes('plant')` filter was excluding the correct grid voltage sensor. Also fixes 3-phase detection to prefer plant-level sensors for all L1/L2/L3 phases
+
 ## [2.13.6] - 2025-07-15
 
 ### Fixed
