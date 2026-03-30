@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.14.3] - 2026-03-30
+
+### Fixed
+- **Sankey CSS Reverted to v2.13.7** — Reverted the Sankey chart CSS handling back to the proven v2.13.7 approach. The "nuclear CSS rebuild" introduced in v2.14.0-v2.14.2 destroyed user-customized card_mod styling (wide colored boxes, label positioning, value fonts). The original regex-based CSS fix-and-prepend approach preserves existing user styling while only updating Jinja percentage variables, layout fix rules, and EV/HP border colors. Also reverted `min_state` back to `0.01`
+
 ## [2.14.2] - 2026-03-30
 
 ### Improved

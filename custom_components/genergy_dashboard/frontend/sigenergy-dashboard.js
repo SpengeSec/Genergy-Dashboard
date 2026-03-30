@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.14.0 — Bundled Distribution
+ * Genergy Dashboard v2.14.3 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -3983,7 +3983,7 @@ return forecast.map(function(d) {
         show_names: true, show_states: true, show_units: true, show_icons: false,
         round: 1, height: 480, wide: true,
         min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
-        min_state: 0.1,
+        min_state: 0.01,
         energy_date_selection: false,
         sections: [
           {
@@ -4043,55 +4043,85 @@ return forecast.map(function(d) {
       }
       jinjaHost += "}\n";
 
-      // Fix sankey CSS: completely rebuild from scratch to prevent accumulated fragments.
-      // Preserve only the user's ha-card background rule from original card_mod.
+      // Fix sankey CSS: strip old :host block + accumulated layout rules, then prepend fresh Jinja
       if (sankeyChart.card_mod?.style?.['sankey-chart-base$']) {
-        let oldCss = sankeyChart.card_mod.style['sankey-chart-base$'];
-        // Extract the user's ha-card background rule if it exists (theme-aware transparent)
-        let haCardBg = '';
-        const bgMatch = oldCss.match(/ha-card\s*\{[^}]*--ha-card-background[^}]*\}/);
-        if (bgMatch) {
-          haCardBg = bgMatch[0] + '\n';
-        } else {
-          haCardBg = 'ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; background: var(--ha-card-background, transparent) !important; }\n';
+        let css = sankeyChart.card_mod.style['sankey-chart-base$'];
+        // Remove ALL old Jinja :host blocks (can accumulate from repeated builds)
+        while (/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/.test(css)) {
+          css = css.replace(/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/, '');
         }
-        // Build CSS completely fresh
-        let css = '';
-        // 1. Jinja :host block (percentage CSS variables)
-        css += jinjaHost;
-        // 2. ha-card background + border-radius + overflow
-        css += haCardBg;
-        css += 'ha-card { --ha-card-border-radius: 16px !important; overflow: hidden !important; }\n';
-        // 3. Label text styling
-        css += '.box .label .name { font-size: 10px !important; font-weight: 500 !important; color: rgba(255,255,255,0.65) !important; text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important; }\n';
-        css += '.box .label::after { font-size: 9px !important; font-weight: 600 !important; color: rgba(255,255,255,0.55) !important; margin-top: auto !important; text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important; white-space: nowrap !important; }\n';
-        // 4. Source node styling (left side)
-        css += '.section:first-of-type .box > div:first-child { min-width: 65px !important; border-radius: 8px 0 0 8px !important; }\n';
-        css += '.section:first-of-type .box .label { left: 6px !important; align-items: flex-start !important; text-align: left !important; }\n';
-        css += '.section:first-of-type .box > div[title*="Grid"] ~ .label .name { border-color: #6b7fd4 !important; }\n';
-        // 5. Source percentage labels (::after)
-        css += '.section:first-of-type .box > div[title*="Solar"] ~ .label::after { content: var(--pct-src-solar); }\n';
-        css += '.section:first-of-type .box > div[title*="Battery"] ~ .label::after { content: var(--pct-src-bat); }\n';
-        css += '.section:first-of-type .box > div[title*="Grid"] ~ .label::after { content: var(--pct-src-grid); }\n';
-        // 6. Destination percentage labels (::after)
-        css += '.section:last-of-type .box > div[title*="Battery"] ~ .label::after { content: var(--pct-dst-bat); }\n';
-        css += '.section:last-of-type .box > div[title*="Load"] ~ .label::after { content: var(--pct-dst-load); }\n';
-        css += '.section:last-of-type .box > div[title*="Home"] ~ .label::after { content: var(--pct-dst-load); }\n';
-        css += '.section:last-of-type .box > div[title*="Grid"] ~ .label::after { content: var(--pct-dst-grid); }\n';
-        css += '.section:last-of-type .box > div[title*="EV"] ~ .label::after { content: var(--pct-dst-ev); }\n';
-        css += '.section:last-of-type .box > div[title*="HP"] ~ .label::after { content: var(--pct-dst-hp); }\n';
-        // 7. EV/HP/Home pill border colors
-        css += '.box > div[title*="EV"] ~ .label .name { border-color: #ff69b4 !important; }\n';
-        css += '.box > div[title*="HP"] ~ .label .name { border-color: #e67e22 !important; }\n';
-        css += '.box > div[title*="Home"] ~ .label .name { border-color: #e8337f !important; }\n';
-        // 8. Sankey layout fix
+        css = css.replace(/min-width:\s*140px\s*!important/g, 'min-width: 90px !important');
+        css = css.replace(/min-width:\s*70px\s*!important/g, 'min-width: 90px !important');
+        // Remove the entire .section:first-of-type block (may contain broken CSS or max-width:75%)
+        css = css.replace(/\.section:first-of-type\s*\{[^}]*\}/g, '');
+        css = css.replace(/min-width:\s*80px\s*!important/g, 'min-width: 65px !important');
+        css = css.replace(/min-width:\s*55px\s*!important/g, 'min-width: 65px !important');
+        // Remove any old destination/source section constraints
+        css = css.replace(/\/\* Constrain destination[^*]*\*\/\n?/g, '');
+        css = css.replace(/\/\* Balance source\/destination[^*]*\*\/\n?/g, '');
+        css = css.replace(/\/\* Force section widths[^*]*\*\/\n?/g, '');
+        css = css.replace(/\/\* Fill container[^*]*\*\/\n?/g, '');
+        css = css.replace(/\/\* Sankey full-width[^*]*\*\/\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\{\s*max-width:\s*\d+%\s*!important;\s*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div:first-child\s*\{\s*max-width:\s*\d+px\s*!important;\s*\}\n?/g, '');
+        css = css.replace(/\.section:first-of-type\s*\{[^}]*width[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\{[^}]*width[^}]*flex[^}]*\}\n?/g, '');
+        css = css.replace(/\.section\s*\{\s*flex:[^}]*\}\n?/g, '');
+        css = css.replace(/\.container\s*\{\s*position:[^}]*\}\n?/g, '');
+        css = css.replace(/\.connectors\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.connectors\s*svg\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div:first-child\s*\{\s*width:\s*100%\s*!important;\s*\}\n?/g, '');
+        // Remove ALL accumulated layout fix blocks and duplicates
+        css = css.replace(/\/\* Sankey layout fix[^*]*\*\/\n?/g, '');
+        css = css.replace(/\.section:first-of-type\s*\{[^}]*flex[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\{[^}]*flex[^}]*\}\n?/g, '');
+        // Remove ALL accumulated duplicate rules from prior rebuilds
+        css = css.replace(/\.section:last-of-type\s*\.box\s*\{\s*flex-direction:\s*row-reverse\s*!important;\s*\}\n?/g, '');
+        css = css.replace(/@media\s*\(max-width:\s*800px\)\s*\{\s*\}\n?/g, '');
+        css = css.replace(/@media\s*\(max-width:\s*800px\)\s*\{  \}\n?/g, '');
+        // Remove accumulated EV/HP/Home duplicate rules before re-adding
+        css = css.replace(/\.box\s*>\s*div\[title\*="EV"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.box\s*>\s*div\[title\*="HP"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.box\s*>\s*div\[title\*="Heat"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="EV"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="HP"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Heat"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
+        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
+        // Replace hardcoded dark-theme Sankey background with theme-aware transparent
+        // ha-card reads --ha-card-background in its :host shadow DOM, so set the variable
+        css = css.replace(/ha-card\s*\{\s*background:\s*#1a1f2e\s*!important/g, 'ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; background: var(--ha-card-background, transparent) !important');
+        // Update Sankey card border-radius to 16px.
+        // ha-card has its own shadow DOM with :host { border-radius: var(--ha-card-border-radius) }
+        // Parent layout-card resets --ha-card-border-radius to 0, so we override it on ha-card itself.
+        // Setting the CSS variable propagates into ha-card's shadow DOM :host styling.
+        css = css.replace(/border-radius:\s*4px\s*!important;?/g, '');
+        css = css.replace(/border-radius:\s*var\(--ha-card-border-radius,\s*16px\)\s*!important;?/g, '');
+        css = css.replace(/border-radius:\s*16px\s*!important;?/g, '');
+        // Remove any old --ha-card-border-radius override to avoid duplication
+        css = css.replace(/ha-card\s*\{\s*--ha-card-border-radius:[^}]*\}\n?/g, '');
+        // Set the CSS variable on ha-card so its shadow DOM :host picks up 16px
+        // Also override overflow to clip content at rounded corners (connectors are inside .container)
+        css += '\nha-card { --ha-card-border-radius: 16px !important; overflow: hidden !important; }\n';
+        // Collapse multiple blank lines
+        css = css.replace(/\n{3,}/g, '\n\n');
+        // Prepend fresh Jinja :host block
+        css = jinjaHost + css;
+        // Always rebuild the layout/connector/EV/HP rules fresh from scratch
         css += '\n/* Sankey layout fix */\n';
         css += '.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n';
         css += '.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n';
         css += '.section:last-of-type .box { flex-direction: row-reverse !important; }\n';
         css += '.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n';
         css += '.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n';
-        css += '@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } .box .label .name { font-size: 8px !important; } .box .label::after { font-size: 7px !important; } }\n';
+        css += '@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } }\n';
+        // EV/HP pill border colors + destination percentages
+        css += '.box > div[title*="EV"] ~ .label .name { border-color: #ff69b4 !important; }\n';
+        css += '.box > div[title*="HP"] ~ .label .name { border-color: #e67e22 !important; }\n';
+        css += '.box > div[title*="Home"] ~ .label .name { border-color: #e8337f !important; }\n';
+        css += '.section:last-of-type .box > div[title*="EV"] ~ .label::after { content: var(--pct-dst-ev); }\n';
+        css += '.section:last-of-type .box > div[title*="HP"] ~ .label::after { content: var(--pct-dst-hp); }\n';
+        css += '.section:last-of-type .box > div[title*="Home"] ~ .label::after { content: var(--pct-dst-load); }\n';
         sankeyChart.card_mod.style['sankey-chart-base$'] = css;
       }
       newCards.push({ type: 'vertical-stack', cards: [sankeyTitle, sankeyChart] });
@@ -4798,7 +4828,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.14.0 ',
+  '%c GENERGY-DASHBOARD %c v2.14.3 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
