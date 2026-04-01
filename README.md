@@ -25,7 +25,7 @@ Animated house card with real-time power flow, sankey energy diagram, and batter
 ![Dashboard Overview](screenshots/overview.png)
 
 ### Energy Charts & EMS Forecasts
-48-hour time-series chart with solar, battery, grid, and consumption traces — plus EMHASS MPC or HAEO optimization forecast overlays, price curves, and deferrable load schedules.
+48-hour time-series chart with solar, battery, grid, and consumption traces — plus EMHASS MPC or HAEO optimization forecast overlays, price curves, deferrable load schedules, and a collapsible forecast timeline table with per-timeslot data.
 
 ![Energy Charts](screenshots/energy-chart.png)
 
@@ -84,6 +84,7 @@ Built-in visual cable path editor for customizing the animated power flow routes
 - **ApexCharts Integration** — 24h or 48h time-series chart with Solar, Battery, Grid, and Consumption traces
 - **Solar Forecast Chart Overlay** — Overlays Solcast PV forecast as a dashed gold area series on the energy chart, using the `detailedForecast` attribute from your Solcast sensor. Chart automatically extends to 48h when enabled
 - **EMS Forecast Overlays** — Supports both **EMHASS** (MPC forecast) and **HAEO** (optimization schedule via `forecast` attribute) as energy management system providers. Dashed forecast lines for planned PV, battery, grid, load, SOC, and price targets
+- **Forecast Timeline Table** — Collapsible markdown table showing upcoming EMS forecast data in 15-minute intervals. Displays Time, Buy/Sell prices, PV, Load, Grid, Battery power (kW), and SoC (%). Features day dividers (📅), current time indicator (▶), colored buy/sell prices, dimmed zero-PV values, and per-timeslot price forecasts. Supports both EMHASS and HAEO providers. Collapsed by default — tap the header to expand
 - **Price Overlay** — Import/export electricity price curves on secondary Y-axis
 - **Deferrable Load Tracking** — Heat pump, boiler, and other deferrable load schedules
 
@@ -370,6 +371,15 @@ To use: check the "**I have a Sigenergy inverter**" toggle on the first step of 
 
 ### EMHASS MPC Entities (Optional — Enable EMHASS in EMS section)
 
+> **Forecast Table Prerequisite**: The collapsible forecast table requires an `input_boolean.genergy_forecast_table` helper in your HA configuration. Add to your `configuration.yaml`:
+> ```yaml
+> input_boolean:
+>   genergy_forecast_table:
+>     name: Genergy Forecast Table
+>     initial: false
+> ```
+> Then restart HA. The table is collapsed by default; tap the header to expand.
+
 | Settings Field | Description |
 |---|---|
 | `emhass_mode` | Current optimization mode (CHARGE/DISCHARGE/IDLE) |
@@ -474,7 +484,9 @@ Configure in Settings → **🔧 Features** tab:
 | **Positive = Charging** | On | Battery sign convention. On: positive = charging (Sigenergy, Huawei). Off: positive = discharging (Deye, Goodwe) |
 | **EMS Provider** | EMHASS | Energy Management System: None / EMHASS / HAEO. Controls status card, forecast overlays, and entity slots |
 | **EMHASS Forecasts** | On | Adds MPC forecast dashed lines to energy chart (when EMS = EMHASS) |
+| **EMHASS Forecast Table** | On | Shows collapsible forecast timeline table below the energy chart (when EMS = EMHASS) |
 | **HAEO Forecasts** | On | Adds HAEO forecast dashed lines to energy chart (when EMS = HAEO) |
+| **HAEO Forecast Table** | On | Shows collapsible forecast timeline table below the energy chart (when EMS = HAEO) |
 | **Deferrable Loads** | Off | Enables 3 deferrable load entity slots and schedule display |
 | **Financial Tracking** | On | Shows Cost Today and Savings Today metrics in chart header |
 | **Solar Forecast** | Off | Enables Solcast/forecast.solar entity slots and chip display |
@@ -584,6 +596,8 @@ The house card composites multiple PNG layers:
 | **Charts show no data** | Ensure core entities (`solar_power`, `load_power`, etc.) are correctly set and have history data |
 | **EMHASS forecast lines not showing** | Set EMS Provider to EMHASS in Features tab, enable EMHASS Forecasts, then set MPC entity fields in Entities tab |
 | **HAEO forecast lines not showing** | Set EMS Provider to HAEO in Features tab, enable HAEO Forecasts, then set HAEO entity fields in Entities tab. Ensure HAEO sensors have a `forecast` attribute |
+| **Forecast table not showing** | Enable "Forecast Table" in Features → EMS section. Add `input_boolean.genergy_forecast_table` to your `configuration.yaml` (see [EMHASS MPC Entities](#emhass-mpc-entities-optional--enable-emhass-in-ems-section)) and restart HA |
+| **Forecast table shows raw pipe text** | Clear browser cache and hard-refresh (Ctrl+Shift+R). Do not wrap the table in `<details>` HTML tags — this breaks HA's markdown parser |
 | **Settings don't persist across browsers** | Make sure dashboard URL is exactly `dashboard-sigenergy` (case-sensitive) |
 | **Battery detail panel empty** | Set `battery_pack_prefix` (e.g., `sensor.battery_monitor_pack_`) in Entities tab |
 | **Cards overlap or misaligned** | Ensure `layout-card` is installed. Try: Settings → Dashboards → Resources → check JS resources are listed |

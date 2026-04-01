@@ -13,10 +13,14 @@ All notable changes to the Genergy Dashboard are documented here.
 ### Added
 - **Collapsible Toggle** — Mushroom tap-to-toggle header card above forecast table using `input_boolean.genergy_forecast_table` + conditional card. Collapsed by default, tap to expand
 - **Day Dividers** — Bold 📅 date separator rows (e.g., "📅 Wednesday 01 Apr") inserted between days in both HAEO and EMHASS forecast tables
+- **Current Time Indicator** — Bold ▶ arrow highlights the nearest 15-minute timeslot to the current time in the forecast table
 - **Colored Values** — Buy prices in red, sell prices in green, grid values color-coded by direction (green=export, red=import, grey=zero)
+- **Dimmed Zero PV** — Zero PV generation values displayed in grey instead of white for visual de-emphasis
 - **Column Units** — Headers now show "PV kW", "Load kW", "Grid kW", "Batt kW", "SoC %", "Buy €", "Sell €" (with configured currency)
+- **SoC Percentage Symbol** — SoC column values now display with a `%` suffix
 
 ### Changed
+- **Currency From Settings** — Forecast table headers use the configured currency symbol from Settings → Pricing instead of hardcoded `¢`/`€`
 - **Scrollable Table Content** — Table content scrolls independently within a 400px max-height container with sticky column headers
 
 ## [2.17.0] - 2026-04-02
