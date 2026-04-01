@@ -2,6 +2,24 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.16.0] - 2026-04-01
+
+### Added
+- **Sankey Info Panel** — New interactive detail panel below the Sankey chart. Click any box (Solar, Battery, Grid, Home, EV, HP) to see a breakdown of its children, contributions, and current power/energy values. Includes historical data navigation via HA's `energy-date-selection` card
+- **Sankey Date Navigation** — Added HA's built-in `energy-date-selection` card next to the Sankey title for browsing historical energy flow data by day/week/month
+- **Sankey Hover Highlighting** — Flow paths now respond to hover with smooth opacity transitions. Hovering a box highlights its connected paths while dimming unrelated flows. Box areas are fully clickable with cursor pointer feedback
+- **Sankey Fresh Install CSS** — New code path creates complete Sankey card_mod CSS from scratch when no existing `sankey-chart-base$` CSS is found (first install or corrupted state), preventing blank/unstyled Sankey charts
+
+### Fixed
+- **EMHASS Detection Accuracy** — Improved EMHASS auto-detect to require `sensor.emhass_` prefix AND confirmatory evidence (published `p_batt`/`p_grid`/`p_pv` forecast sensors, custom EMHASS cost/savings entities, or MPC entities). Prevents false EMHASS detection on non-EMHASS systems
+- **Sankey Proportional Allocation** — Replaced greedy source→destination allocation with proportional distribution based on remaining capacity. Each source now distributes to its children proportionally, preventing large destinations from starving smaller ones (e.g., EV/HP getting zero flow)
+- **Sankey CSS Cleanup** — Additional cleanup passes to remove orphaned Jinja template endings, stale fill-opacity overrides, duplicate box cursor/transition rules, and broken ha-card rules that accumulated across rebuilds
+- **Sankey Title Rebuild** — Sankey title card is now always rebuilt fresh (was previously inheriting stale config from previous layout). Renamed from "Energy Flow Today" to "Energy Statistics" to better reflect historical date range support
+
+### Changed
+- **Sankey Throttle** — Increased Sankey chart throttle from 300ms to 10000ms to reduce excessive re-renders during rapid state changes, improving dashboard performance on slower devices
+- **Sankey Chart Discovery** — Sankey card is now located by type (`custom:sankey-chart`) instead of positional index, making layout modifications more robust
+
 ## [2.15.0] - 2026-05-28
 
 ### Fixed
