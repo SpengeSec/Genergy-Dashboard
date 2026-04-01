@@ -334,6 +334,19 @@ class SigConfigStore {
 
 window.SigenergyConfig = new SigConfigStore();
 
+// Shared theme resolver — used by all Genergy components
+window._sigenergyResolveTheme = function(hass) {
+  var cfg = window.SigenergyConfig ? window.SigenergyConfig.get() : {};
+  var theme = (cfg.display && cfg.display.theme) || 'dark';
+  if (theme !== 'auto') return theme;
+  // Auto-detect from HA
+  if (hass && hass.themes && hass.themes.darkMode !== undefined) return hass.themes.darkMode ? 'dark' : 'light';
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+  var bg = getComputedStyle(document.documentElement).getPropertyValue('--primary-background-color').trim();
+  if (bg) { var m = bg.match(/(\d+)/g); if (m && m.length >= 3) { var lum = 0.299 * parseInt(m[0]) + 0.587 * parseInt(m[1]) + 0.114 * parseInt(m[2]); return lum < 128 ? 'dark' : 'light'; } }
+  return 'dark';
+};
+
 // Auto-load house card from same directory (after ConfigStore is available)
 if (!customElements.get('sigenergy-house-card')) {
   const _hcUrl = new URL('sigenergy-house-card.js', _SIGENERGY_SCRIPT_URL);
@@ -2155,22 +2168,26 @@ class SigenergySettingsCard extends HTMLElement {
           // ── HAEO auto-detect ─────────────────────────────────────────
           if (this._hass && this._hass.states) {
             const allKeys = Object.keys(this._hass.states);
-            // Look for HAEO network_optimization_status sensor pattern (HAEO prefixes with "network_")
-            const haeoStatusKeys = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_network_optimization_status'));
+            // Look for HAEO sensor patterns — both full network_optimization_ and short optimizer_ naming
+            const haeoStatusKeys = allKeys.filter(k => k.startsWith('sensor.') && (k.endsWith('_network_optimization_status') || k.endsWith('_optimizer_status')));
             if (haeoStatusKeys.length > 0) {
               const statusKey = haeoStatusKeys[0];
-              // Derive network name prefix (e.g. "sensor.home_energy_" from "sensor.home_energy_network_optimization_status")
-              const networkPrefix = statusKey.replace('_network_optimization_status', '_');
               cfg2.entities.haeo_optim_status = statusKey;
               found.push('HAEO optimization status: ' + statusKey);
-              // Try network optimization cost and duration
-              const costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
-              const durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
-              if (allKeys.includes(costKey)) {
+              // Derive cost/duration — handle both naming patterns
+              let costKey, durKey;
+              if (statusKey.endsWith('_network_optimization_status')) {
+                costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
+                durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
+              } else {
+                costKey = statusKey.replace(/_status$/, '_cost');
+                durKey = statusKey.replace(/_status$/, '_duration');
+              }
+              if (costKey !== statusKey && allKeys.includes(costKey)) {
                 cfg2.entities.haeo_optim_cost = costKey;
                 found.push('HAEO optimization cost: ' + costKey);
               }
-              if (allKeys.includes(durKey)) {
+              if (durKey !== statusKey && allKeys.includes(durKey)) {
                 cfg2.entities.haeo_optim_duration = durKey;
                 found.push('HAEO optimization duration: ' + durKey);
               }
@@ -2658,17 +2675,24 @@ class SigenergySettingsCard extends HTMLElement {
 
     // HAEO detection — with candidate support for multi-instance
     const haeoStatusCandidates = this._findEntityCandidates(allKeys, [
-      (k) => k.endsWith('_network_optimization_status'),
+      (k) => k.endsWith('_network_optimization_status') || k.endsWith('_optimizer_status'),
     ], { domainFilter: 'sensor' });
     this._assignCandidate('haeo_optim_status', haeoStatusCandidates, cfg2, found);
 
     // If HAEO status found (single or picked), derive related entities
     const statusKey = cfg2.entities.haeo_optim_status;
     if (statusKey) {
-      const costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
-      const durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
-      if (allKeys.includes(costKey)) { cfg2.entities.haeo_optim_cost = costKey; found.push('HAEO cost: ' + costKey); }
-      if (allKeys.includes(durKey)) { cfg2.entities.haeo_optim_duration = durKey; found.push('HAEO duration: ' + durKey); }
+      // Derive cost/duration from status key — handle both naming patterns
+      let costKey, durKey;
+      if (statusKey.endsWith('_network_optimization_status')) {
+        costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
+        durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
+      } else {
+        costKey = statusKey.replace(/_status$/, '_cost');
+        durKey = statusKey.replace(/_status$/, '_duration');
+      }
+      if (costKey !== statusKey && allKeys.includes(costKey)) { cfg2.entities.haeo_optim_cost = costKey; found.push('HAEO cost: ' + costKey); }
+      if (durKey !== statusKey && allKeys.includes(durKey)) { cfg2.entities.haeo_optim_duration = durKey; found.push('HAEO duration: ' + durKey); }
 
       // Battery charge/discharge/SoC with candidate support
       const bChargeC = this._findEntityCandidates(allKeys, [
@@ -3756,8 +3780,11 @@ return forecast.map(function(d) {
                "{% if w >= " + pwrThresh + " %}{{ (w / 1000) | round(2) }} kW{% else %}{{ w | round(0) }} W{% endif %}";
       };
 
-      // Theme-aware card style — uses HA CSS variables with dark-theme fallbacks
-      const _cardStyle = 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }';
+      // Theme-aware card style — resolves 'auto' / 'dark' / 'light'
+      const _resolvedTheme = this._resolveTheme();
+      const _cardStyle = _resolvedTheme === 'light'
+        ? 'ha-card { background: var(--ha-card-background, #fff) !important; border: 1px solid var(--divider-color, #e0e0e0) !important; border-radius: 12px !important; color: var(--primary-text-color, #1a1a2e) !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }'
+        : 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }';
       const statusCards = [];
       if (e.solar_power) statusCards.push({
         type: 'custom:mushroom-template-card',
@@ -3862,7 +3889,9 @@ return forecast.map(function(d) {
           "{% set load = lr * 1000 if lu == 'MWh' else lr / 1000 if lu == 'Wh' else lr %}" +
           "{{ ((solar / load) * 100) | round(1) if load > 0 else 0 }}%",
         icon: 'mdi:check-decagram', icon_color: 'green',
-        card_mod: { style: 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; }' }
+        card_mod: { style: _resolvedTheme === 'light'
+          ? 'ha-card { background: var(--ha-card-background, #fff) !important; border: 1px solid var(--divider-color, #e0e0e0) !important; border-radius: 12px !important; color: var(--primary-text-color, #1a1a2e) !important; }'
+          : 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; }' }
       } : null;
 
       // Build Solcast forecast card (conditional)
@@ -4065,7 +4094,7 @@ return forecast.map(function(d) {
         round: 1, height: 480, wide: true,
         min_box_size: 50, min_box_distance: 8, unit_prefix: 'k',
         min_state: 0.01,
-        throttle: 300,
+        throttle: 10000,
         energy_date_selection: false,
         sections: [
           {
@@ -4208,12 +4237,21 @@ return forecast.map(function(d) {
         css = css.replace(/path\[fill-opacity\]\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/path\[fill-opacity="[^"]*"\]\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/path\s*\{\s*transition:[^}]*\}\n?/g, '');
+        // Remove old box cursor/transition rules to avoid duplication
+        css = css.replace(/\.box\s*\{\s*cursor:[^}]*\}\n?/g, '');
+        css = css.replace(/\.box\s*\{\s*transition:\s*height[^}]*\}\n?/g, '');
+        css = css.replace(/\.spacerv\s*\{\s*transition:\s*height[^}]*\}\n?/g, '');
         // Remove broken ha-card rules (e.g. "ha-card { --ha-card- overflow...")
         css = css.replace(/\n?ha-card\s*\{\s*--ha-card-\s+overflow[^}]*\}\n?/g, '');
         // Add smooth transition and opacity levels for hover highlighting
         css += 'path { transition: fill-opacity 0.3s ease !important; }\n';
         css += 'path[fill-opacity="0.4"] { fill-opacity: 0.6 !important; }\n';
         css += 'path[fill-opacity="0.85"] { fill-opacity: 0.95 !important; }\n';
+        // Make entire box area hoverable (not just the colored strip)
+        css += '.box { cursor: pointer !important; }\n';
+        // Reduce box height transition jitter from live value updates
+        css += '.box { transition: height 0.5s ease !important; }\n';
+        css += '.spacerv { transition: height 0.5s ease !important; }\n';
         // Set the CSS variable on ha-card so its shadow DOM :host picks up 16px
         // Also override overflow to clip content at rounded corners (connectors are inside .container)
         css += '\nha-card { --ha-card-border-radius: 16px !important; overflow: hidden !important; }\n';
@@ -4256,7 +4294,8 @@ return forecast.map(function(d) {
         css += 'path[fill-opacity="0.4"] { fill-opacity: 0.6 !important; }\n';
         css += 'path[fill-opacity="0.85"] { fill-opacity: 0.95 !important; }\n';
         css += '.container, .section { overflow: visible !important; }\n';
-        css += '.box { overflow: hidden !important; position: relative !important; min-height: 30px !important; }\n';
+        css += '.spacerv { transition: height 0.5s ease !important; }\n';
+        css += '.box { overflow: hidden !important; position: relative !important; min-height: 30px !important; cursor: pointer !important; transition: height 0.5s ease !important; }\n';
         css += '.section:first-of-type .box > div:first-child { min-width: 90px !important; border-radius: 8px 0 0 8px !important; }\n';
         css += '.section:last-of-type .box > div:first-child { min-width: 90px !important; border-radius: 0 8px 8px 0 !important; }\n';
         css += '.box .label { position: absolute !important; top: 2px !important; bottom: 2px !important; transform: none !important; display: flex !important; flex-direction: column !important; justify-content: flex-start !important; gap: 0px !important; line-height: normal !important; z-index: 2 !important; width: auto !important; max-width: 160px !important; overflow: visible !important; padding: 0 6px !important; background: transparent !important; margin: 0 !important; }\n';
@@ -4378,15 +4417,45 @@ return forecast.map(function(d) {
     }
   }
 
+  // Detect HA's current theme preference (dark or light)
+  _detectHaTheme() {
+    // Method 1: Check HA's selected_theme from hass object
+    if (this._hass?.themes?.darkMode !== undefined) {
+      return this._hass.themes.darkMode ? 'dark' : 'light';
+    }
+    // Method 2: Check if prefers-color-scheme media query matches dark
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+    // Method 3: Check computed CSS variable on document
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--primary-background-color').trim();
+    if (bg) {
+      // Parse RGB — dark backgrounds have low luminance
+      const m = bg.match(/(\d+)/g);
+      if (m && m.length >= 3) {
+        const lum = (0.299 * parseInt(m[0]) + 0.587 * parseInt(m[1]) + 0.114 * parseInt(m[2]));
+        return lum < 128 ? 'dark' : 'light';
+      }
+    }
+    return 'dark'; // default fallback
+  }
+
+  // Resolve the effective theme — delegates to shared global resolver
+  _resolveTheme() {
+    return window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark';
+  }
+
   _renderDisplay(el, cfg) {
     const d = cfg.display || {};
     el.innerHTML = `
       <div class="section">
         <div class="section-title">Theme</div>
-        <div class="price-grid">
+        <div class="price-grid" style="grid-template-columns:1fr 1fr 1fr;">
           <div class="price-btn ${d.theme==='dark'?'active':''}" data-theme="dark">🌙 Dark</div>
           <div class="price-btn ${d.theme==='light'?'active':''}" data-theme="light">☀️ Light</div>
+          <div class="price-btn ${d.theme==='auto'?'active':''}" data-theme="auto">🔄 Auto</div>
         </div>
+        <div style="font-size:10px;color:#666;margin-top:4px;">Auto: follows your HA theme (${this._detectHaTheme() === 'dark' ? 'currently dark' : 'currently light'})</div>
       </div>
       <div class="section">
         <div class="section-title">Formatting</div>
@@ -4407,6 +4476,16 @@ return forecast.map(function(d) {
           <span class="row-label">Battery Label</span>
           <input class="row-input" type="text" value="${d.battery_label||''}" data-key="battery_label" placeholder="BATTERY" />
           <span class="row-state">Name shown on house card</span>
+        </div>
+        <div class="row">
+          <span class="row-label">SoC Ring Low</span>
+          <input class="row-input" type="number" min="0" max="100" value="${d.soc_ring_low!==undefined?d.soc_ring_low:40}" data-key="soc_ring_low" />
+          <span class="row-state">Below: red pulse</span>
+        </div>
+        <div class="row">
+          <span class="row-label">SoC Ring High</span>
+          <input class="row-input" type="number" min="0" max="100" value="${d.soc_ring_high!==undefined?d.soc_ring_high:60}" data-key="soc_ring_high" />
+          <span class="row-state">Above: green · Between: orange</span>
         </div>
       </div>
       <div class="section">
@@ -4544,10 +4623,19 @@ class SigenergySankeyPanel extends HTMLElement {
     // so we hook into the boxes directly.
     this._boxClickCleanup = [];
     this._attachBoxListeners();
+    this._setupDateNavigation();
   }
 
   disconnectedCallback() {
     this._cleanupBoxListeners();
+    if (this._dateNavInterval) {
+      clearInterval(this._dateNavInterval);
+      this._dateNavInterval = null;
+    }
+    if (this._dateNavActive) {
+      this._dateNavActive = false;
+      this._historicalStates = null;
+    }
   }
 
   _cleanupBoxListeners() {
@@ -4625,10 +4713,271 @@ class SigenergySankeyPanel extends HTMLElement {
       };
       box.addEventListener('click', handler, true);
       this._boxClickCleanup.push(() => box.removeEventListener('click', handler, true));
+
+      // Attach hover highlighting to the full .box element (not just the narrow colored strip)
+      const internalBox = internalBoxes[idx];
+      if (internalBox && sankeyBase._handleMouseEnter && sankeyBase._handleMouseLeave) {
+        const enterHandler = () => sankeyBase._handleMouseEnter(internalBox);
+        const leaveHandler = () => sankeyBase._handleMouseLeave();
+        box.addEventListener('mouseenter', enterHandler);
+        box.addEventListener('mouseleave', leaveHandler);
+        box.style.cursor = 'pointer';
+        this._boxClickCleanup.push(() => {
+          box.removeEventListener('mouseenter', enterHandler);
+          box.removeEventListener('mouseleave', leaveHandler);
+        });
+      }
+
       attached++;
     });
 
     return attached > 0;
+  }
+
+  _stabilizeLiveValues() {
+    // Prevent destination bars from jumping by quantizing entity values at the
+    // SANKEY-CHART level. The chart's render inspects:
+    //   Object.keys(this.states).length ? this.states : this.hass.states
+    // With energy_date_selection:false, this.states is {} so it falls through to
+    // hass.states (full-precision, constantly-changing values → layout jitter).
+    // By setting sankeyChart.states to a quantized snapshot, we make the chart
+    // use stable values. We only update when the quantized values actually change.
+    const sankeyBase = this._findSankeyBase();
+    if (!sankeyBase || !this._hass) return;
+    // Collect entity IDs from the sankey chart's sections
+    const entityIds = [];
+    if (sankeyBase.__sections) {
+      for (const section of sankeyBase.__sections) {
+        if (section.boxes) {
+          for (const box of section.boxes) {
+            if (box.entity_id && !entityIds.includes(box.entity_id)) entityIds.push(box.entity_id);
+          }
+        }
+      }
+    }
+    if (entityIds.length === 0) return;
+    // Quantize each entity's state to display precision (0.1 kWh)
+    const liveStates = this._hass.states;
+    const lastQ = this._lastQuantValues || {};
+    let changed = false;
+    const newQ = {};
+    for (const eid of entityIds) {
+      const s = liveStates[eid];
+      if (!s) continue;
+      const raw = parseFloat(s.state);
+      if (isNaN(raw)) continue;
+      const unit = (s.attributes && s.attributes.unit_of_measurement) || 'kWh';
+      let factor;
+      if (unit === 'MWh') factor = 10000;   // 4 decimals → 0.1 kWh precision
+      else if (unit === 'Wh') factor = 0.01; // nearest 100 Wh → 0.1 kWh
+      else factor = 10;                       // 1 decimal kWh
+      const rounded = Math.round(raw * factor) / factor;
+      newQ[eid] = rounded;
+      if (lastQ[eid] !== rounded) changed = true;
+    }
+    this._lastQuantValues = newQ;
+    if (changed || !this._quantStatesCache) {
+      // Build a full states object with only the sankey entities quantized
+      const qs = Object.assign({}, liveStates);
+      for (const eid of entityIds) {
+        if (newQ[eid] !== undefined && qs[eid]) {
+          qs[eid] = Object.assign({}, qs[eid], { state: String(newQ[eid]) });
+        }
+      }
+      this._quantStatesCache = qs;
+      // Set sankeyChart.states to the quantized snapshot.
+      // This makes the render template use our stable values instead of hass.states.
+      this._setSankeyChartStates(this._quantStatesCache);
+    }
+    // When unchanged, do nothing — the chart keeps using the previously set states.
+  }
+
+  _setupDateNavigation() {
+    // Monitor the energy-date-selection card for date changes.
+    // energy_date_selection is false (for accurate live values today).
+    // When a historical date is selected, fetch HA statistics and
+    // directly set the sankeyBase's hass property with overridden states.
+    this._dateNavLastStr = null;
+    this._dateNavActive = false;
+    this._dateNavInterval = setInterval(() => {
+      this._checkDateNavigation();
+    }, 2000);
+  }
+
+  _getSelectedDateStr() {
+    // Read the selected date from the energy-date-selection card's period selector.
+    try {
+      function deepFind(root, sel, depth) {
+        if (depth > 15) return null;
+        const el = root.querySelector(sel);
+        if (el) return el;
+        for (const child of root.querySelectorAll('*')) {
+          if (child.shadowRoot) {
+            const r = deepFind(child.shadowRoot, sel, depth + 1);
+            if (r) return r;
+          }
+        }
+        return null;
+      }
+      // Note: HA uses hui-energy-period-selector (not ha-energy-period-selector)
+      const haMain = document.querySelector('home-assistant');
+      if (!haMain || !haMain.shadowRoot) return null;
+      const periodSel = deepFind(haMain.shadowRoot, 'hui-energy-period-selector', 0);
+      if (!periodSel) return null;
+
+      // Read startDate property — this is the start of the selected period in UTC.
+      // Convert to local date string (YYYY-MM-DD) since HA stores UTC but the user sees local dates.
+      const sd = periodSel.startDate || periodSel._startDate;
+      if (sd) {
+        const d = new Date(sd);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      }
+
+      // Fallback: parse the displayed date text from the shadow root
+      const sr = periodSel.shadowRoot;
+      if (sr) {
+        const text = sr.textContent || '';
+        const months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+        const match = text.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)/);
+        if (match) {
+          const now = new Date();
+          const d = new Date(now.getFullYear(), months[match[1]], parseInt(match[2]));
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd2 = String(d.getDate()).padStart(2, '0');
+          return `${yyyy}-${mm}-${dd2}`;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  _checkDateNavigation() {
+    const selectedStr = this._getSelectedDateStr();
+    if (!selectedStr) return;
+
+    const todayStr = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
+    const isToday = selectedStr === todayStr;
+
+    if (isToday) {
+      if (this._dateNavActive) {
+        this._dateNavActive = false;
+        this._historicalStates = null;
+        this._dateNavLastStr = selectedStr;
+        // Clear quantization cache so next _stabilizeLiveValues picks up fresh data
+        this._quantStatesCache = null;
+        this._lastQuantValues = {};
+      }
+      if (this._dateNavLastStr !== selectedStr) this._dateNavLastStr = selectedStr;
+      // Stabilize live values: quantize entity state values to 1 decimal place
+      // so that sub-0.1 kWh fluctuations don't cause pixel-level layout jitter.
+      this._stabilizeLiveValues();
+      return;
+    }
+
+    // When historical date is active, re-apply states every tick to override HA's live updates
+    if (selectedStr === this._dateNavLastStr && this._dateNavActive && this._historicalStates) {
+      this._setSankeyChartStates(this._historicalStates);
+      return;
+    }
+
+    this._dateNavLastStr = selectedStr;
+    // Historical date selected — fetch stats and override
+    this._dateNavActive = true;
+    this._fetchAndApplyHistory(selectedStr);
+  }
+
+  async _fetchAndApplyHistory(dateStr) {
+    if (!this._hass?.connection) return;
+
+    const sankeyBase = this._findSankeyBase();
+    if (!sankeyBase) return;
+
+    const startDate = new Date(dateStr + 'T00:00:00');
+    const endDate = new Date(startDate.getTime() + 86400000);
+
+    // Collect entity IDs from sankey chart sections
+    const entityIds = [];
+    if (sankeyBase.__sections) {
+      for (const section of sankeyBase.__sections) {
+        if (section.boxes) {
+          for (const box of section.boxes) {
+            if (box.entity_id && !entityIds.includes(box.entity_id)) entityIds.push(box.entity_id);
+          }
+        }
+      }
+    }
+    // Also add from our config nodes
+    if (this._config?.nodes) {
+      for (const node of this._config.nodes) {
+        if (node.entity_id && !entityIds.includes(node.entity_id)) entityIds.push(node.entity_id);
+      }
+    }
+    if (entityIds.length === 0) return;
+
+    try {
+      const stats = await this._hass.connection.sendMessagePromise({
+        type: 'recorder/statistics_during_period',
+        start_time: startDate.toISOString(),
+        end_time: endDate.toISOString(),
+        statistic_ids: entityIds,
+        period: 'day',
+        types: ['change']
+      });
+
+      // Build overridden states
+      const newStates = { ...this._hass.states };
+      for (const entityId of entityIds) {
+        const entityStats = stats[entityId];
+        let totalChange = 0;
+        if (entityStats) {
+          for (const period of entityStats) {
+            if (period.change !== null && period.change !== undefined) {
+              totalChange += period.change;
+            }
+          }
+        }
+        const currentState = this._hass.states[entityId];
+        if (currentState) {
+          newStates[entityId] = { ...currentState, state: String(totalChange) };
+        }
+      }
+
+      // Only apply if we still want historical data
+      if (this._dateNavActive) {
+        // Cache the historical states for re-application every tick
+        this._historicalStates = newStates;
+
+        // Apply via SANKEY-CHART.states (parent, Lit reactive) so it flows through the render template
+        this._setSankeyChartStates(newStates);
+      }
+    } catch (err) {
+      console.warn('Genergy: Failed to fetch historical statistics for Sankey:', err);
+    }
+  }
+
+  _setSankeyChartStates(states) {
+    // Set states on the SANKEY-CHART parent element (Lit reactive property).
+    // The chart's render template uses:
+    //   Object.keys(this.states).length ? this.states : this.hass.states
+    // so setting non-empty states overrides hass.states for the render cycle.
+    const sankeyBase = this._findSankeyBase();
+    if (!sankeyBase) return;
+    let sankeyChart = null;
+    let node = sankeyBase;
+    while (node) {
+      if (node.localName === 'sankey-chart') { sankeyChart = node; break; }
+      node = node.parentElement || (node.getRootNode && node.getRootNode().host);
+    }
+    if (sankeyChart) {
+      sankeyChart.states = states;
+    } else {
+      // Fallback: set directly on base
+      sankeyBase.states = states;
+    }
   }
 
   _findSankeyBase() {
@@ -5089,6 +5438,12 @@ class SigenergyDeviceCard extends HTMLElement {
     }
 
     /* ── Layout constants (viewBox user-units) ── */
+    var _t = window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark';
+    var _pillBg = _t === 'light' ? 'rgba(255,255,255,0.94)' : 'rgba(30,35,54,0.94)';
+    var _textFill = _t === 'light' ? '#1a1a2e' : '#e0e4ec';
+    var _valFill = _t === 'light' ? '#1a1a2e' : '#fff';
+    var _chevBg = _t === 'light' ? '#e8eaee' : '#2a2e38';
+    var _chevBgExp = _t === 'light' ? '#d0e8e3' : '#3a5e58';
     var P = 4, PW = 150, PH = 58, PR = 16, CR = 28, CL = 8, G = 3;
     var IW = 300;  // image width in SVG units
     // Image pixel heights: 1=552, 2=750, 3=963, 4=1170, 5=1398, 6=1602 (all 795px wide)
@@ -5123,26 +5478,26 @@ class SigenergyDeviceCard extends HTMLElement {
         s += '<line x1="' + sLeft + '" y1="' + cy + '" x2="' + (le + CR) + '" y2="' + cy + '" stroke="' + col + '" stroke-width="1.5" opacity="0.7"/>';
         var ccx = le - G - CR;
         s += '<g class="chevron" data-device="' + deviceKey + '" style="cursor:pointer">';
-        s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? '#3a5e58' : '#2a2e38') + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
-        s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? '#fff' : '#8892a4') + '">' + chevChar + '</text>';
+        s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? _chevBgExp : _chevBg) + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
+        s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? _valFill : '#8892a4') + '">' + chevChar + '</text>';
         s += '</g>';
         var px = P, py = cy - PH / 2;
-        s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="rgba(30,35,54,0.94)" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
-        s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="#e0e4ec">' + label + '</text>';
+        s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="' + _pillBg + '" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
+        s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="' + _textFill + '">' + label + '</text>';
         s += '<circle cx="' + (px + 16) + '" cy="' + (py + 42) + '" r="5" fill="' + col + '"/>';
-        s += '<text x="' + (px + 26) + '" y="' + (py + 47) + '" font-family="sans-serif" font-size="16" font-weight="700" fill="#fff">' + val + '</text>';
+        s += '<text x="' + (px + 26) + '" y="' + (py + 47) + '" font-family="sans-serif" font-size="16" font-weight="700" fill="' + _valFill + '">' + val + '</text>';
       } else {
         s += '<circle cx="' + sRight + '" cy="' + cy + '" r="3" fill="' + col + '"/>';
         var re = IX + IW + CL;
         s += '<line x1="' + sRight + '" y1="' + cy + '" x2="' + (re - CR) + '" y2="' + cy + '" stroke="' + col + '" stroke-width="1.5" opacity="0.7"/>';
         var ccx = re + G + CR;
         s += '<g class="chevron" data-device="' + deviceKey + '" style="cursor:pointer">';
-        s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? '#3a5e58' : '#2a2e38') + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
-        s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? '#fff' : '#8892a4') + '">' + chevChar + '</text>';
+        s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? _chevBgExp : _chevBg) + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
+        s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? _valFill : '#8892a4') + '">' + chevChar + '</text>';
         s += '</g>';
         var px = TW - P - PW, py = cy - PH / 2;
-        s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="rgba(30,35,54,0.94)" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
-        s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="#e0e4ec">' + label + '</text>';
+        s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="' + _pillBg + '" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
+        s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="' + _textFill + '">' + label + '</text>';
         s += '<circle cx="' + (px + 16) + '" cy="' + (py + 42) + '" r="5" fill="' + col + '"/>';
         s += '<text x="' + (px + 26) + '" y="' + (py + 47) + '" font-family="sans-serif" font-size="16" font-weight="700" fill="#fff">' + val + '</text>';
       }
@@ -5171,11 +5526,19 @@ class SigenergyDeviceCard extends HTMLElement {
 
     /* ── Expansion panels ── */
     var panels = '';
-    var panelStyle = 'background:rgba(30,35,54,0.96);border:1px solid #2d3451;border-radius:12px;padding:12px 16px;margin:8px 4px;';
+    var panelStyle = _t === 'light'
+      ? 'background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e0e0e0);border-radius:12px;padding:12px 16px;margin:8px 4px;'
+      : 'background:rgba(30,35,54,0.96);border:1px solid #2d3451;border-radius:12px;padding:12px 16px;margin:8px 4px;';
     var statStyle = 'display:inline-block;text-align:center;padding:6px 10px;min-width:70px;';
-    var statVal = 'font-size:16px;font-weight:700;color:#fff;display:block;';
-    var statLbl = 'font-size:9px;color:#8892a4;text-transform:uppercase;letter-spacing:0.5px;';
-    var headerStyle = 'font-size:13px;font-weight:700;color:#e0e4ec;margin-bottom:8px;letter-spacing:1px;';
+    var statVal = _t === 'light'
+      ? 'font-size:16px;font-weight:700;color:var(--primary-text-color,#1a1a2e);display:block;'
+      : 'font-size:16px;font-weight:700;color:#fff;display:block;';
+    var statLbl = _t === 'light'
+      ? 'font-size:9px;color:var(--secondary-text-color,#666);text-transform:uppercase;letter-spacing:0.5px;'
+      : 'font-size:9px;color:#8892a4;text-transform:uppercase;letter-spacing:0.5px;';
+    var headerStyle = _t === 'light'
+      ? 'font-size:13px;font-weight:700;color:var(--primary-text-color,#1a1a2e);margin-bottom:8px;letter-spacing:1px;'
+      : 'font-size:13px;font-weight:700;color:#e0e4ec;margin-bottom:8px;letter-spacing:1px;';
     var dps = store ? (store.getDisplay('decimal_places') ?? 1) : 1; // user-configurable decimal places
 
     var fmtEntity = function(eid, decimals, unit) {
@@ -5677,29 +6040,9 @@ console.info(
         var flowBottomPx = Math.round(maxY * scale);
         var flowHeightPx = flowBottomPx - flowTopPx;
 
-        // Adjust destination boxes
-        var boxes = lastSec.querySelectorAll(':scope > .box');
-        if (boxes.length === 1) {
-          var box = boxes[0];
-          var div = box.querySelector(':scope > div:first-child');
-          // Only adjust height — the sankey chart already positions the box top correctly
-          box.style.height = flowHeightPx + 'px';
-          box.style.marginTop = '';
-          if (div) div.style.height = flowHeightPx + 'px';
-        } else if (boxes.length > 1) {
-          // Multiple destinations: adjust last box bottom to match flow bottom
-          var lastBox = boxes[boxes.length - 1];
-          var lastBoxRect = lastBox.getBoundingClientRect();
-          var secRect = lastSec.getBoundingClientRect();
-          var boxBottomInSec = lastBoxRect.bottom - secRect.top;
-          var overshoot = boxBottomInSec - flowBottomPx;
-          if (overshoot > 2) {
-            var newH = Math.max(10, lastBox.offsetHeight - Math.round(overshoot));
-            lastBox.style.height = newH + 'px';
-            var div = lastBox.querySelector(':scope > div:first-child');
-            if (div) div.style.height = newH + 'px';
-          }
-        }
+        // Destination box height adjustment DISABLED — sankey chart's _calcBoxes()
+        // already handles sizing with min_box_size enforcement. Overriding heights
+        // here caused the last box (Grid Export) to shrink below min_box_size and jump.
       } finally {
         patching = false;
       }

@@ -334,6 +334,19 @@ class SigConfigStore {
 
 window.SigenergyConfig = new SigConfigStore();
 
+// Shared theme resolver — used by all Genergy components
+window._sigenergyResolveTheme = function(hass) {
+  var cfg = window.SigenergyConfig ? window.SigenergyConfig.get() : {};
+  var theme = (cfg.display && cfg.display.theme) || 'dark';
+  if (theme !== 'auto') return theme;
+  // Auto-detect from HA
+  if (hass && hass.themes && hass.themes.darkMode !== undefined) return hass.themes.darkMode ? 'dark' : 'light';
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+  var bg = getComputedStyle(document.documentElement).getPropertyValue('--primary-background-color').trim();
+  if (bg) { var m = bg.match(/(\d+)/g); if (m && m.length >= 3) { var lum = 0.299 * parseInt(m[0]) + 0.587 * parseInt(m[1]) + 0.114 * parseInt(m[2]); return lum < 128 ? 'dark' : 'light'; } }
+  return 'dark';
+};
+
 // Auto-load house card from same directory (after ConfigStore is available)
 if (!customElements.get('sigenergy-house-card')) {
   const _hcUrl = new URL('sigenergy-house-card.js', _SIGENERGY_SCRIPT_URL);
@@ -2155,22 +2168,26 @@ class SigenergySettingsCard extends HTMLElement {
           // ── HAEO auto-detect ─────────────────────────────────────────
           if (this._hass && this._hass.states) {
             const allKeys = Object.keys(this._hass.states);
-            // Look for HAEO network_optimization_status sensor pattern (HAEO prefixes with "network_")
-            const haeoStatusKeys = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_network_optimization_status'));
+            // Look for HAEO sensor patterns — both full network_optimization_ and short optimizer_ naming
+            const haeoStatusKeys = allKeys.filter(k => k.startsWith('sensor.') && (k.endsWith('_network_optimization_status') || k.endsWith('_optimizer_status')));
             if (haeoStatusKeys.length > 0) {
               const statusKey = haeoStatusKeys[0];
-              // Derive network name prefix (e.g. "sensor.home_energy_" from "sensor.home_energy_network_optimization_status")
-              const networkPrefix = statusKey.replace('_network_optimization_status', '_');
               cfg2.entities.haeo_optim_status = statusKey;
               found.push('HAEO optimization status: ' + statusKey);
-              // Try network optimization cost and duration
-              const costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
-              const durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
-              if (allKeys.includes(costKey)) {
+              // Derive cost/duration — handle both naming patterns
+              let costKey, durKey;
+              if (statusKey.endsWith('_network_optimization_status')) {
+                costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
+                durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
+              } else {
+                costKey = statusKey.replace(/_status$/, '_cost');
+                durKey = statusKey.replace(/_status$/, '_duration');
+              }
+              if (costKey !== statusKey && allKeys.includes(costKey)) {
                 cfg2.entities.haeo_optim_cost = costKey;
                 found.push('HAEO optimization cost: ' + costKey);
               }
-              if (allKeys.includes(durKey)) {
+              if (durKey !== statusKey && allKeys.includes(durKey)) {
                 cfg2.entities.haeo_optim_duration = durKey;
                 found.push('HAEO optimization duration: ' + durKey);
               }
@@ -2658,17 +2675,24 @@ class SigenergySettingsCard extends HTMLElement {
 
     // HAEO detection — with candidate support for multi-instance
     const haeoStatusCandidates = this._findEntityCandidates(allKeys, [
-      (k) => k.endsWith('_network_optimization_status'),
+      (k) => k.endsWith('_network_optimization_status') || k.endsWith('_optimizer_status'),
     ], { domainFilter: 'sensor' });
     this._assignCandidate('haeo_optim_status', haeoStatusCandidates, cfg2, found);
 
     // If HAEO status found (single or picked), derive related entities
     const statusKey = cfg2.entities.haeo_optim_status;
     if (statusKey) {
-      const costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
-      const durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
-      if (allKeys.includes(costKey)) { cfg2.entities.haeo_optim_cost = costKey; found.push('HAEO cost: ' + costKey); }
-      if (allKeys.includes(durKey)) { cfg2.entities.haeo_optim_duration = durKey; found.push('HAEO duration: ' + durKey); }
+      // Derive cost/duration from status key — handle both naming patterns
+      let costKey, durKey;
+      if (statusKey.endsWith('_network_optimization_status')) {
+        costKey = statusKey.replace('_network_optimization_status', '_network_optimization_cost');
+        durKey = statusKey.replace('_network_optimization_status', '_network_optimization_duration');
+      } else {
+        costKey = statusKey.replace(/_status$/, '_cost');
+        durKey = statusKey.replace(/_status$/, '_duration');
+      }
+      if (costKey !== statusKey && allKeys.includes(costKey)) { cfg2.entities.haeo_optim_cost = costKey; found.push('HAEO cost: ' + costKey); }
+      if (durKey !== statusKey && allKeys.includes(durKey)) { cfg2.entities.haeo_optim_duration = durKey; found.push('HAEO duration: ' + durKey); }
 
       // Battery charge/discharge/SoC with candidate support
       const bChargeC = this._findEntityCandidates(allKeys, [
@@ -3756,8 +3780,11 @@ return forecast.map(function(d) {
                "{% if w >= " + pwrThresh + " %}{{ (w / 1000) | round(2) }} kW{% else %}{{ w | round(0) }} W{% endif %}";
       };
 
-      // Theme-aware card style — uses HA CSS variables with dark-theme fallbacks
-      const _cardStyle = 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }';
+      // Theme-aware card style — resolves 'auto' / 'dark' / 'light'
+      const _resolvedTheme = this._resolveTheme();
+      const _cardStyle = _resolvedTheme === 'light'
+        ? 'ha-card { background: var(--ha-card-background, #fff) !important; border: 1px solid var(--divider-color, #e0e0e0) !important; border-radius: 12px !important; color: var(--primary-text-color, #1a1a2e) !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }'
+        : 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }';
       const statusCards = [];
       if (e.solar_power) statusCards.push({
         type: 'custom:mushroom-template-card',
@@ -3862,7 +3889,9 @@ return forecast.map(function(d) {
           "{% set load = lr * 1000 if lu == 'MWh' else lr / 1000 if lu == 'Wh' else lr %}" +
           "{{ ((solar / load) * 100) | round(1) if load > 0 else 0 }}%",
         icon: 'mdi:check-decagram', icon_color: 'green',
-        card_mod: { style: 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; }' }
+        card_mod: { style: _resolvedTheme === 'light'
+          ? 'ha-card { background: var(--ha-card-background, #fff) !important; border: 1px solid var(--divider-color, #e0e0e0) !important; border-radius: 12px !important; color: var(--primary-text-color, #1a1a2e) !important; }'
+          : 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; }' }
       } : null;
 
       // Build Solcast forecast card (conditional)
@@ -4388,15 +4417,45 @@ return forecast.map(function(d) {
     }
   }
 
+  // Detect HA's current theme preference (dark or light)
+  _detectHaTheme() {
+    // Method 1: Check HA's selected_theme from hass object
+    if (this._hass?.themes?.darkMode !== undefined) {
+      return this._hass.themes.darkMode ? 'dark' : 'light';
+    }
+    // Method 2: Check if prefers-color-scheme media query matches dark
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+    // Method 3: Check computed CSS variable on document
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--primary-background-color').trim();
+    if (bg) {
+      // Parse RGB — dark backgrounds have low luminance
+      const m = bg.match(/(\d+)/g);
+      if (m && m.length >= 3) {
+        const lum = (0.299 * parseInt(m[0]) + 0.587 * parseInt(m[1]) + 0.114 * parseInt(m[2]));
+        return lum < 128 ? 'dark' : 'light';
+      }
+    }
+    return 'dark'; // default fallback
+  }
+
+  // Resolve the effective theme — delegates to shared global resolver
+  _resolveTheme() {
+    return window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark';
+  }
+
   _renderDisplay(el, cfg) {
     const d = cfg.display || {};
     el.innerHTML = `
       <div class="section">
         <div class="section-title">Theme</div>
-        <div class="price-grid">
+        <div class="price-grid" style="grid-template-columns:1fr 1fr 1fr;">
           <div class="price-btn ${d.theme==='dark'?'active':''}" data-theme="dark">🌙 Dark</div>
           <div class="price-btn ${d.theme==='light'?'active':''}" data-theme="light">☀️ Light</div>
+          <div class="price-btn ${d.theme==='auto'?'active':''}" data-theme="auto">🔄 Auto</div>
         </div>
+        <div style="font-size:10px;color:#666;margin-top:4px;">Auto: follows your HA theme (${this._detectHaTheme() === 'dark' ? 'currently dark' : 'currently light'})</div>
       </div>
       <div class="section">
         <div class="section-title">Formatting</div>
@@ -4417,6 +4476,16 @@ return forecast.map(function(d) {
           <span class="row-label">Battery Label</span>
           <input class="row-input" type="text" value="${d.battery_label||''}" data-key="battery_label" placeholder="BATTERY" />
           <span class="row-state">Name shown on house card</span>
+        </div>
+        <div class="row">
+          <span class="row-label">SoC Ring Low</span>
+          <input class="row-input" type="number" min="0" max="100" value="${d.soc_ring_low!==undefined?d.soc_ring_low:40}" data-key="soc_ring_low" />
+          <span class="row-state">Below: red pulse</span>
+        </div>
+        <div class="row">
+          <span class="row-label">SoC Ring High</span>
+          <input class="row-input" type="number" min="0" max="100" value="${d.soc_ring_high!==undefined?d.soc_ring_high:60}" data-key="soc_ring_high" />
+          <span class="row-state">Above: green · Between: orange</span>
         </div>
       </div>
       <div class="section">
@@ -5369,6 +5438,12 @@ class SigenergyDeviceCard extends HTMLElement {
     }
 
     /* ── Layout constants (viewBox user-units) ── */
+    var _t = window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark';
+    var _pillBg = _t === 'light' ? 'rgba(255,255,255,0.94)' : 'rgba(30,35,54,0.94)';
+    var _textFill = _t === 'light' ? '#1a1a2e' : '#e0e4ec';
+    var _valFill = _t === 'light' ? '#1a1a2e' : '#fff';
+    var _chevBg = _t === 'light' ? '#e8eaee' : '#2a2e38';
+    var _chevBgExp = _t === 'light' ? '#d0e8e3' : '#3a5e58';
     var P = 4, PW = 150, PH = 58, PR = 16, CR = 28, CL = 8, G = 3;
     var IW = 300;  // image width in SVG units
     // Image pixel heights: 1=552, 2=750, 3=963, 4=1170, 5=1398, 6=1602 (all 795px wide)
@@ -5403,26 +5478,26 @@ class SigenergyDeviceCard extends HTMLElement {
         s += '<line x1="' + sLeft + '" y1="' + cy + '" x2="' + (le + CR) + '" y2="' + cy + '" stroke="' + col + '" stroke-width="1.5" opacity="0.7"/>';
         var ccx = le - G - CR;
         s += '<g class="chevron" data-device="' + deviceKey + '" style="cursor:pointer">';
-        s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? '#3a5e58' : '#2a2e38') + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
-        s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? '#fff' : '#8892a4') + '">' + chevChar + '</text>';
+        s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? _chevBgExp : _chevBg) + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
+        s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? _valFill : '#8892a4') + '">' + chevChar + '</text>';
         s += '</g>';
         var px = P, py = cy - PH / 2;
-        s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="rgba(30,35,54,0.94)" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
-        s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="#e0e4ec">' + label + '</text>';
+        s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="' + _pillBg + '" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
+        s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="' + _textFill + '">' + label + '</text>';
         s += '<circle cx="' + (px + 16) + '" cy="' + (py + 42) + '" r="5" fill="' + col + '"/>';
-        s += '<text x="' + (px + 26) + '" y="' + (py + 47) + '" font-family="sans-serif" font-size="16" font-weight="700" fill="#fff">' + val + '</text>';
+        s += '<text x="' + (px + 26) + '" y="' + (py + 47) + '" font-family="sans-serif" font-size="16" font-weight="700" fill="' + _valFill + '">' + val + '</text>';
       } else {
         s += '<circle cx="' + sRight + '" cy="' + cy + '" r="3" fill="' + col + '"/>';
         var re = IX + IW + CL;
         s += '<line x1="' + sRight + '" y1="' + cy + '" x2="' + (re - CR) + '" y2="' + cy + '" stroke="' + col + '" stroke-width="1.5" opacity="0.7"/>';
         var ccx = re + G + CR;
         s += '<g class="chevron" data-device="' + deviceKey + '" style="cursor:pointer">';
-        s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? '#3a5e58' : '#2a2e38') + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
-        s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? '#fff' : '#8892a4') + '">' + chevChar + '</text>';
+        s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? _chevBgExp : _chevBg) + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
+        s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? _valFill : '#8892a4') + '">' + chevChar + '</text>';
         s += '</g>';
         var px = TW - P - PW, py = cy - PH / 2;
-        s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="rgba(30,35,54,0.94)" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
-        s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="#e0e4ec">' + label + '</text>';
+        s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="' + _pillBg + '" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
+        s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="' + _textFill + '">' + label + '</text>';
         s += '<circle cx="' + (px + 16) + '" cy="' + (py + 42) + '" r="5" fill="' + col + '"/>';
         s += '<text x="' + (px + 26) + '" y="' + (py + 47) + '" font-family="sans-serif" font-size="16" font-weight="700" fill="#fff">' + val + '</text>';
       }
@@ -5451,11 +5526,19 @@ class SigenergyDeviceCard extends HTMLElement {
 
     /* ── Expansion panels ── */
     var panels = '';
-    var panelStyle = 'background:rgba(30,35,54,0.96);border:1px solid #2d3451;border-radius:12px;padding:12px 16px;margin:8px 4px;';
+    var panelStyle = _t === 'light'
+      ? 'background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e0e0e0);border-radius:12px;padding:12px 16px;margin:8px 4px;'
+      : 'background:rgba(30,35,54,0.96);border:1px solid #2d3451;border-radius:12px;padding:12px 16px;margin:8px 4px;';
     var statStyle = 'display:inline-block;text-align:center;padding:6px 10px;min-width:70px;';
-    var statVal = 'font-size:16px;font-weight:700;color:#fff;display:block;';
-    var statLbl = 'font-size:9px;color:#8892a4;text-transform:uppercase;letter-spacing:0.5px;';
-    var headerStyle = 'font-size:13px;font-weight:700;color:#e0e4ec;margin-bottom:8px;letter-spacing:1px;';
+    var statVal = _t === 'light'
+      ? 'font-size:16px;font-weight:700;color:var(--primary-text-color,#1a1a2e);display:block;'
+      : 'font-size:16px;font-weight:700;color:#fff;display:block;';
+    var statLbl = _t === 'light'
+      ? 'font-size:9px;color:var(--secondary-text-color,#666);text-transform:uppercase;letter-spacing:0.5px;'
+      : 'font-size:9px;color:#8892a4;text-transform:uppercase;letter-spacing:0.5px;';
+    var headerStyle = _t === 'light'
+      ? 'font-size:13px;font-weight:700;color:var(--primary-text-color,#1a1a2e);margin-bottom:8px;letter-spacing:1px;'
+      : 'font-size:13px;font-weight:700;color:#e0e4ec;margin-bottom:8px;letter-spacing:1px;';
     var dps = store ? (store.getDisplay('decimal_places') ?? 1) : 1; // user-configurable decimal places
 
     var fmtEntity = function(eid, decimals, unit) {

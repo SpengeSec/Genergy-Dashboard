@@ -36,16 +36,20 @@ class _NoCacheJSView(HomeAssistantView):
     url = f"/{DOMAIN}/js/{{filename}}"
     name = f"{DOMAIN}:js"
 
-    def __init__(self, frontend_dir: Path) -> None:
+    def __init__(self, frontend_dir: Path, hass: HomeAssistant) -> None:
         self._dir = frontend_dir
+        self._hass = hass
 
     async def get(self, request: web.Request, filename: str) -> web.Response:
         # Prevent path traversal
         safe = Path(filename).name
         filepath = self._dir / safe
-        if not filepath.is_file() or not safe.endswith(".js"):
+        if not safe.endswith(".js"):
             return web.Response(status=404)
-        body = filepath.read_bytes()
+        is_file = await self._hass.async_add_executor_job(filepath.is_file)
+        if not is_file:
+            return web.Response(status=404)
+        body = await self._hass.async_add_executor_job(filepath.read_bytes)
         return web.Response(
             body=body,
             content_type="application/javascript",
@@ -63,7 +67,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     frontend_dir = Path(__file__).parent / "frontend"
     if frontend_dir.exists():
         # Register custom no-cache JS view (replaces StaticPathConfig for JS)
-        hass.http.register_view(_NoCacheJSView(frontend_dir))
+        hass.http.register_view(_NoCacheJSView(frontend_dir, hass))
 
         # Still register static path for non-JS assets (images, etc.)
         from homeassistant.components.http import StaticPathConfig
@@ -83,8 +87,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         boot_ts = str(int(time.time()))[-6:]
         js_path = frontend_dir / "sigenergy-dashboard.js"
         cache_buster = f"?v={boot_ts}"
-        if js_path.exists():
-            digest = hashlib.md5(js_path.read_bytes()).hexdigest()[:8]  # noqa: S324
+        if await hass.async_add_executor_job(js_path.exists):
+            js_bytes = await hass.async_add_executor_job(js_path.read_bytes)
+            digest = hashlib.md5(js_bytes).hexdigest()[:8]  # noqa: S324
             cache_buster = f"?v={digest}.{boot_ts}"
         add_extra_js_url(hass, f"/{DOMAIN}/js/sigenergy-dashboard.js{cache_buster}")
         _LOGGER.info("Genergy Dashboard: JS resources registered")

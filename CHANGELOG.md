@@ -2,6 +2,17 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.16.1] - 2026-04-02
+
+### Added
+- **Theme Auto-Detect** — New "🔄 Auto" theme mode in Display settings that automatically follows your Home Assistant light/dark theme. Uses 3-tier detection: HA theme preference → browser prefers-color-scheme → CSS variable luminance analysis
+- **SoC Ring Low/High Settings** — Added configurable SoC Ring Low and SoC Ring High inputs to the Display tab. Controls the battery ring color thresholds (below low = red pulse, above high = green, between = orange)
+
+### Fixed
+- **HAEO Auto-Detect Bug** — Fixed entity mapping failure when HAEO entities use the short `_optimizer_status` suffix instead of `_network_optimization_status`. Both code paths (single detect and "Detect All") now correctly derive `_cost` and `_duration` entities from either naming pattern
+- **Blocking I/O in `__init__.py`** — Replaced synchronous `read_bytes()`, `is_file()`, and `exists()` calls with `async_add_executor_job()` wrappers in both `_NoCacheJSView.get()` and `async_setup()`. Prevents blocking the HA event loop during dashboard resource loading
+- **Light Theme Support** — Dashboard card styles, Sankey expansion panels, and SVG battery labels now adapt to light/dark theme. Uses CSS variable fallbacks appropriate to the resolved theme instead of hardcoded dark-mode colors
+
 ## [2.16.0] - 2026-04-01
 
 ### Added
