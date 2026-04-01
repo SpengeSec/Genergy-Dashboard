@@ -4101,9 +4101,24 @@ return forecast.map(function(d) {
             if (hBatt) tpl += ":---:|";
             if (hSoc) tpl += ":---:|";
             tpl += "\n";
+            // Count columns for day divider
+            let haeCols = 1; // Time column
+            if (hImpP) haeCols++;
+            if (hExpP) haeCols++;
+            if (hSolar) haeCols++;
+            if (hLoad) haeCols++;
+            if (hGrid) haeCols++;
+            if (hBatt) haeCols++;
+            if (hSoc) haeCols++;
             // Data rows
+            tpl += "{%- set _prevDay = namespace(d='') %}\n";
             tpl += "{%- for p in _iter %}\n";
             tpl += "{%- set ts = p.time | as_datetime | as_local | as_timestamp %}\n";
+            tpl += "{%- set _day = ts | timestamp_custom('%Y-%m-%d') %}\n";
+            tpl += "{%- if _day != _prevDay.d %}{%- set _prevDay.d = _day %}\n";
+            tpl += "| **📅 {{ ts | timestamp_custom('%A %d %b') }}** |";
+            for (let i = 1; i < haeCols; i++) tpl += " |";
+            tpl += "\n{%- endif %}\n";
             tpl += "{%- set t = ts | timestamp_custom('%H:%M') %}\n";
             tpl += "| {{ t }} |";
             if (hImpP) tpl += " <font color='red'>{{ ns.imp.get(ts|string, '—') }}</font> |";
@@ -4166,9 +4181,24 @@ return forecast.map(function(d) {
             if (mpBatt) tpl += ":---:|";
             if (mpSoc) tpl += ":---:|";
             tpl += "\n";
+            // Count columns for day divider
+            let emCols = 1; // Time column
+            if (bpEnt) emCols++;
+            if (spEnt) emCols++;
+            if (mpPv) emCols++;
+            if (mpLoad) emCols++;
+            if (mpGrid) emCols++;
+            if (mpBatt) emCols++;
+            if (mpSoc) emCols++;
             // Data rows — iterate over the primary entity's forecast
+            tpl += "{%- set _prevDay = namespace(d='') %}\n";
             tpl += "{%- for row in _iter %}\n";
             tpl += "{%- set dt = row.date %}\n";
+            tpl += "{%- set _day = dt | as_datetime | as_local | as_timestamp | timestamp_custom('%Y-%m-%d') %}\n";
+            tpl += "{%- if _day != _prevDay.d %}{%- set _prevDay.d = _day %}\n";
+            tpl += "| **📅 {{ dt | as_datetime | as_local | as_timestamp | timestamp_custom('%A %d %b') }}** |";
+            for (let i = 1; i < emCols; i++) tpl += " |";
+            tpl += "\n{%- endif %}\n";
             tpl += "{%- set t = dt | as_datetime | as_local | as_timestamp | timestamp_custom('%H:%M') %}\n";
             tpl += "| {{ t }} |";
             if (bpEnt) tpl += " <font color='red'>{{ ns.buy.get(dt, '—') }}</font> |";

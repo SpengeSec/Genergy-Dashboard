@@ -11,7 +11,8 @@ All notable changes to the Genergy Dashboard are documented here.
 - **Buy/Sell Prices Per Timeslot** — EMHASS buy/sell prices now use `unit_load_cost_forecasts` and `unit_prod_price_forecasts` attributes for per-timeslot price forecasts instead of static current state values
 
 ### Added
-- **Collapsible Toggle** — Mushroom tap-to-toggle header card above forecast table using `input_boolean.genergy_forecast_table` + conditional card
+- **Collapsible Toggle** — Mushroom tap-to-toggle header card above forecast table using `input_boolean.genergy_forecast_table` + conditional card. Collapsed by default, tap to expand
+- **Day Dividers** — Bold 📅 date separator rows (e.g., "📅 Wednesday 01 Apr") inserted between days in both HAEO and EMHASS forecast tables
 - **Colored Values** — Buy prices in red, sell prices in green, grid values color-coded by direction (green=export, red=import, grey=zero)
 - **Column Units** — Headers now show "PV kW", "Load kW", "Grid kW", "Batt kW", "SoC %", "Buy €", "Sell €" (with configured currency)
 
