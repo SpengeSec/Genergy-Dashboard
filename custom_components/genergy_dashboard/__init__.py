@@ -263,7 +263,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _delayed_prereq_check)
 
     # Install bundled theme
-    await hass.async_add_executor_job(_install_theme, hass)
+    theme_updated = await hass.async_add_executor_job(_install_theme, hass)
+
+    # Reload themes so HA picks up new/updated theme without manual restart
+    if theme_updated:
+        try:
+            await hass.services.async_call("frontend", "reload_themes")
+            _LOGGER.info("Genergy Dashboard: Reloaded themes after theme install/update")
+        except Exception:
+            _LOGGER.debug("Genergy Dashboard: frontend.reload_themes not available yet")
 
     # Ensure input_boolean.genergy_forecast_table exists
     await _ensure_forecast_table_toggle(hass)
@@ -295,17 +303,22 @@ async def _async_update_listener(
     await _regenerate_dashboard(hass, entry)
 
 
-def _install_theme(hass: HomeAssistant) -> None:
-    """Copy bundled sigenergy_dark theme to HA themes directory."""
+def _install_theme(hass: HomeAssistant) -> bool:
+    """Copy bundled sigenergy_dark theme to HA themes directory.
+
+    Returns True if the theme was installed or updated.
+    """
     theme_src = Path(__file__).parent / "themes" / "sigenergy_dark.yaml"
     if not theme_src.exists():
-        return
+        return False
     themes_dir = Path(hass.config.config_dir) / "themes"
     themes_dir.mkdir(exist_ok=True)
     dest = themes_dir / "sigenergy_dark.yaml"
     if not dest.exists() or dest.stat().st_size != theme_src.stat().st_size:
         shutil.copy2(theme_src, dest)
         _LOGGER.info("Genergy Dashboard: Installed sigenergy_dark theme")
+        return True
+    return False
 
 
 async def _create_or_update_dashboard(

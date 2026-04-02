@@ -2,6 +2,12 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.18.1] - 2026-06-17
+
+### Fixed
+- **Theme Not Applying in HA Light Mode** (fixes #7) — The `sigenergy_dark` theme only defined variables under `modes: dark:`, so they were ignored when HA was in light mode (white background). Added top-level defaults and a `modes: light:` section that forces dark styling regardless of the user's HA light/dark mode setting
+- **Automatic Theme Reload** — The integration now calls `frontend.reload_themes` after installing or updating the theme, so users don't need to manually reload themes or restart HA
+
 ## [2.18.0] - 2026-06-17
 
 ### Added
