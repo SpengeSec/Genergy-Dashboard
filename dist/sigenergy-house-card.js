@@ -1,5 +1,5 @@
 /**
- * Sigenergy House Card v3.16.1 — Lit Element Custom Card for Home Assistant
+ * Sigenergy House Card v3.16.2 — Lit Element Custom Card for Home Assistant
  * Replaces YAML button-card approach with proper SVG-based energy flow visualization.
  *
  * Architecture:
@@ -436,29 +436,31 @@ class SigenergyHouseCard extends LitElement {
     return map[condition] || '🌤️';
   }
 
+  // Improved code to also show negative values on card 
   _formatPower(val, entityId) {
-    const abs = Math.abs(val);
-    // If entity reports in kWh/Wh, display as energy not power
-    if (entityId) {
-      const unit = this._stateUnit(entityId);
-      if (unit === "kWh") return abs >= 100 ? `${abs.toFixed(0)} kWh` : `${abs.toFixed(1)} kWh`;
-      if (unit === "Wh") return abs >= 1000 ? `${(abs / 1000).toFixed(1)} kWh` : `${abs.toFixed(0)} Wh`;
-      if (unit === "MWh") return `${(abs * 1000).toFixed(1)} kWh`;
-    }
-    // Read user-configured auto-scale threshold (default 1000 W)
-    let thresh = 1000;
-    let dp = 2; // decimal places for kW display (default 2)
-    try {
-      if (SigConfigStore) {
-        const cfg = SigConfigStore.getInstance().config;
-        thresh = cfg?.display?.power_threshold ?? 1000;
-        dp = cfg?.display?.decimal_places ?? 2;
+      const abs = Math.abs(val);
+      const sign = val < 0 ? '-' : '';
+      // If entity reports in kWh/Wh, display as energy not power
+      if (entityId) {
+        const unit = this._stateUnit(entityId);
+        if (unit === "kWh") return abs >= 100 ? `${sign}${abs.toFixed(0)} kWh` : `${sign}${abs.toFixed(1)} kWh`;
+        if (unit === "Wh") return abs >= 1000 ? `${sign}${(abs / 1000).toFixed(1)} kWh` : `${sign}${abs.toFixed(0)} Wh`;
+        if (unit === "MWh") return `${sign}${(abs * 1000).toFixed(1)} kWh`;
       }
-    } catch (_) {}
-    if (abs >= thresh * 10) return `${(abs / 1000).toFixed(Math.min(dp, 1))} kW`;
-    if (abs >= thresh) return `${(abs / 1000).toFixed(dp)} kW`;
-    return `${abs.toFixed(0)} W`;
-  }
+      // Read user-configured auto-scale threshold (default 1000 W)
+      let thresh = 1000;
+      let dp = 2;
+      try {
+        if (SigConfigStore) {
+          const cfg = SigConfigStore.getInstance().config;
+          thresh = cfg?.display?.power_threshold ?? 1000;
+          dp = cfg?.display?.decimal_places ?? 2;
+        }
+      } catch (_) {}
+      if (abs >= thresh * 10) return `${sign}${(abs / 1000).toFixed(Math.min(dp, 1))} kW`;
+      if (abs >= thresh) return `${sign}${(abs / 1000).toFixed(dp)} kW`;
+      return `${sign}${abs.toFixed(0)} W`;
+    }
 
   // ── SoC ring color (configurable via SigConfigStore) ────────────────────
   _socRingColor(soc) {
@@ -1418,7 +1420,7 @@ window.customCards.push({
 });
 
 console.info(
-  "%c SIGENERGY-HOUSE-CARD %c v3.16.1 ",
+  "%c SIGENERGY-HOUSE-CARD %c v3.16.2 ",
   "color: white; background: #00d4aa; font-weight: bold; padding: 2px 6px; border-radius: 3px 0 0 3px;",
   "color: #00d4aa; background: #1a1f2e; font-weight: bold; padding: 2px 6px; border-radius: 0 3px 3px 0;"
 );

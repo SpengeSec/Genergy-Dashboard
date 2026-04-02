@@ -2,6 +2,24 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.18.0] - 2026-06-17
+
+### Added
+- **HTML Forecast Tables** — Rewrote HAEO and EMHASS forecast tables as native HTML `<table>` elements using `custom:html-template-card` for pixel-perfect rendering. Replaces markdown tables that suffered from alignment and styling inconsistencies
+- **Net Cost Column** — New "Net €" column in both forecast tables showing `Buy − Sell` per timeslot with color-coded positive (red) and negative (green) values
+- **Today/Tomorrow/Future Sections** — Forecast tables now group timeslots under collapsible "Today", "Tomorrow", and future date headers instead of inline day dividers
+- **Forecast Table Toggle** — `input_boolean.genergy_forecast_table` auto-created by the integration on setup for show/hide toggle support
+
+### Fixed
+- **House Card Negative PV Display** — Merged PR #8 from @Timieh: `_formatPower()` now correctly displays negative power values for micro inverters that consume power at night. Added sign handling (`val < 0 ? '-' : ''`) before formatted output (House Card v3.16.1 → v3.16.2)
+
+### Changed
+- **html-template-card Dependency** — Added `custom:html-template-card` (by PiotrMachowski) to `REQUIRED_HACS_CARDS` for automatic prerequisite detection
+
+### Thanks
+- **@Timieh** for contributing PR #8 — negative PV power display fix for micro inverters
+- **@Roving-Ronin** for continued testing, feedback, and bug reports
+
 ## [2.17.1] - 2026-04-02
 
 ### Fixed
