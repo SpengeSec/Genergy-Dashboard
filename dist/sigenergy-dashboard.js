@@ -4126,8 +4126,8 @@ return forecast.map(function(d) {
             tpl += "{%- set months = ['January','February','March','April','May','June','July','August','September','October','November','December'] %}\n";
 
             // HTML table start
-            tpl += '<div style="max-height:570px; overflow-y:auto; position:relative;">\n';
-            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px;">\n';
+            tpl += '<div style="max-height:570px; overflow-y:auto; overflow-x:hidden; position:relative;">\n';
+            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px; table-layout:fixed;">\n';
             tpl += '<thead><tr>\n';
             tpl += '<th style="' + _thStyle + '">Time</th>\n';
             if (hImpP) tpl += '<th style="' + _thStyle + '">Buy ' + currency + '</th>\n';
@@ -4318,8 +4318,8 @@ return forecast.map(function(d) {
             tpl += "{%- set months = ['January','February','March','April','May','June','July','August','September','October','November','December'] %}\n";
 
             // HTML table start
-            tpl += '<div style="max-height:570px; overflow-y:auto; position:relative;">\n';
-            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px;">\n';
+            tpl += '<div style="max-height:570px; overflow-y:auto; overflow-x:hidden; position:relative;">\n';
+            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px; table-layout:fixed;">\n';
             tpl += '<thead><tr>\n';
             tpl += '<th style="' + _thStyle + '">Time</th>\n';
             if (bpEnt) tpl += '<th style="' + _thStyle + '">Buy ' + currency + '</th>\n';
@@ -4698,10 +4698,11 @@ return forecast.map(function(d) {
         css = css.replace(/path\[fill-opacity\]\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/path\[fill-opacity="[^"]*"\]\s*\{[^}]*\}\n?/g, '');
         css = css.replace(/path\s*\{\s*transition:[^}]*\}\n?/g, '');
-        // Remove old box cursor/transition rules to avoid duplication
+        // Remove old box cursor/transition/overflow/min-height rules to avoid duplication
         css = css.replace(/\.box\s*\{\s*cursor:[^}]*\}\n?/g, '');
         css = css.replace(/\.box\s*\{\s*transition:\s*height[^}]*\}\n?/g, '');
         css = css.replace(/\.spacerv\s*\{\s*transition:\s*height[^}]*\}\n?/g, '');
+        css = css.replace(/\.box\s*\{\s*overflow:\s*(hidden|visible)[^}]*\}\n?/g, '');
         // Remove broken ha-card rules (e.g. "ha-card { --ha-card- overflow...")
         css = css.replace(/\n?ha-card\s*\{\s*--ha-card-\s+overflow[^}]*\}\n?/g, '');
         // Add smooth transition and opacity levels for hover highlighting
