@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.19.0 — Bundled Distribution
+ * Genergy Dashboard v2.20.0 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -2229,12 +2229,226 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
+          // ── Marstek auto-detect (Venus Modbus & Local API) ────────────
+          // Detects Marstek Venus batteries — both marstek_modbus (Modbus TCP) and
+          // marstek_local_api (Local UDP) integrations create sensor.marstek_* entities
+          if (this._hass && this._hass.states) {
+            const allKeys = Object.keys(this._hass.states);
+            const marstekKeys = allKeys.filter(k => k.startsWith('sensor.marstek'));
+            if (marstekKeys.length > 0) {
+              const has = (suffix) => marstekKeys.find(k => k.endsWith(suffix));
+
+              // Prefer system-level aggregate entities (marstek_local_api multi-device) over single-device
+              const sysAvgSoc = has('_system_average_soc');
+              const sysTotalPower = has('_system_total_power');
+              const sysTotalGrid = has('_system_total_grid_power');
+              const sysTotalSolar = has('_system_total_solar_power');
+
+              const map = {
+                battery_soc:             sysAvgSoc || has('_battery_soc'),
+                battery_power:           sysTotalPower || has('_battery_power'),
+                grid_power:              sysTotalGrid || has('_grid_power') || has('_ct_total_power') || has('_ac_power'),
+                solar_power:             sysTotalSolar || has('_pv_power_es') || has('_pv_power'),
+                load_power:              has('_offgrid_power'),
+                // Daily energy (marstek_modbus)
+                battery_charge_today:    has('_total_daily_charging_energy'),
+                battery_discharge_today: has('_total_daily_discharging_energy'),
+                // Lifetime energy (marstek_local_api — converted to daily by energy meter section below)
+                solar_energy:            has('_total_pv_energy'),
+                grid_import_energy:      has('_total_grid_import') || has('_total_grid_import_energy'),
+                grid_export_energy:      has('_total_grid_export') || has('_total_grid_export_energy'),
+                load_energy:             has('_total_load_energy'),
+                // MPPT strings (marstek_modbus, up to 4)
+                pv1_power:               has('_mppt1_power'),
+                pv2_power:               has('_mppt2_power'),
+                pv3_power:               has('_mppt3_power'),
+                pv4_power:               has('_mppt4_power'),
+              };
+
+              let marstekCount = 0;
+              for (const [key, eid] of Object.entries(map)) {
+                if (eid && !cfg2.entities[key]) {
+                  cfg2.entities[key] = eid;
+                  found.push('Marstek auto-detect ' + key + ': ' + eid);
+                  marstekCount++;
+                }
+              }
+
+              if (marstekCount > 0) {
+                // Marstek battery_power: positive = charging (charge is positive, discharge is negative)
+                cfg2.features.battery_positive_charging = true;
+                found.push('✓ Marstek detected (' + marstekCount + ' entities) — battery sign: positive = charging');
+                // PV string count for Modbus
+                let pvCount = 0;
+                for (let i = 1; i <= 4; i++) {
+                  if (has('_mppt' + i + '_power')) pvCount = i;
+                }
+                if (pvCount > 0 && !cfg2.features.pv_strings) {
+                  cfg2.features.pv_strings = pvCount;
+                  found.push('Marstek MPPT strings detected: ' + pvCount);
+                }
+                if (!cfg2.display) cfg2.display = {};
+                if (!cfg2.display.battery_label) {
+                  cfg2.display.battery_label = 'Marstek Venus';
+                  found.push('✓ Battery label set to Marstek Venus');
+                }
+              }
+            }
+          }
+
+          // ── Zendure auto-detect (SolarFlow, Hyper, Hub, Ace, SuperBase) ──
+          // Zendure HA creates entities like sensor.hyper_2000_electric_level,
+          // sensor.hub_1200_solar_input_power, etc.
+          // Key suffixes: electric_level (SoC), solar_input_power, grid_input_power,
+          // output_home_power, bat_in_out (net battery power, positive = charging)
+          if (this._hass && this._hass.states) {
+            const allKeys = Object.keys(this._hass.states);
+            // Detect Zendure by finding entities ending in _electric_level that also
+            // have sibling _solar_input_power entities (unique Zendure naming pattern)
+            const zenElectricLevel = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_electric_level'));
+            const zenSolarInput = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_solar_input_power'));
+
+            if (zenElectricLevel.length > 0 && zenSolarInput.length > 0) {
+              // Extract device prefix from the first electric_level entity
+              // e.g. sensor.hyper_2000_electric_level → "sensor.hyper_2000_"
+              const zenBase = zenElectricLevel[0].replace('electric_level', '');
+              const zenKeys = allKeys.filter(k => k.startsWith(zenBase));
+              const has = (suffix) => zenKeys.find(k => k.endsWith(suffix));
+
+              const map = {
+                battery_soc:             has('_electric_level'),
+                solar_power:             has('_solar_input_power'),
+                grid_power:              has('_grid_input_power'),
+                load_power:              has('_output_home_power'),
+                battery_power:           has('_bat_in_out'),
+                battery_capacity:        has('_total_kwh'),
+                // Aggregate energy (kWh, state_class total_increasing)
+                battery_charge_today:    has('_aggr_charge'),
+                battery_discharge_today: has('_aggr_discharge'),
+                solar_energy_today:      has('_aggr_solar'),
+                grid_import_today:       has('_aggr_grid_input_power'),
+                load_energy_today:       has('_aggr_output_home'),
+              };
+
+              let zenCount = 0;
+              for (const [key, eid] of Object.entries(map)) {
+                if (eid && !cfg2.entities[key]) {
+                  cfg2.entities[key] = eid;
+                  found.push('Zendure auto-detect ' + key + ': ' + eid);
+                  zenCount++;
+                }
+              }
+
+              if (zenCount > 0) {
+                // Zendure bat_in_out: positive = charging
+                cfg2.features.battery_positive_charging = true;
+                found.push('✓ Zendure detected (' + zenCount + ' entities) — battery sign: positive = charging');
+                // Derive device label from entity prefix
+                const zenDevice = zenElectricLevel[0].replace('sensor.', '').replace('_electric_level', '').replace(/_/g, ' ');
+                if (!cfg2.display) cfg2.display = {};
+                if (!cfg2.display.battery_label) {
+                  cfg2.display.battery_label = zenDevice.replace(/\b\w/g, c => c.toUpperCase());
+                  found.push('✓ Battery label set to ' + cfg2.display.battery_label);
+                }
+              }
+            }
+          }
+
+          // ── HomeWizard auto-detect (P1 Meter, Plug-In Battery, kWh Meter) ──
+          // HomeWizard entities use distinctive suffixes: _active_power_w,
+          // _state_of_charge_pct, _total_power_import_kwh, _total_power_export_kwh
+          if (this._hass && this._hass.states) {
+            const allKeys = Object.keys(this._hass.states);
+            const hwBatterySoc = allKeys.find(k => k.startsWith('sensor.') && k.endsWith('_state_of_charge_pct'));
+            const hwActivePower = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_active_power_w'));
+            const hwImport = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_total_power_import_kwh'));
+            const hwExport = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_total_power_export_kwh'));
+
+            // HomeWizard confirmed if we find _state_of_charge_pct OR (_active_power_w AND _total_power_import_kwh together)
+            const isHomeWizard = hwBatterySoc || (hwActivePower.length > 0 && hwImport.length > 0);
+
+            if (isHomeWizard) {
+              let hwCount = 0;
+
+              // Battery entities (Plug-In Battery / HWE-BAT)
+              if (hwBatterySoc && !cfg2.entities.battery_soc) {
+                cfg2.entities.battery_soc = hwBatterySoc;
+                found.push('HomeWizard auto-detect battery_soc: ' + hwBatterySoc);
+                hwCount++;
+                // Find sibling entities from same device (same prefix before "state_of_charge_pct")
+                const batBase = hwBatterySoc.replace('state_of_charge_pct', '');
+                const batPower = allKeys.find(k => k === batBase + 'active_power_w');
+                const batImport = allKeys.find(k => k === batBase + 'total_power_import_kwh');
+                const batExport = allKeys.find(k => k === batBase + 'total_power_export_kwh');
+                if (batPower && !cfg2.entities.battery_power) {
+                  cfg2.entities.battery_power = batPower;
+                  found.push('HomeWizard auto-detect battery_power: ' + batPower);
+                  hwCount++;
+                }
+                if (batImport && !cfg2.entities.battery_charge_energy) {
+                  cfg2.entities.battery_charge_energy = batImport;
+                  found.push('HomeWizard auto-detect battery_charge_energy: ' + batImport);
+                  hwCount++;
+                }
+                if (batExport && !cfg2.entities.battery_discharge_energy) {
+                  cfg2.entities.battery_discharge_energy = batExport;
+                  found.push('HomeWizard auto-detect battery_discharge_energy: ' + batExport);
+                  hwCount++;
+                }
+              }
+
+              // Grid entities (P1 Meter / HWE-P1 or kWh Meter / HWE-KWH)
+              // Find an _active_power_w entity that also has _total_power_import_kwh sibling,
+              // but is NOT the battery device (which also has _active_power_w)
+              const batBase2 = hwBatterySoc ? hwBatterySoc.replace('state_of_charge_pct', '') : '';
+              for (const apw of hwActivePower) {
+                if (batBase2 && apw.startsWith(batBase2)) continue; // skip battery device
+                const devBase = apw.replace('active_power_w', '');
+                const devImport = allKeys.find(k => k === devBase + 'total_power_import_kwh');
+                const devExport = allKeys.find(k => k === devBase + 'total_power_export_kwh');
+                if (devImport || devExport) {
+                  if (!cfg2.entities.grid_power) {
+                    cfg2.entities.grid_power = apw;
+                    found.push('HomeWizard auto-detect grid_power: ' + apw);
+                    hwCount++;
+                  }
+                  if (devImport && !cfg2.entities.grid_import_energy) {
+                    cfg2.entities.grid_import_energy = devImport;
+                    found.push('HomeWizard auto-detect grid_import_energy: ' + devImport);
+                    hwCount++;
+                  }
+                  if (devExport && !cfg2.entities.grid_export_energy) {
+                    cfg2.entities.grid_export_energy = devExport;
+                    found.push('HomeWizard auto-detect grid_export_energy: ' + devExport);
+                    hwCount++;
+                  }
+                  break; // Use first P1/kWh meter found
+                }
+              }
+
+              if (hwCount > 0) {
+                found.push('✓ HomeWizard detected (' + hwCount + ' entities)');
+                if (!cfg2.display) cfg2.display = {};
+                if (hwBatterySoc && !cfg2.display.battery_label) {
+                  cfg2.display.battery_label = 'HomeWizard Battery';
+                  found.push('✓ Battery label set to HomeWizard Battery');
+                }
+              }
+            }
+          }
+
           // ── Auto-detect battery sign convention ─────────────────────
           // If battery_power entity contains "output" or "discharge", positive = discharging
           if (this._hass && this._hass.states) {
             const bpEntity = (cfg2.entities.battery_power || '').toLowerCase();
             if (bpEntity) {
-              if (bpEntity.includes('output') || bpEntity.includes('discharge')) {
+              if (bpEntity.includes('marstek')) {
+                cfg2.features.battery_positive_charging = true;
+                found.push('⚡ Battery sign: positive = charging (Marstek convention)');
+              } else if (bpEntity.includes('bat_in_out')) {
+                cfg2.features.battery_positive_charging = true;
+                found.push('⚡ Battery sign: positive = charging (Zendure bat_in_out convention)');
+              } else if (bpEntity.includes('output') || bpEntity.includes('discharge')) {
                 cfg2.features.battery_positive_charging = false;
                 found.push('⚡ Battery sign: positive = discharging (entity name contains "output/discharge")');
               } else if (bpEntity.includes('sigen_') || bpEntity.includes('sigenergy')) {
@@ -2282,32 +2496,40 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
-          // ── Auto-detect BMS integrations (JK BMS, PACE BMS, Seplos BMS) ──
+          // ── Auto-detect BMS integrations ──
+          // Supported: JK BMS, Daly BMS, JBD/Xiaoxiang BMS, ANT BMS, PACE BMS,
+          // Seplos BMS, BMS BLE (patman15), BMS Connector (flip555),
+          // batmon-ha (fl4p), Gobel Power addon (fancyui), JKBMS RS485 addon
           if (this._hass && this._hass.states) {
             const allKeys = Object.keys(this._hass.states);
-            // Common BMS entity patterns:
-            // JK BMS:    sensor.jk_bms_*_state_of_charge, sensor.jk_bms_*_soc
-            // PACE BMS:  sensor.pace_bms_*_soc, sensor.pace_bms_*_state_of_charge
-            // Seplos BMS: sensor.seplos_*_soc, sensor.seplos_bms_*_soc
-            // BMS BLE (generic): sensor.*_bms_*_soc, sensor.*_bms_*_state_of_charge
-            // bms_connector: sensor.bms_*_soc
+
+            // ── Phase 1: Prefix-based detection (ESPHome & HACS integrations) ──
             const bmsPatterns = [
+              // ESPHome-based BMS integrations (syssi repos)
               { name: 'JK BMS', prefix: /^sensor\.jk_bms_/ },
+              { name: 'Daly BMS', prefix: /^sensor\.daly_bms_/ },
+              { name: 'JBD BMS', prefix: /^sensor\.jbd_bms_/ },
+              { name: 'ANT BMS', prefix: /^sensor\.ant_bms_/ },
               { name: 'PACE BMS', prefix: /^sensor\.pace_bms_/ },
               { name: 'Seplos BMS', prefix: /^sensor\.seplos[_.]/ },
+              // Generic BLE BMS (JBD BLE, etc.)
               { name: 'BMS BLE', prefix: /^sensor\.[a-z0-9_]*bms_ble_/ },
+              // HACS custom integration (flip555)
               { name: 'BMS Connector', prefix: /^sensor\.bms_connector_/ },
+              // JKBMS RS485 addon (jean-luc1203) via MQTT
+              { name: 'JKBMS RS485', prefix: /^sensor\.jkbms_/ },
             ];
             let bmsDetected = false;
             for (const bms of bmsPatterns) {
               const bmsKeys = allKeys.filter(k => bms.prefix.test(k));
               if (bmsKeys.length === 0) continue;
-              // Find SoC entities
-              const socKeys = bmsKeys.filter(k => k.endsWith('_soc') || k.endsWith('_state_of_charge'));
+              // Find SoC entities (multiple naming conventions)
+              const socKeys = bmsKeys.filter(k =>
+                k.endsWith('_soc') || k.endsWith('_state_of_charge') ||
+                k.endsWith('_battery_level') || k.endsWith('_soc_percent'));
               if (socKeys.length > 0) {
                 bmsDetected = true;
                 found.push('🔋 ' + bms.name + ' detected (' + socKeys.length + ' pack' + (socKeys.length > 1 ? 's' : '') + ')');
-                // Auto-assign pack SoC entities
                 const sortedSocs = socKeys.sort();
                 const packCount = Math.min(sortedSocs.length, 8);
                 cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, packCount);
@@ -2318,7 +2540,7 @@ class SigenergySettingsCard extends HTMLElement {
                     found.push('  Pack ' + (pi + 1) + ' SoC: ' + sortedSocs[pi]);
                   }
                 }
-                // Also look for battery voltage/current from this BMS
+                // Look for battery voltage/current from this BMS
                 const voltKey = bmsKeys.find(k => k.endsWith('_total_voltage') || k.endsWith('_pack_voltage') || k.endsWith('_voltage'));
                 const currKey = bmsKeys.find(k => k.endsWith('_current') || k.endsWith('_pack_current'));
                 if (voltKey && !cfg2.entities.battery_voltage) {
@@ -2330,6 +2552,132 @@ class SigenergySettingsCard extends HTMLElement {
                   found.push('  Battery Current: ' + currKey);
                 }
                 break; // Use first detected BMS brand
+              }
+            }
+
+            // ── Phase 2: batmon-ha (fl4p) — MQTT addon, suffix-based detection ──
+            // batmon-ha entities: sensor.{alias}_soc_percent, sensor.{alias}_total_voltage, sensor.{alias}_current
+            if (!bmsDetected) {
+              const batmonSocKeys = allKeys.filter(k => /^sensor\..+_soc_percent$/.test(k) || /^sensor\..+_soc_soc_percent$/.test(k));
+              if (batmonSocKeys.length > 0) {
+                bmsDetected = true;
+                found.push('🔋 batmon-ha detected (' + batmonSocKeys.length + ' battery' + (batmonSocKeys.length > 1 ? 's' : '') + ')');
+                const sortedSocs = batmonSocKeys.sort();
+                const packCount = Math.min(sortedSocs.length, 8);
+                cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, packCount);
+                for (let pi = 0; pi < packCount; pi++) {
+                  const packKey = 'battery_pack' + (pi + 1) + '_soc';
+                  if (!cfg2.entities[packKey]) {
+                    cfg2.entities[packKey] = sortedSocs[pi];
+                    found.push('  Pack ' + (pi + 1) + ' SoC: ' + sortedSocs[pi]);
+                  }
+                }
+                // Infer device prefix from SoC entity for voltage/current
+                const devPrefix = sortedSocs[0].replace(/_soc_percent$/, '').replace(/_soc_soc_percent$/, '');
+                const batmonVolt = allKeys.find(k => k === devPrefix + '_soc_total_voltage' || k === devPrefix + '_total_voltage');
+                const batmonCurr = allKeys.find(k => k === devPrefix + '_soc_current' || k === devPrefix + '_current');
+                if (batmonVolt && !cfg2.entities.battery_voltage) {
+                  cfg2.entities.battery_voltage = batmonVolt;
+                  found.push('  Battery Voltage: ' + batmonVolt);
+                }
+                if (batmonCurr && !cfg2.entities.battery_current) {
+                  cfg2.entities.battery_current = batmonCurr;
+                  found.push('  Battery Current: ' + batmonCurr);
+                }
+              }
+            }
+
+            // ── Phase 3: Gobel Power addon — MQTT, suffix-based detection ──
+            // Gobel entities: sensor.{device}_total_soc, sensor.{device}_pack_01_view_soc, sensor.{device}_total_voltage
+            if (!bmsDetected) {
+              const gobelPackSocKeys = allKeys.filter(k => /^sensor\..+_pack_\d+_view_soc$/.test(k));
+              const gobelTotalSocKeys = allKeys.filter(k => /^sensor\..+_total_soc$/.test(k));
+              if (gobelPackSocKeys.length > 0) {
+                bmsDetected = true;
+                found.push('🔋 Gobel Power BMS detected (' + gobelPackSocKeys.length + ' pack' + (gobelPackSocKeys.length > 1 ? 's' : '') + ')');
+                const sortedSocs = gobelPackSocKeys.sort();
+                const packCount = Math.min(sortedSocs.length, 8);
+                cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, packCount);
+                for (let pi = 0; pi < packCount; pi++) {
+                  const packKey = 'battery_pack' + (pi + 1) + '_soc';
+                  if (!cfg2.entities[packKey]) {
+                    cfg2.entities[packKey] = sortedSocs[pi];
+                    found.push('  Pack ' + (pi + 1) + ' SoC: ' + sortedSocs[pi]);
+                  }
+                }
+                // Infer device prefix for voltage/current from pack entity
+                const devPrefix = sortedSocs[0].replace(/_pack_\d+_view_soc$/, '');
+                const gobelVolt = allKeys.find(k => k === devPrefix + '_total_voltage');
+                const gobelCurr = allKeys.find(k => k === devPrefix + '_total_current');
+                if (gobelVolt && !cfg2.entities.battery_voltage) {
+                  cfg2.entities.battery_voltage = gobelVolt;
+                  found.push('  Battery Voltage: ' + gobelVolt);
+                }
+                if (gobelCurr && !cfg2.entities.battery_current) {
+                  cfg2.entities.battery_current = gobelCurr;
+                  found.push('  Battery Current: ' + gobelCurr);
+                }
+              } else if (gobelTotalSocKeys.length > 0) {
+                bmsDetected = true;
+                found.push('🔋 Gobel Power BMS detected (total SoC)');
+                // Use total_soc as single pack
+                cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, 1);
+                if (!cfg2.entities.battery_pack1_soc) {
+                  cfg2.entities.battery_pack1_soc = gobelTotalSocKeys[0];
+                  found.push('  Pack 1 SoC: ' + gobelTotalSocKeys[0]);
+                }
+                const devPrefix = gobelTotalSocKeys[0].replace(/_total_soc$/, '');
+                const gobelVolt = allKeys.find(k => k === devPrefix + '_total_voltage');
+                const gobelCurr = allKeys.find(k => k === devPrefix + '_total_current');
+                if (gobelVolt && !cfg2.entities.battery_voltage) {
+                  cfg2.entities.battery_voltage = gobelVolt;
+                  found.push('  Battery Voltage: ' + gobelVolt);
+                }
+                if (gobelCurr && !cfg2.entities.battery_current) {
+                  cfg2.entities.battery_current = gobelCurr;
+                  found.push('  Battery Current: ' + gobelCurr);
+                }
+              }
+            }
+
+            // ── Phase 4: BMS_BLE-HA (patman15) — smart detection via _battery_level ──
+            // BMS_BLE entities use device BLE name as prefix: sensor.{ble_name}_battery_level,
+            // sensor.{ble_name}_voltage, sensor.{ble_name}_current, sensor.{ble_name}_power
+            // Supported devices: JK, JBD, Daly, Seplos, SOK, ANT, Renogy, Redodo, LiTime, etc.
+            if (!bmsDetected) {
+              const bleSocKeys = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_battery_level'));
+              const blePacks = [];
+              for (const socKey of bleSocKeys) {
+                const prefix = socKey.replace(/_battery_level$/, '');
+                // Verify it looks like a BMS by checking for sibling voltage/current/power entities
+                const hasVolt = allKeys.includes(prefix + '_voltage');
+                const hasCurr = allKeys.includes(prefix + '_current');
+                const hasPower = allKeys.includes(prefix + '_power');
+                if (hasVolt || hasCurr || hasPower) {
+                  blePacks.push({ soc: socKey, prefix, hasVolt, hasCurr });
+                }
+              }
+              if (blePacks.length > 0) {
+                bmsDetected = true;
+                found.push('🔋 BMS BLE detected (' + blePacks.length + ' battery' + (blePacks.length > 1 ? 's' : '') + ')');
+                const packCount = Math.min(blePacks.length, 8);
+                cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, packCount);
+                for (let pi = 0; pi < packCount; pi++) {
+                  const packKey = 'battery_pack' + (pi + 1) + '_soc';
+                  if (!cfg2.entities[packKey]) {
+                    cfg2.entities[packKey] = blePacks[pi].soc;
+                    found.push('  Pack ' + (pi + 1) + ' SoC: ' + blePacks[pi].soc);
+                  }
+                }
+                // Use first pack's voltage/current as battery-level entities
+                if (blePacks[0].hasVolt && !cfg2.entities.battery_voltage) {
+                  cfg2.entities.battery_voltage = blePacks[0].prefix + '_voltage';
+                  found.push('  Battery Voltage: ' + blePacks[0].prefix + '_voltage');
+                }
+                if (blePacks[0].hasCurr && !cfg2.entities.battery_current) {
+                  cfg2.entities.battery_current = blePacks[0].prefix + '_current';
+                  found.push('  Battery Current: ' + blePacks[0].prefix + '_current');
+                }
               }
             }
           }
@@ -5608,7 +5956,9 @@ class SigenergyEnergyFlowCard extends HTMLElement {
   }
 
   set states(states) {
-    this._overriddenStates = (states && Object.keys(states).length) ? states : null;
+    const newOverride = (states && Object.keys(states).length) ? states : null;
+    if (newOverride === this._overriddenStates) return; // same reference, skip re-render
+    this._overriddenStates = newOverride;
     this._lastRenderKey = '';
     this._scheduleRender();
   }
@@ -5856,25 +6206,56 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     // Build mySigen-style node panel (full-height bar covering flow edge)
     const makeLabel = (box, pct, align) => {
       const fmt = this._formatValue(box.kwh);
-      const isTiny = box.h < 55;
-      const isCompact = box.h < 105;
+      const h = box.h;
       const alignCls = align === 'left' ? 'lbl-left' : 'lbl-right';
       // Per-node color-tinted background (mySigen style)
       const [r,g,b] = hexRgb(box.color || '#4ECDC4');
       const panelBg = isDark
         ? `linear-gradient(180deg, rgba(${r},${g},${b},0.32) 0%, rgba(${r},${g},${b},0.15) 100%)`
         : `linear-gradient(180deg, rgba(${r},${g},${b},0.18) 0%, rgba(${r},${g},${b},0.08) 100%)`;
-      if (isTiny) {
-        return `<div class="node-panel ${alignCls}" style="background:${panelBg};">
+
+      // Tiny inline mode (< 40px): horizontal layout
+      if (h < 40) {
+        return `<div class="node-panel ${alignCls} lbl-inline-wrap" style="background:${panelBg};">
           <span class="lbl-name">${this._escHtml(box.name)}</span>
           <span class="lbl-inline">${fmt.v} ${fmt.u.charAt(0) === 'M' ? 'MWh' : 'kWh'}</span>
         </div>`;
       }
-      return `<div class="node-panel ${alignCls}${isCompact ? ' lbl-compact' : ''}" style="background:${panelBg};">
-        <span class="lbl-name">${this._escHtml(box.name)}</span>
-        <span class="lbl-val">${fmt.v}</span>
-        <span class="lbl-unit">${fmt.u}</span>
-        ${!isCompact ? `<span class="lbl-pct">${pct}%</span>` : ''}
+
+      // Proportional sizing: scale font sizes based on bar height
+      // Reference: 200px = full size, scale down linearly to 40px = minimum
+      const scale = Math.min(1, Math.max(0.45, (h - 40) / 160));
+      const nameSize = Math.round(7 + scale * 3);    // 7px → 10px
+      const namePadV = scale > 0.6 ? 2 : 1;
+      const namePadH = scale > 0.6 ? 8 : 5;
+      const nameMb = scale > 0.6 ? 2 : 1;
+      const valSize = Math.round(14 + scale * 12);    // 14px → 26px
+      const valLh = scale > 0.6 ? 1.1 : 1.0;
+      const unitSize = Math.round(8 + scale * 4);     // 8px → 12px
+      const pctSize = Math.round(9 + scale * 4);      // 9px → 13px
+      const panelPadV = scale > 0.5 ? 6 : 2;
+      const panelPadH = scale > 0.5 ? 8 : 5;
+
+      // Calculate content height to decide what fits
+      const nameH = Math.ceil(nameSize * 1.4) + namePadV * 2 + nameMb;
+      const valH = Math.ceil(valSize * valLh);
+      const unitH = Math.ceil(unitSize * 1.15);
+      const pctH = Math.ceil(pctSize * 1.15) + 2;
+      const availH = h - panelPadV * 2;
+      const baseH = nameH + valH;
+      const showUnit = (baseH + unitH) <= availH;
+      const showPct = showUnit && (baseH + unitH + pctH) <= availH;
+
+      // Use auto-margin centering: margin-top:auto on first + margin-bottom:auto
+      // on last child centers the group — auto margins collapse to 0 on overflow
+      // (unlike justify-content:center which clips the top on Safari)
+      const lastEl = showPct ? 'pct' : showUnit ? 'unit' : 'val';
+
+      return `<div class="node-panel ${alignCls}" style="background:${panelBg};padding:${panelPadV}px ${panelPadH}px;">
+        <span class="lbl-name" style="font-size:${nameSize}px;line-height:1.4;padding:${namePadV}px ${namePadH}px;margin-top:auto;margin-bottom:${nameMb}px;">${this._escHtml(box.name)}</span>
+        <span class="lbl-val" style="font-size:${valSize}px;line-height:${valLh};${lastEl === 'val' ? 'margin-bottom:auto;' : ''}">${fmt.v}</span>
+        ${showUnit ? `<span class="lbl-unit" style="font-size:${unitSize}px;line-height:1.15;margin-top:0;${lastEl === 'unit' ? 'margin-bottom:auto;' : ''}">${fmt.u}</span>` : ''}
+        ${showPct ? `<span class="lbl-pct" style="font-size:${pctSize}px;line-height:1.15;margin-top:2px;margin-bottom:auto;">${pct}%</span>` : ''}
       </div>`;
     };
 
@@ -5937,7 +6318,7 @@ class SigenergyEnergyFlowCard extends HTMLElement {
         .node-panel {
           display: flex;
           flex-direction: column;
-          justify-content: center;
+          justify-content: flex-start;
           width: 100%;
           height: 100%;
           backdrop-filter: blur(6px);
@@ -5945,9 +6326,9 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           padding: 6px 8px;
           gap: 0px;
           box-sizing: border-box;
-          overflow: hidden;
+          overflow: visible;
         }
-        .node-panel > * { flex-shrink: 1; min-height: 0; }
+        .node-panel > * { flex-shrink: 0; min-height: 0; }
         .lbl-left { align-items: center; text-align: center; }
         .lbl-right { align-items: center; text-align: center; }
 
@@ -5984,26 +6365,23 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           margin-top: 2px;
         }
 
-        /* Compact (small nodes) */
-        .lbl-compact { padding: 3px 6px; }
-        .lbl-compact .lbl-name { font-size: 8px; padding: 1px 5px; margin-bottom: 1px; }
-        .lbl-compact .lbl-val { font-size: 16px; }
-        .lbl-compact .lbl-unit { font-size: 9px; }
-
-        /* Tiny inline label */
-        .node-panel:has(.lbl-inline) {
+        /* Tiny inline label — duplicate both :has() and .lbl-inline-wrap for Safari compat */
+        .node-panel:has(.lbl-inline),
+        .node-panel.lbl-inline-wrap {
           flex-direction: row;
           align-items: center;
           justify-content: flex-start;
           gap: 4px;
           padding: 3px 5px;
         }
-        .node-panel:has(.lbl-inline) .lbl-name {
+        .node-panel:has(.lbl-inline) .lbl-name,
+        .node-panel.lbl-inline-wrap .lbl-name {
           font-size: 8px;
           padding: 1px 5px;
           flex-shrink: 0;
         }
-        .lbl-right:has(.lbl-inline) {
+        .lbl-right:has(.lbl-inline),
+        .lbl-right.lbl-inline-wrap {
           justify-content: flex-end;
         }
         .lbl-inline {
@@ -6015,20 +6393,6 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           text-overflow: ellipsis;
           flex: 1;
           min-width: 0;
-        }
-
-        @media (max-width: 500px) {
-          .lbl-val { font-size: 16px !important; }
-          .lbl-name { font-size: 7px !important; padding: 1px 4px !important; }
-          .lbl-unit { font-size: 9px !important; }
-          .lbl-pct { font-size: 10px !important; }
-          .node-panel { padding: 3px 5px; }
-        }
-        @media (min-width: 769px) {
-          .lbl-val { font-size: 26px !important; }
-          .lbl-name { font-size: 10px !important; }
-          .lbl-unit { font-size: 12px !important; }
-          .lbl-pct { font-size: 13px !important; }
         }
       </style>
       <ha-card class="efc-card">
@@ -6388,9 +6752,15 @@ class SigenergySankeyPanel extends HTMLElement {
       return;
     }
 
-    // When historical date is active, re-apply states every tick to override HA's live updates
+    // When historical date is active, re-apply states only if HA pushed live updates
+    // that would overwrite our historical data. Avoid re-applying unchanged states
+    // because each _setSankeyChartStates triggers a re-render that destroys DOM
+    // elements (and their click handlers).
     if (selectedStr === this._dateNavLastStr && this._dateNavActive && this._historicalStates) {
-      this._setSankeyChartStates(this._historicalStates);
+      const sankeyBase = this._findSankeyBase();
+      if (sankeyBase && sankeyBase._overriddenStates !== this._historicalStates) {
+        this._setSankeyChartStates(this._historicalStates);
+      }
       return;
     }
 
@@ -6543,6 +6913,15 @@ class SigenergySankeyPanel extends HTMLElement {
 
         // Apply via SANKEY-CHART.states (parent, Lit reactive) so it flows through the render template
         this._setSankeyChartStates(newStates);
+
+        // Re-attach click handlers after the flow card re-renders (next frame)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            this._cleanupBoxListeners();
+            this._boxClickCleanup = [];
+            this._attachBoxListeners();
+          });
+        });
 
         // Refresh the stats panel and detail panel with historical values
         this._updateStatsPanel();
@@ -8329,7 +8708,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.19.0 ',
+  '%c GENERGY-DASHBOARD %c v2.20.0 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );

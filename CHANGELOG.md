@@ -2,6 +2,30 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.20.0] - 2025-04-08
+
+### Added — Auto-Detection for New Integrations
+- **HomeWizard Auto-Detect** — Discovers HomeWizard P1 meter and Energy Socket entities (`_total_power_import_kwh`, `_active_power_w`, `_state_of_charge_pct` suffixes). Maps grid import/export, load power, and battery SoC when available
+- **Marstek Auto-Detect** — Discovers Marstek battery inverters via both Modbus (`sensor.marstek*` prefix) and Local API integrations. Detects system aggregates versus per-device entities using sensor naming patterns
+- **Zendure Auto-Detect** — Discovers Zendure portable power stations via `_electric_level` + `_solar_input_power` suffix patterns. Maps battery SoC and solar input power
+- **Battery Sign Convention Update** — Battery charge/discharge detection updated to recognize Marstek and Zendure naming patterns alongside existing Sigenergy Modbus conventions
+
+### Fixed — Sankey Energy Flow Labels (Safari)
+- **Proportional Font Scaling** — Rewrote `makeLabel()` to use linear proportional scaling based on bar height (`scale = (h - 40) / 160`, clamped 0.45–1.0) instead of fixed breakpoints. Font sizes: name 7–10px, value 14–26px, unit 8–12px, pct 9–13px
+- **Calculate-Based Element Visibility** — Unit and percentage elements are only rendered if their calculated height fits within the available bar space, preventing overflow clipping on any browser
+- **Safari Auto-Margin Centering** — Replaced `justify-content: center` with `margin-top: auto` / `margin-bottom: auto` on first/last children. Auto margins collapse to 0 on overflow (instead of clipping the top on Safari)
+- **Explicit Inline Styles** — All font sizes, line-heights, margins, and padding are set via inline `style=` attributes, eliminating browser-default variations between Chrome and Safari
+- **Panel Overflow Fix** — Changed `.node-panel` from `overflow: hidden` to `overflow: visible` so the parent `.node-bar` handles clipping symmetrically
+
+### Fixed — Sankey Historical Navigation
+- **Historical Date Click Fix** — Clicking bars on historical dates now works reliably. Added identity check in `set states()` setter and conditional re-apply guard in `_checkDateNavigation()` to prevent constant DOM re-renders that destroyed click handlers
+- **Post-Fetch Click Handler Re-Attachment** — After fetching historical data, click handlers are re-attached via double-RAF timing to ensure new DOM nodes are ready
+- **Safari `:has()` Fallback** — Added `.lbl-inline-wrap` class as fallback for Safari versions without `:has()` pseudo-class support
+
+### Changed
+- **Dashboard JS Version** — Updated console banner to v2.20.0
+- **Removed Fixed CSS Breakpoints** — Removed `.lbl-compact` rules and `@media` blocks with `!important` overrides that conflicted with proportional inline sizing
+
 ## [2.19.0] - 2026-04-08
 
 ### Added — Native Energy Flow Card (replaces ha-sankey-chart dependency)
