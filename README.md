@@ -76,7 +76,7 @@ Built-in visual cable path editor for customizing the animated power flow routes
 - **Battery Runtime Estimate** — Shows estimated time-to-full (charging) or time-to-empty (discharging) below the battery status on the house card. Uses configurable SoC targets from your inverter's charge cutoff and discharge reserve settings, with auto-detection for all major brands
 - **Responsive House Design** — Toggle EV charger/heat pump in settings and the house card updates dynamically: garage gate opens to show EV charging, heat pump unit appears on the house exterior
 - **Cable Path Editor** — Built-in visual editor for customizing animated power flow cable routes with drag-to-reposition control points and snap-to-grid
-- **Sankey Energy Flow** — Visual energy flow diagram showing power distribution from sources (Solar, Grid, Battery) to sinks (Home, Battery, Grid, EV, Heat Pump). Entities below 0.1 kWh are automatically hidden for a cleaner chart. Rounded to 1 decimal place
+- **Native Energy Flow Card** — Built-in SVG energy flow visualization (`sigenergy-energy-flow-card`) with thick gradient ribbon flows, proportional bar sizing, and interactive hover highlighting. Replaces the third-party `ha-sankey-chart` dependency — no external HACS plugin needed. Three adaptive label modes (Normal/Compact/Inline) based on bar height, with Safari/Chrome/Firefox cross-browser compatibility. Entities below 0.1 kWh are automatically hidden for a cleaner chart
 - **Battery System Card** — SVG-based battery stack visualization with expandable detail panels for each inverter and battery pack (SoC, SoH, voltage, current, cycles, cell voltages, temperatures)
 - **Status Cards** — Real-time power values (Solar, Home, Battery, Grid) and daily energy totals (kWh)
 
@@ -90,6 +90,7 @@ Built-in visual cable path editor for customizing the animated power flow routes
 
 ### Settings UI (No YAML Required)
 - **4-tab configuration card** with live entity validation
+- **Kiosk Mode** — Dedicated display mode that hides the HA sidebar, header, and toolbar for tablets/wall displays. Resolution-aware spacing (1080p, 1440p, 4K) with a floating exit button. Enable in Display → Kiosk Mode
 - **Entity Configuration** — Map your HA entities to ~70 dashboard slots with real-time state badges
 - **Auto-Detect from HA Energy Dashboard** — One-click detection of grid sources, solar, battery, Solcast, EV chargers, and heat pumps from your HA Energy Dashboard configuration. Supports broadened keyword matching for 30+ EV charger brands (Tesla, Zappi, Easee, Wallbox, ChargePoint, etc.) and 20+ heat pump brands (Daikin, Nibe, Vaillant, Viessmann, etc.)
 - **Cumulative Sensor Support** — Automatically detects cumulative (lifetime total) energy sensors and creates HA utility_meter helpers for daily tracking. Works with both daily-resetting and always-increasing sensor types
@@ -124,7 +125,6 @@ You can also install them manually:
 |---|---|---|
 | [Layout Card](https://github.com/thomasloven/lovelace-layout-card) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=thomasloven&repository=lovelace-layout-card) | Responsive grid layout |
 | [ApexCharts Card](https://github.com/RomRider/apexcharts-card) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=RomRider&repository=apexcharts-card) | Energy time-series charts |
-| [Sankey Chart Card](https://github.com/MindFreeze/ha-sankey-chart) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MindFreeze&repository=ha-sankey-chart) | Energy flow diagram |
 | [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=piitaya&repository=lovelace-mushroom) | Status pills and cards |
 | [Card Mod](https://github.com/thomasloven/lovelace-card-mod) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=thomasloven&repository=lovelace-card-mod) | CSS styling injection |
 | [HTML Jinja2 Template Card](https://github.com/PiotrMachowski/Home-Assistant-Lovelace-HTML-Jinja2-Template-card) | [![Install](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=PiotrMachowski&repository=Home-Assistant-Lovelace-HTML-Jinja2-Template-card) | HTML forecast tables |
@@ -201,7 +201,7 @@ The integration will **automatically detect** missing HACS frontend plugins and 
 The integration includes a **two-layer detection system** that automatically checks for required HACS frontend plugins:
 
 ### Backend Detection (on startup)
-When the integration loads, it scans your Lovelace resource list for the 5 required cards. If any are missing:
+When the integration loads, it scans your Lovelace resource list for the required cards. If any are missing:
 - A **persistent notification** appears in Home Assistant with direct install links for each missing card
 - A **Repair issue** is created in **Settings → System → Repairs** with a warning
 
@@ -493,6 +493,7 @@ Configure in Settings → **🔧 Features** tab:
 | **Solar Forecast** | Off | Enables Solcast/forecast.solar entity slots and chip display |
 | **Weather Widget** | On | Shows weather emoji + temperature badge on house card |
 | **Sunrise/Sunset** | On | Shows sunrise/sunset times on house card |
+| **Kiosk Mode** | Off | Hides HA sidebar, header, and toolbar for dedicated display/tablet setups. Floating exit button to disable |
 
 > **Note**: Changing EMS Provider, toggling Forecasts, Deferrable Loads, Financial Tracking, or Solar Forecast triggers a full dashboard rebuild to add/remove the relevant chart series and cards.
 
@@ -590,7 +591,7 @@ The house card composites multiple PNG layers:
 | **Dashboard not in sidebar** | Go to Settings → Devices & Services, find Genergy Dashboard, check it's loaded. Try a hard refresh (Ctrl+Shift+R) |
 | **Cards not appearing** | Clear browser cache (Ctrl+Shift+Delete), hard-refresh (Ctrl+Shift+R) |
 | **"Custom element doesn't exist: sigenergy-settings-card" (or sigenergy-house-card)** | This is auto-recovered by the built-in watchdog. **1)** Try a hard refresh (Ctrl+Shift+R / Cmd+Shift+R). **2)** If it persists, restart Home Assistant — the integration registers JS resources on startup. **3)** Check Settings → Devices & Services and confirm Genergy Dashboard is loaded without errors. |
-| **"Custom element doesn't exist: layout-card" (or apexcharts/mushroom/etc.)** | The integration will detect and notify you about missing cards automatically. Open the Settings tab to see the prerequisite banner with direct install links. Or install the 5 required HACS dependencies manually (see [Prerequisites](#prerequisites)) and restart HA |
+| **"Custom element doesn't exist: layout-card" (or apexcharts/mushroom/etc.)** | The integration will detect and notify you about missing cards automatically. Open the Settings tab to see the prerequisite banner with direct install links. Or install the required HACS dependencies manually (see [Prerequisites](#prerequisites)) and restart HA |
 | **Entity not found (red ✗ badge)** | Check entity ID in Developer Tools → States. Entity IDs are case-sensitive |
 | **Light/wrong theme** | The integration auto-installs and reloads the `sigenergy_dark` theme. If the dashboard shows a white background: **1)** Ensure `/config/themes/sigenergy_dark.yaml` exists. **2)** Ensure `configuration.yaml` has `frontend:` with `themes: !include_dir_merge_named themes`. **3)** Restart HA or call `frontend.reload_themes` from Developer Tools → Services. The theme forces dark styling on the dashboard regardless of your HA light/dark mode setting. |
 | **House card shows no image** | Ensure the integration is properly installed — images are bundled in the `frontend/images/` directory |
@@ -632,9 +633,10 @@ genergy-dashboard/
 │       │   └── en.json                # English translations
 │       ├── frontend/
 │       │   ├── genergy-dashboard.js   # Bridge JS (HACS resource entry point)
-│       │   ├── sigenergy-dashboard.js # Bundle: settings card + device card + dashboard builder
+│       │   ├── sigenergy-dashboard.js # Bundle: settings card + energy flow card + device card + dashboard builder
 │       │   ├── sigenergy-house-card.js# Animated house card (Lit Element)
-│       │   └── images/               # Runtime images (battery renders, house card assets)
+│       │   ├── sigenergy-smart-load-card.js # Smart load monitoring grid card
+│       │   └── images/               # Runtime images (battery renders, house card assets, smart load icons)
 │       │       ├── 1inverter[1-8]battery.png
 │       │       ├── home_has_solar_has_car.png
 │       │       ├── dark_home_has_solar_has_car.png
@@ -644,7 +646,8 @@ genergy-dashboard/
 │       │       ├── ac_charger_bg.png
 │       │       └── device_heat_pump.png
 │       └── themes/
-│           └── sigenergy_dark.yaml    # Bundled dark theme (auto-installed)
+│           ├── sigenergy_dark.yaml    # Bundled dark theme (auto-installed)
+│           └── sigenergy_light.yaml   # Bundled light theme (auto-installed)
 ├── dashboards/
 │   └── sigenergy.yaml                 # Bootstrap dashboard YAML (legacy manual install)
 ├── dist/

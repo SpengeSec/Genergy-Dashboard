@@ -76,7 +76,7 @@ const DEFAULT_CONFIG = {
     battery_min_soc: "",
   },
   colors: {
-    solar: "#f5c542",
+    solar: "#F0D850",
     battery_charge: "#e74c3c",
     battery_discharge: "#2ecc71",
     grid_import: "#e74c3c",
@@ -634,7 +634,7 @@ class SigenergyHouseCard extends LitElement {
   _renderEditor() {
     if (!this._isEditMode) return svg``;
     const pathColors = {
-      solar: '#f5c542',
+      solar: '#F0D850',
       home: '#3498db',
       battery: '#2ecc71',
       grid: '#e74c3c',
@@ -673,7 +673,7 @@ class SigenergyHouseCard extends LitElement {
 
     // ── SoC Ring editor handle ──────────────────────────────────────────────
     const ring = this._editRing || { cx: 498, cy: 585, r: 32, skewX: 0, skewY: 0 };
-    const ringColor = '#00d4aa';
+    const ringColor = '#00d4b8';
     const skX = ring.skewX || 0;
     const skY = ring.skewY || 0;
     const ringTransform = (skX || skY)
@@ -832,7 +832,7 @@ class SigenergyHouseCard extends LitElement {
     for (const [name, points] of Object.entries(this._editPaths)) {
       result[name] = this._pointsToPath(points);
     }
-    console.info('%c CABLE EDITOR — Current Paths:', 'color: #00d4aa; font-weight: bold;');
+    console.info('%c CABLE EDITOR — Current Paths:', 'color: #00d4b8; font-weight: bold;');
     console.info(JSON.stringify(result, null, 2));
     // Also build the YAML config snippet
     let yaml = 'paths:\n';
@@ -842,9 +842,9 @@ class SigenergyHouseCard extends LitElement {
     // Include ring position
     const ring = this._editRing;
     yaml += `soc_ring_cx: ${Math.round(ring.cx)}\nsoc_ring_cy: ${Math.round(ring.cy)}\nsoc_ring_r: ${Math.round(ring.r)}\nsoc_ring_skew_x: ${(ring.skewX || 0).toFixed(1)}\nsoc_ring_skew_y: ${(ring.skewY || 0).toFixed(1)}\n`;
-    console.info('%c YAML Config:', 'color: #f5c542; font-weight: bold;');
+    console.info('%c YAML Config:', 'color: #F0D850; font-weight: bold;');
     console.info(yaml);
-    console.info('%c SoC Ring Position:', 'color: #00d4aa; font-weight: bold;');
+    console.info('%c SoC Ring Position:', 'color: #00d4b8; font-weight: bold;');
     console.info(JSON.stringify(ring));
   }
 
@@ -943,7 +943,7 @@ class SigenergyHouseCard extends LitElement {
           url_path: 'dashboard-sigenergy',
           config: dashConfig,
         });
-        console.info('%c PATHS APPLIED & SAVED', 'color: #00d4aa; font-weight: bold;');
+        console.info('%c PATHS APPLIED & SAVED', 'color: #00d4b8; font-weight: bold;');
         return; // HA will rebuild the card with new config
       }
     } catch (err) {
@@ -1120,7 +1120,7 @@ class SigenergyHouseCard extends LitElement {
               <button class="copy-btn" @click="${this._onCopyPaths}">Copy Paths</button>
               ${Object.keys(this._editPaths).map(name => html`
                 <span class="path-controls">
-                  <span class="path-name" style="color: ${{solar:'#f5c542',home:'#3498db',battery:'#2ecc71',grid:'#e74c3c',ev:'#ff69b4'}[name]||'#fff'}">${name}</span>
+                  <span class="path-name" style="color: ${{solar:'#F0D850',home:'#3498db',battery:'#2ecc71',grid:'#e74c3c',ev:'#ff69b4'}[name]||'#fff'}">${name}</span>
                   <button class="sm-btn" data-path="${name}" @click="${this._onAddPoint}">+pt</button>
                   <button class="sm-btn" data-path="${name}" @click="${this._onRemovePoint}">-pt</button>
                 </span>
@@ -1222,7 +1222,7 @@ class SigenergyHouseCard extends LitElement {
       .editor-title {
         font-size: 14px;
         font-weight: 700;
-        color: #00d4aa;
+        color: #00d4b8;
         margin-bottom: 4px;
       }
 
@@ -1240,7 +1240,7 @@ class SigenergyHouseCard extends LitElement {
       }
 
       .copy-btn {
-        background: #00d4aa;
+        background: #00d4b8;
         color: #1a1f2e;
         border: none;
         padding: 6px 14px;
@@ -1248,10 +1248,11 @@ class SigenergyHouseCard extends LitElement {
         font-weight: 700;
         font-size: 12px;
         cursor: pointer;
+        transition: background 0.2s;
       }
 
       .copy-btn:hover {
-        background: #00f0c0;
+        background: #00d4b8;
       }
 
       .apply-btn {
@@ -1263,6 +1264,7 @@ class SigenergyHouseCard extends LitElement {
         font-weight: 700;
         font-size: 12px;
         cursor: pointer;
+        transition: background 0.2s;
       }
 
       .apply-btn:hover {
@@ -1288,6 +1290,7 @@ class SigenergyHouseCard extends LitElement {
         border-radius: 3px;
         font-size: 10px;
         cursor: pointer;
+        transition: background 0.2s;
       }
 
       .sm-btn:hover {
@@ -1421,6 +1424,6 @@ window.customCards.push({
 
 console.info(
   "%c SIGENERGY-HOUSE-CARD %c v3.16.2 ",
-  "color: white; background: #00d4aa; font-weight: bold; padding: 2px 6px; border-radius: 3px 0 0 3px;",
-  "color: #00d4aa; background: #1a1f2e; font-weight: bold; padding: 2px 6px; border-radius: 0 3px 3px 0;"
+  "color: white; background: #00d4b8; font-weight: bold; padding: 2px 6px; border-radius: 3px 0 0 3px;",
+  "color: #00d4b8; background: #1a1f2e; font-weight: bold; padding: 2px 6px; border-radius: 0 3px 3px 0;"
 );

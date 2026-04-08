@@ -118,10 +118,11 @@ class SigenergySmartLoadCard extends HTMLElement {
     if (!this.shadowRoot || !this._hass) return;
     const loads = this._getSmartLoads();
     const hass = this._hass;
-    const standbyThreshold = window.SigenergyConfig?.get()?.features?.smart_load_standby_threshold || 5;
+    const standbyThreshold = parseFloat(window.SigenergyConfig?.get()?.features?.smart_load_standby_threshold) || 5;
+    const hideInactive = window.SigenergyConfig?.get()?.features?.smart_load_hide_inactive;
 
-    // Check if loads config changed (needs full re-render)
-    const loadKeys = loads.map(l => l.entity_power + '|' + l.label).join(';');
+    // Check if loads config changed or hide-inactive toggle changed (needs full re-render)
+    const loadKeys = loads.map(l => l.entity_power + '|' + l.label).join(';') + '|hide=' + !!hideInactive + '|threshold=' + standbyThreshold;
     if (loadKeys !== this._lastLoadKeys) {
       this._rendered = false;
       this._render();
@@ -132,6 +133,7 @@ class SigenergySmartLoadCard extends HTMLElement {
     const tiles = this.shadowRoot.querySelectorAll('.tile');
     let totalWatts = 0;
     let totalKwh = 0;
+    let visibleCount = 0;
 
     tiles.forEach(tile => {
       const entityId = tile.dataset.entity;
@@ -148,11 +150,19 @@ class SigenergySmartLoadCard extends HTMLElement {
       const energyState = hass.states?.[load.entity_energy];
       const kwh = energyState ? parseFloat(energyState.state) : null;
 
+      // Hide inactive tiles when setting is enabled
+      if (hideInactive && (watts == null || watts <= standbyThreshold)) {
+        tile.style.display = 'none';
+        return;
+      }
+      tile.style.display = '';
+      visibleCount++;
+
       if (watts != null) totalWatts += watts;
       if (kwh != null && !isNaN(kwh)) totalKwh += kwh;
 
       // Update power text
-      let cls = 'off', tileCls = '';
+      let cls = 'off', tileCls = 'off';
       if (watts != null && watts > 0) {
         if (watts > 1000) { cls = 'high'; tileCls = 'high'; }
         else if (watts <= standbyThreshold) { cls = 'standby'; tileCls = 'standby'; }
@@ -190,9 +200,13 @@ class SigenergySmartLoadCard extends HTMLElement {
       return;
     }
 
-    const cols = window.SigenergyConfig?.get()?.features?.smart_load_columns || 4;
+    const userCols = window.SigenergyConfig?.get()?.features?.smart_load_columns;
     const sortBy = window.SigenergyConfig?.get()?.features?.smart_load_sort || 'power';
-    const standbyThreshold = window.SigenergyConfig?.get()?.features?.smart_load_standby_threshold || 5;
+    const standbyThreshold = parseFloat(window.SigenergyConfig?.get()?.features?.smart_load_standby_threshold) || 5;
+
+    // Adaptive column count based on load count (if user didn't set explicit value)
+    const loadCount = loads.length;
+    const cols = userCols || (loadCount <= 2 ? 2 : loadCount <= 6 ? 3 : 4);
 
     // Build load data with current values
     let items = loads.map(load => {
@@ -211,6 +225,12 @@ class SigenergySmartLoadCard extends HTMLElement {
       return { ...load, watts, kwh, typeInfo };
     });
 
+    // Filter out inactive loads if setting is enabled
+    const hideInactive = window.SigenergyConfig?.get()?.features?.smart_load_hide_inactive;
+    if (hideInactive) {
+      items = items.filter(item => item.watts != null && item.watts > standbyThreshold);
+    }
+
     // Sort
     if (sortBy === 'power') {
       items.sort((a, b) => (b.watts || 0) - (a.watts || 0));
@@ -223,22 +243,24 @@ class SigenergySmartLoadCard extends HTMLElement {
     // Totals
     const totalWatts = items.reduce((sum, i) => sum + (i.watts || 0), 0);
     const totalKwh = items.reduce((sum, i) => sum + (i.kwh || 0), 0);
+    const activeCount = items.filter(i => i.watts != null && i.watts > standbyThreshold).length;
 
+    const isDark = (window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark') === 'dark';
     this.shadowRoot.innerHTML = `
       <style>
         :host {
           display: block;
-          --card-bg: var(--ha-card-background, #22273a);
-          --text-primary: var(--primary-text-color, #fff);
-          --text-secondary: var(--secondary-text-color, #8892a4);
-          --accent: var(--primary-color, #00d4b8);
-          --border: var(--divider-color, rgba(92,156,230,0.12));
+          --text-primary: ${isDark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)'};
+          --text-secondary: ${isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'};
+          --accent: #00d4b8;
+          --border: ${isDark ? 'rgba(0,212,184,0.12)' : 'rgba(0,0,0,0.06)'};
         }
         .card {
-          background: var(--card-bg);
+          background: ${isDark ? 'linear-gradient(135deg, rgba(18,24,40,0.95) 0%, rgba(26,31,46,0.98) 50%, rgba(20,28,42,0.95) 100%)' : 'rgba(255,255,255,0.92)'};
           border: 1px solid var(--border);
           border-radius: 16px;
           padding: 16px;
+          box-shadow: ${isDark ? '0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)' : '0 2px 12px rgba(0,0,0,0.06)'};
         }
         .header {
           display: flex;
@@ -247,12 +269,12 @@ class SigenergySmartLoadCard extends HTMLElement {
           margin-bottom: 12px;
         }
         .header-title {
-          font-size: 14px;
+          font-size: 16px;
           font-weight: 600;
           color: var(--text-primary);
         }
         .header-total {
-          font-size: 12px;
+          font-size: 13px;
           color: var(--accent);
           font-weight: 600;
         }
@@ -262,19 +284,20 @@ class SigenergySmartLoadCard extends HTMLElement {
           gap: 8px;
         }
         @media (max-width: 768px) {
-          .grid { grid-template-columns: repeat(3, 1fr); }
+          .grid { grid-template-columns: repeat(${Math.min(cols, 3)}, 1fr); }
         }
         @media (max-width: 480px) {
           .grid { grid-template-columns: repeat(2, 1fr); }
         }
         .tile {
-          background: rgba(255,255,255,0.03);
-          border: 1px solid var(--border);
+          position: relative;
+          background: ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'};
+          border: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};
           border-radius: 12px;
           padding: 10px 8px;
           text-align: center;
           cursor: pointer;
-          transition: background 0.2s, border-color 0.2s;
+          transition: transform 0.2s, background 0.2s, border-color 0.2s, box-shadow 0.3s, opacity 0.3s;
           min-height: 90px;
           display: flex;
           flex-direction: column;
@@ -283,17 +306,49 @@ class SigenergySmartLoadCard extends HTMLElement {
           gap: 4px;
         }
         .tile:hover {
-          background: rgba(255,255,255,0.06);
+          transform: translateY(-2px);
+          background: ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'};
+          box-shadow: 0 4px 16px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.1)'};
           border-color: var(--accent);
         }
-        .tile.active { border-color: rgba(255,165,0,0.5); }
-        .tile.high { border-color: rgba(231,76,60,0.5); }
-        .tile.standby { border-color: rgba(255,235,59,0.3); }
+        .tile.active {
+          border-color: rgba(0,212,184,0.4);
+          box-shadow: 0 0 12px rgba(0,212,184,0.15), inset 0 0 8px rgba(0,212,184,0.04);
+        }
+        .tile.high {
+          border-color: rgba(231,76,60,0.5);
+          box-shadow: 0 0 16px rgba(231,76,60,0.2), inset 0 0 8px rgba(231,76,60,0.06);
+          animation: pulseHigh 2s ease-in-out infinite;
+        }
+        .tile.standby {
+          border-color: rgba(255,235,59,0.3);
+          box-shadow: 0 0 6px rgba(255,235,59,0.08);
+          opacity: 0.6;
+        }
+        @keyframes pulseHigh {
+          0%, 100% { box-shadow: 0 0 16px rgba(231,76,60,0.2), inset 0 0 8px rgba(231,76,60,0.06); }
+          50% { box-shadow: 0 0 24px rgba(231,76,60,0.35), inset 0 0 12px rgba(231,76,60,0.1); }
+        }
         .tile-icon {
           width: 36px;
           height: 36px;
           object-fit: contain;
           opacity: 0.9;
+          transition: opacity 0.2s, filter 0.3s;
+        }
+        .tile.active .tile-icon,
+        .tile.high .tile-icon { opacity: 1; }
+        .tile.off .tile-icon { opacity: 0.35; filter: grayscale(0.8); }
+        .tile.off { opacity: 0.45; }
+        .tile.off .tile-label { color: var(--text-secondary); opacity: 0.6; }
+        .rank-badge {
+          position: absolute;
+          top: 4px;
+          right: 6px;
+          font-size: 9px;
+          font-weight: 700;
+          color: var(--accent);
+          opacity: 0.6;
         }
         .tile-label {
           font-size: 10px;
@@ -308,9 +363,9 @@ class SigenergySmartLoadCard extends HTMLElement {
           font-weight: 600;
           color: var(--text-primary);
         }
-        .tile-power.active { color: #ffa726; }
+        .tile-power.active { color: #00d4b8; }
         .tile-power.high { color: #e74c3c; }
-        .tile-power.standby { color: #ffeb3b; }
+        .tile-power.standby { color: #ffeb3b; opacity: 0.7; }
         .tile-power.off { color: var(--text-secondary); }
         .tile-energy {
           font-size: 9px;
@@ -345,21 +400,28 @@ class SigenergySmartLoadCard extends HTMLElement {
           ${items.map(item => {
             const w = item.watts;
             let cls = 'off';
-            let tileCls = '';
+            let tileCls = 'off';
             if (w != null && w > 0) {
               if (w > 1000) { cls = 'high'; tileCls = 'high'; }
               else if (w <= standbyThreshold) { cls = 'standby'; tileCls = 'standby'; }
               else { cls = 'active'; tileCls = 'active'; }
             }
+            // Rank badge for active/high devices (1-based)
+            const activeItems = items.filter(i2 => i2.watts != null && i2.watts > standbyThreshold);
+            const rankIdx = activeItems.indexOf(item);
+            const rankHtml = rankIdx >= 0 ? `<span class="rank-badge">#${rankIdx + 1}</span>` : '';
+            const energyHtml = item.kwh != null && !isNaN(item.kwh)
+              ? `<div class="tile-energy">${_formatEnergy(item.kwh)}</div>` : '';
             return `
               <div class="tile ${tileCls}" data-entity="${item.entity_power}">
+                ${rankHtml}
                 <img class="tile-icon" src="${IMG_BASE}${item.type}_mid.png"
                      alt="${item.typeInfo?.label || item.type}"
                      loading="lazy"
                      onerror="this.src='${IMG_BASE}plug_socket_mid.png'">
                 <div class="tile-label">${item.label || item.typeInfo?.label || 'Load'}</div>
                 <div class="tile-power ${cls}">${_formatPower(w)}</div>
-                ${item.kwh != null && !isNaN(item.kwh) ? `<div class="tile-energy">${_formatEnergy(item.kwh)}</div>` : ''}
+                ${energyHtml}
               </div>
             `;
           }).join('')}
@@ -378,15 +440,20 @@ class SigenergySmartLoadCard extends HTMLElement {
       tile.addEventListener('click', () => {
         const entityId = tile.dataset.entity;
         if (entityId && this._hass) {
-          const event = new Event('hass-more-info', { bubbles: true, composed: true });
-          event.detail = { entityId };
+          const event = new CustomEvent('hass-more-info', {
+            bubbles: true,
+            composed: true,
+            detail: { entityId }
+          });
           this.dispatchEvent(event);
         }
       });
     });
 
     this._rendered = true;
-    this._lastLoadKeys = loads.map(l => l.entity_power + '|' + l.label).join(';');
+    const _hideInactive = window.SigenergyConfig?.get()?.features?.smart_load_hide_inactive;
+    const _stThresh = parseFloat(window.SigenergyConfig?.get()?.features?.smart_load_standby_threshold) || 5;
+    this._lastLoadKeys = loads.map(l => l.entity_power + '|' + l.label).join(';') + '|hide=' + !!_hideInactive + '|threshold=' + _stThresh;
   }
 }
 

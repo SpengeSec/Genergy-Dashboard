@@ -2,6 +2,52 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.19.0] - 2026-04-08
+
+### Added — Native Energy Flow Card (replaces ha-sankey-chart dependency)
+- **Custom SVG Energy Flow Card** — New `sigenergy-energy-flow-card` custom element replaces the third-party `ha-sankey-chart` HACS plugin. Renders thick gradient SVG ribbon flows between source and destination bars with smooth hover highlighting, click interaction, and proportional bar sizing. No external Sankey chart dependency required
+- **Proportional Bar Allocation** — Energy flow bars use a true proportional algorithm: `(kWh / totalKwh) × availableHeight` with 20px minimum floor and proportional shrinkage of larger bars to compensate. Bars always fill the full container height (520px)
+- **Adaptive Bar Labels** — Three label modes based on bar height: Normal (≥105px: badge + value + unit + percentage), Compact (55–104px: badge + value + unit), and Inline (<55px: badge + value as single line)
+- **Safari Cross-Browser Compatibility** — Defensive CSS (`overflow: hidden` on panels, `flex-shrink: 1` + `min-height: 0` on flex children) ensures consistent rendering across Chrome, Safari, and Firefox
+- **Sankey Hover Highlighting** — Flow paths respond to hover with smooth opacity transitions. Hovering a bar highlights its connected flows while dimming unrelated paths
+- **Sankey Stats Panel** — Click any node (Solar, Battery, Grid, Home, EV, HP) in the info panel to see a breakdown with current power/energy values. Re-render flash eliminated via `_lastStatsKey` comparison
+
+### Added — Kiosk Mode
+- **Kiosk Mode** — New Display setting that hides the HA sidebar, header, and toolbar for dedicated display/tablet installations. Injects CSS overrides into HA's shadow DOM hierarchy with resolution-aware spacing (1080p, 1440p, 4K)
+- **Kiosk Exit Button** — Floating ✕ button in top-right corner when kiosk is active. Click to disable kiosk mode and reload. Hover effect transitions between subtle and red highlight
+- **Kiosk Warning Label** — Orange warning in Display settings below the kiosk toggle explaining that it hides all navigation
+- **Kiosk Redirect** — Enabling kiosk mode automatically redirects to the main dashboard tab (`/dashboard-sigenergy/0`)
+
+### Added — BMS Auto-Detection
+- **Third-Party BMS Integration** — Auto-detect now discovers JK BMS, PACE BMS, Seplos BMS, BMS BLE (generic Bluetooth), and BMS Connector entities. Detects per-pack SoC sensors and maps them to battery pack slots, with voltage and current entity inference
+- **Battery System Settings Section** — Battery Voltage and Battery Current entities moved from the Inverter & PV section to a new dedicated Battery System section in Settings
+
+### Added — Smart Load Enhancements
+- **Hide Inactive Loads** — New toggle to hide smart load tiles for devices below the standby threshold
+- **Adaptive Column Count** — Smart load grid automatically adjusts columns based on load count (2 cols for ≤2 loads, 3 for ≤6, 4 for more) when no explicit column count is set
+- **Standby Threshold Parsing** — Fixed threshold comparison using `parseFloat()` for consistent numeric handling
+
+### Added — Chart & Visual Enhancements
+- **Sunrise/Sunset Annotations** — Energy chart now shows ☀ sunrise and 🌙 sunset vertical line annotations on the time axis, derived from the `sun.sun` entity. Covers yesterday, today, and tomorrow for full 48h span
+- **Losses Node in Energy Flow** — When "Show Losses" is enabled, a Losses destination node appears in the energy flow chart showing conversion/distribution losses
+- **Light Theme** — New `sigenergy_light` theme bundled and auto-installed alongside the dark theme. Backend `_install_theme()` now iterates both themes
+
+### Added — Settings & UX
+- **Settings Tab Persistence** — Active settings tab is remembered via `sessionStorage` across page navigations within the same session
+- **Section Dividers** — Settings sections now use styled divider elements with icons for clearer visual grouping
+
+### Fixed
+- **Device Card Hover Flash** — `SigenergyDeviceCard` no longer re-renders on every `hass` update. New `_shouldRerender()` method with `_lastRenderKey` comparison prevents unnecessary DOM rebuilds
+- **Smart Load Tile State Classes** — Tiles now correctly apply `off` CSS class when power is zero/unavailable (was missing `tileCls = 'off'` assignment)
+- **House Card Solar Color** — Updated solar accent color from `#f5c542` to `#F0D850` across all house card references (path editor, cable editor, YAML output)
+- **House Card SoC Ring Color** — Updated ring accent from `#00d4aa` to `#00d4b8` for better contrast
+- **House Card Button Transitions** — Added `transition: background 0.2s` to copy, apply, and small buttons in the cable path editor for smoother hover effects
+
+### Changed
+- **Sankey Chart Dependency Removed** — The third-party `ha-sankey-chart` HACS plugin is no longer required. The dashboard now uses the built-in `sigenergy-energy-flow-card` for energy flow visualization. Existing installations that still have the Sankey chart plugin can keep it — it will simply not be used
+- **Dashboard JS Version** — Updated console banner to v2.19.0
+- **House Card Version** — v3.16.2 (color tweaks, transition improvements)
+
 ## [2.18.3] - 2026-06-17
 
 ### Fixed

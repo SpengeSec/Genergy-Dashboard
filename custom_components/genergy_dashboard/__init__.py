@@ -304,21 +304,23 @@ async def _async_update_listener(
 
 
 def _install_theme(hass: HomeAssistant) -> bool:
-    """Copy bundled sigenergy_dark theme to HA themes directory.
+    """Copy bundled sigenergy_dark and sigenergy_light themes to HA themes directory.
 
-    Returns True if the theme was installed or updated.
+    Returns True if any theme was installed or updated.
     """
-    theme_src = Path(__file__).parent / "themes" / "sigenergy_dark.yaml"
-    if not theme_src.exists():
-        return False
     themes_dir = Path(hass.config.config_dir) / "themes"
     themes_dir.mkdir(exist_ok=True)
-    dest = themes_dir / "sigenergy_dark.yaml"
-    if not dest.exists() or dest.stat().st_size != theme_src.stat().st_size:
-        shutil.copy2(theme_src, dest)
-        _LOGGER.info("Genergy Dashboard: Installed sigenergy_dark theme")
-        return True
-    return False
+    changed = False
+    for name in ("sigenergy_dark", "sigenergy_light"):
+        theme_src = Path(__file__).parent / "themes" / f"{name}.yaml"
+        if not theme_src.exists():
+            continue
+        dest = themes_dir / f"{name}.yaml"
+        if not dest.exists() or dest.stat().st_size != theme_src.stat().st_size:
+            shutil.copy2(theme_src, dest)
+            _LOGGER.info("Genergy Dashboard: Installed %s theme", name)
+            changed = True
+    return changed
 
 
 async def _create_or_update_dashboard(
