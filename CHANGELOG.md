@@ -2,6 +2,19 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.20.1] - 2025-04-09
+
+### Fixed — Smart Load Persistence (Critical)
+- **`_merge()` Metadata Preservation** — Fixed critical bug where `_ts`, `_version`, and `_saved` metadata keys were silently dropped during config merge (only `Object.keys(defaults)` were iterated). This broke timestamp-based conflict resolution in `setHass()`, causing stale HA dashboard config to always overwrite fresh localStorage data (`0 >= 0` always true). Smart loads configured by users would disappear on page refresh if `_saveToHA()` hadn't completed yet
+
+### Fixed — Config Store Resilience
+- **`_loadFromHA()` — Search All Cards** — Now searches all cards in the overview view for `_sigenergy_config`, not just `cards[0]`. Prevents silent config loss if the layout card structure changes or a card is reordered
+- **`_saveToHA()` — Retry Logic** — Added retry mechanism (up to 2 retries with 1.5s delay) when saving config to HA dashboard YAML fails. Logs clear warnings when dashboard or view is not found instead of failing silently
+
+### Fixed — Unit Conversion
+- **`_getValKWh()` Power Unit Handling** — Added support for power units (`W`, `kW`/`KW`, `MW`) alongside existing energy units (`Wh`, `kWh`, `MWh`). Fixes incorrect display where e.g. 30 kW solar production was shown as "30 W" on the System Insights Environment tile
+- **Unit String Trimming** — Added `.trim()` to unit-of-measurement string to handle trailing whitespace from some integrations
+
 ## [2.20.0] - 2025-04-08
 
 ### Added — Auto-Detection for New Integrations

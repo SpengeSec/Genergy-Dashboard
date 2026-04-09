@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.20.0 — Bundled Distribution
+ * Genergy Dashboard v2.20.1 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -289,8 +289,14 @@ class SigConfigStore {
     if (!this._hass) return null;
     try {
       const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
-      const layout = config?.views?.find(v => v.path === 'overview')?.cards?.[0];
-      const stored = layout?._sigenergy_config;
+      const view = config?.views?.find(v => v.path === 'overview');
+      // Try cards[0] first (primary location), then search all cards for _sigenergy_config
+      let stored = view?.cards?.[0]?._sigenergy_config;
+      if (!stored && view?.cards) {
+        for (const c of view.cards) {
+          if (c?._sigenergy_config) { stored = c._sigenergy_config; break; }
+        }
+      }
       if (stored) return this._merge(DEFAULT_CONFIG, stored);
     } catch (e) { console.warn('SigConfig: failed to load from HA', e); }
     return null;
@@ -310,7 +316,7 @@ class SigConfigStore {
     this._saveToHAPromise = this._saveToHA(config);
   }
 
-  async _saveToHA(config) {
+  async _saveToHA(config, retries = 2) {
     if (!this._hass) return;
     try {
       const dashConfig = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
@@ -318,8 +324,16 @@ class SigConfigStore {
       if (view?.cards?.[0]) {
         view.cards[0]._sigenergy_config = config;
         await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config: dashConfig });
+      } else {
+        console.warn('SigConfig: dashboard-sigenergy overview view or layout card not found — config only saved to browser localStorage');
       }
-    } catch (e) { console.warn('SigConfig: failed to save to HA', e); }
+    } catch (e) {
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, 1500));
+        return this._saveToHA(config, retries - 1);
+      }
+      console.warn('SigConfig: failed to save to HA after retries — config only in localStorage', e);
+    }
   }
 
   _merge(defaults, overrides) {
@@ -331,6 +345,10 @@ class SigConfigStore {
         result[key] = overrides[key] !== undefined ? overrides[key] : defaults[key];
       }
     }
+    // Preserve metadata keys (_ts, _version, _saved) from overrides
+    if (overrides._ts !== undefined) result._ts = overrides._ts;
+    if (overrides._version !== undefined) result._version = overrides._version;
+    if (overrides._saved !== undefined) result._saved = overrides._saved;
     // Backward compat: migrate old boolean emhass flag to ems_provider
     if (result.features && result.features.ems_provider === undefined) {
       result.features.ems_provider = result.features.emhass === true ? 'emhass' : 'none';
@@ -7575,9 +7593,11 @@ class SigenergyInsightsCard extends HTMLElement {
     if (!s || s.state === 'unavailable' || s.state === 'unknown') return null;
     const v = parseFloat(s.state);
     if (isNaN(v)) return null;
-    const unit = (s.attributes?.unit_of_measurement || 'kWh').toString();
+    const unit = (s.attributes?.unit_of_measurement || 'kWh').toString().trim();
     if (unit === 'MWh') return v * 1000;
-    if (unit === 'Wh') return v / 1000;
+    if (unit === 'Wh' || unit === 'W') return v / 1000;
+    if (unit === 'kW' || unit === 'KW') return v;          // kW ≈ kWh for display
+    if (unit === 'MW') return v * 1000;
     return v;
   }
 
@@ -8708,7 +8728,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.20.0 ',
+  '%c GENERGY-DASHBOARD %c v2.20.1 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
