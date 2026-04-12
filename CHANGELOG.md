@@ -2,7 +2,7 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
-## [2.21.0-pre.1] - 2025-06-22
+## [2.21.0] - 2025-07-12
 
 ### Added — V2 Event Cards (by Roving-Ronin)
 - **HAEO Events Card V2** — Integrated the [HAEO Events Card](https://github.com/Roving-Ronin/myHomeAssistant) by [@Roving-Ronin](https://github.com/Roving-Ronin). Replaces the Jinja2 html-template-card for HAEO users with a native custom element featuring two tabs: "Future Decisions" (forecast-based event classification with 16 color-coded scenarios) and "Past Events" (historical kWh deltas via HA history API). Includes status bar with live SoC, buy/sell prices, and grid timing predictions
@@ -36,6 +36,31 @@ All notable changes to the Genergy Dashboard are documented here.
 - **Heat Pump Label** — House card now respects `heat_pump_label` config for the heat pump tile (was only reading `battery_label` for battery)
 - **Smart Load Empty State** — Smart load card no longer clears rendered content when load list temporarily becomes empty (keeps last known state visible)
 - **V2 Card Registration** — `__init__.py` now registers all three V2 event card JS files (`haeo-events-card.js`, `emhass-events-card.js`, `em-events-card.js`) with MD5 hash-based cache busting
+
+### Changed — V2 Event Card Table Improvements
+- **Sticky Table Headers** — All V2 event card tables now use `position: sticky; top: 0; z-index: 2` headers that stay visible while scrolling through timeslots. Consolidated from separate header/body tables into a single table with sticky `<thead>`
+- **Collapsible Legend Chevron** — Added animated rotating chevron indicator (`▶` → `▼`) to legend collapse toggle for clearer expand/collapse affordance
+- **Theme Variable Fix** — Replaced `--card-background-color` with `--primary-background-color` for sticky header backgrounds — ensures correct rendering across HA light and dark themes
+- **Table Scroll Fix** — Changed overflow from `overflow-y: auto` to `overflow: auto` enabling horizontal scrolling when table exceeds container width (`min-width: 700px`)
+- **Grid Export Classification** — EMHASS events card now correctly classifies grid export scenarios in forecast data
+
+### Changed — Responsive Layout
+- **iPad Portrait Breakpoint** — Updated responsive breakpoint from `769px`/`800px` to `1025px`, keeping iPad portrait (768–834px) in single-column layout to avoid cramped cards
+- **Smart Load Grid** — Smart loads section now switches to single-column at `≤1024px` (was `≤600px`), matching the main dashboard breakpoint
+
+### Changed — Energy Charts
+- **Price Precision** — Reduced price chart `float_precision` from `4` to `2` decimal places for cleaner price display
+- **Extended Chart Span** — Changed extended chart history from `-6h` to `-12h` for better context when viewing past data
+
+### Changed — Battery Auto-Detect
+- **Extended Battery Entity Matching** — Auto-detect now discovers battery power, temperature, cycle count, and capacity entities from battery pack prefixes (previously only voltage and current were detected)
+
+### Changed — Sankey Panel
+- **Click Toggle Behavior** — Clicking a Sankey node now toggles selection (select/deselect) instead of the previous expand → collapse → deselect three-state cycle
+- **Expand Button** — Expand/collapse button now correctly toggles the breakdown panel with visual state feedback
+
+### Changed — Insights Power Display
+- **Auto-Scaling Power Units** — Power values in System Insights (battery, solar, inverter, grid) now auto-scale between W/kW/MW using `_getValPower()` instead of always displaying in watts
 
 ## [2.20.1] - 2025-04-09
 

@@ -266,7 +266,7 @@ function _emec_legTable(items) {
 function _emec_buildLegend() {
   return '<details class="leg" style="font-size:11px;margin-top:12px;">' +
     '<summary style="display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;font-weight:bold;cursor:pointer;list-style:none;user-select:none;-webkit-user-select:none;">' +
-    '<span>📘 Legend</span>' +
+    '<span>📘 Legend <span class="leg-chevron" style="display:inline-block;transition:transform 0.2s ease;font-size:10px;margin-left:2px;">▶</span></span>' +
     '<span style="display:flex;align-items:center;gap:10px;">' +
     '<span class="pill" style="background:#555;font-size:10px;" id="provider-pill">⚡ ...</span>' +
     '<span style="color:var(--secondary-text-color);font-size:10px;font-weight:normal;">' + _EMEC_VERSION + '</span>' +
@@ -288,11 +288,12 @@ const _EMEC_STYLE = [
   '.sbar { display: flex; gap: 14px; align-items: center; padding: 4px 0 8px 0; font-size: 12px; flex-wrap: wrap; width: 100%; border-bottom: 2px solid #888; margin-bottom: 0; }',
   '.pill { padding: 2px 8px; border-radius: 10px; font-weight: bold; font-size: 11px; color: #fff; }',
   '.stxt { color: var(--secondary-text-color); font-size: 11px; }',
-  '.wrap { overflow-y: auto; width: 100%; }',
+  '.wrap { overflow: auto; width: 100%; }',
   '.pane { display: none; }',
   '.pane.active { display: block; }',
   /* All data-table rules scoped to .dt to prevent leaking into legend tables */
-  '.dt { border-collapse: collapse; width: 100%; table-layout: fixed; }',
+  '.dt { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 700px; table-layout: fixed; }',
+  '.dt thead { position: sticky; top: 0; z-index: 2; }',
   '.dt th, .dt td { padding: 3px 4px; border-bottom: 1px solid var(--divider-color,#444); font-size: 11px; line-height: 1.3; white-space: nowrap; text-align: right; overflow: hidden; text-overflow: ellipsis; }',
   '.dt th:nth-child(1) { text-align: left; box-shadow: inset -1px 0 0 #555; }',
   '.dt td:nth-child(1) { text-align: left !important; box-shadow: inset -1px 0 0 #555; font-size: 11px; }',
@@ -300,8 +301,8 @@ const _EMEC_STYLE = [
   '.dt td:nth-child(2) { text-align: left; white-space: normal; box-shadow: inset -1px 0 0 #555; font-size: 11px; }',
   '.dt th:nth-child(2) { white-space: normal; box-shadow: inset -1px 0 0 #555; }',
   '.cur-unit { font-size: 9px; font-weight: normal; opacity: 0.7; }',
-  '.dt thead { background-color: var(--card-background-color,#1c1c1c); }',
-  '.dt thead th { background-color: var(--card-background-color,#1c1c1c); font-weight: bold; color: var(--primary-text-color); border-bottom: 1px solid #666; }',
+  '.dt thead { background-color: var(--primary-background-color,#1c1c1c); }',
+  '.dt thead th { background-color: var(--primary-background-color,#1c1c1c); font-weight: bold; color: var(--primary-text-color); border-bottom: 1px solid #666; }',
   /* Last row of thead = kW/kWh row — thick bottom border separates header from data */
   '.dt thead tr:last-child th { border-bottom: 2px solid #888; }',
   /* thick left border = major group boundary */
@@ -312,6 +313,8 @@ const _EMEC_STYLE = [
   '.dr td.bgi, .dr td.bgl { text-align: right !important; }',
   '.msg { padding: 20px; text-align: center; color: var(--secondary-text-color); }',
   '.err { padding: 10px; color: #f44336; }',
+  '.leg summary::-webkit-details-marker { display: none; }',
+  '.leg[open] .leg-chevron { transform: rotate(90deg); }',
 ].join('\n');
 
 function _emec_buildHTML() {
@@ -337,8 +340,8 @@ function _emec_buildHTML() {
     // ── Future pane ──
     '<div class="pane active" id="pane-future">' +
     '<div class="sbar" id="sbar-future">⏳ Loading...</div>' +
-    // Header table — sits above the scroll area, never scrolls
-    '<table class="dt dt-head" style="margin-bottom:0;">' +
+    // Single table with sticky header inside scroll area
+    '<div class="wrap"><table class="dt">' +
     '<colgroup>' +
     '<col style="width:52px;"><col style="width:30%;"><col style="width:62px;"><col style="width:62px;">' +
     '<col style="width:40px;"><col style="width:44px;"><col style="width:40px;"><col style="width:44px;">' +
@@ -369,15 +372,6 @@ function _emec_buildHTML() {
     '<th class="bgi" style="text-align:right;">kWh</th>' +
     '</tr>' +
     '</thead>' +
-    '</table>' +
-    // Body scroll area
-    '<div class="wrap"><table class="dt">' +
-    '<colgroup>' +
-    '<col style="width:52px;"><col style="width:30%;"><col style="width:62px;"><col style="width:62px;">' +
-    '<col style="width:40px;"><col style="width:44px;"><col style="width:40px;"><col style="width:44px;">' +
-    '<col style="width:40px;"><col style="width:44px;"><col style="width:40px;"><col style="width:44px;">' +
-    '<col style="width:44px;"><col style="width:62px;">' +
-    '</colgroup>' +
     '<tbody id="tb-future"><tr><td colspan="14" class="msg">⏳ Loading...</td></tr></tbody>' +
     '</table></div>' +
     '</div>' +
@@ -388,8 +382,8 @@ function _emec_buildHTML() {
     '<strong style="color:var(--primary-text-color);">Past Decisions</strong>' +
     '<span class="stxt" id="st-past">Loading...</span>' +
     '</div>' +
-    // Header table — never scrolls
-    '<table class="dt dt-head" style="margin-bottom:0;">' +
+    // Single table with sticky header inside scroll area
+    '<div class="wrap"><table class="dt">' +
     '<colgroup>' +
     '<col style="width:52px;"><col style="width:30%;"><col style="width:62px;"><col style="width:62px;">' +
     '<col style="width:40px;"><col style="width:44px;"><col style="width:40px;"><col style="width:44px;">' +
@@ -417,18 +411,9 @@ function _emec_buildHTML() {
     '<th style="box-shadow:inset 2px 0 0 #666;text-align:right;">kW</th>' +
     '<th class="bgi" style="text-align:right;">kWh</th>' +
     '<th style="box-shadow:inset 2px 0 0 #666;text-align:right;">kW</th>' +
-    '<th class="bgi" style="text-align:right;">kWh</th>'
+    '<th class="bgi" style="text-align:right;">kWh</th>' +
     '</tr>' +
     '</thead>' +
-    '</table>' +
-    // Body scroll area
-    '<div class="wrap"><table class="dt">' +
-    '<colgroup>' +
-    '<col style="width:52px;"><col style="width:40%;"><col style="width:68px;"><col style="width:68px;">' +
-    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
-    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
-    '<col style="width:46px;"><col style="width:68px;">' +
-    '</colgroup>' +
     '<tbody id="tb-past"><tr><td colspan="14" class="msg">⏳ Select range to load...</td></tr></tbody>' +
     '</table></div>' +
     '</div>' +
@@ -521,15 +506,39 @@ class EmEventsCard extends HTMLElement {
       if (top < 10) return;
       const leg = this.shadowRoot.querySelector('.leg');
       const legH = leg ? leg.getBoundingClientRect().height + 12 : 0;
-      w.style.height = Math.max(120, window.innerHeight - top - legH - 12) + 'px';
+      /* Walk up DOM (crossing shadow boundaries) to find nearest overflow:hidden
+         container (e.g. modal). Use its max-height (not actual height) to avoid
+         circular sizing when the container shrinks to fit content. */
+      let avail = window.innerHeight - top - legH - 12;
+      let el = this;
+      for (let i = 0; i < 30 && el; i++) {
+        const p = el.parentElement || (el.getRootNode && el.getRootNode() !== document ? el.getRootNode().host : null);
+        if (!p) break;
+        try {
+          const cs = getComputedStyle(p);
+          if (cs.overflow === 'hidden' || cs.overflowY === 'hidden') {
+            const r = p.getBoundingClientRect();
+            const mh = parseFloat(cs.maxHeight);
+            const cH = (!isNaN(mh) && mh > 0) ? mh : r.height;
+            avail = cH - (top - r.top) - legH - 12;
+            break;
+          }
+        } catch(e) {}
+        el = p;
+      }
+      w.style.height = Math.max(120, avail) + 'px';
     });
-    // Sync header table widths — subtract scrollbar width so columns align
-    const wrap = this.shadowRoot.querySelector('.pane.active .wrap');
-    if (!wrap) return;
-    const scrollbarW = wrap.offsetWidth - wrap.clientWidth;
-    this.shadowRoot.querySelectorAll('.pane.active table.dt-head').forEach(t => {
-      t.style.width = 'calc(100% - ' + scrollbarW + 'px)';
-    });
+    /* Chrome doesn't support position:sticky on <thead>.
+       Apply it to each <th> with computed top for multi-row headers. */
+    const thead = this.shadowRoot.querySelector('.dt thead');
+    if (thead) {
+      const rows = thead.querySelectorAll('tr');
+      if (rows[0]) {
+        const h0 = rows[0].getBoundingClientRect().height;
+        rows[0].querySelectorAll('th').forEach(th => { th.style.position = 'sticky'; th.style.top = '0px'; th.style.zIndex = '3'; });
+        if (rows[1]) rows[1].querySelectorAll('th').forEach(th => { th.style.position = 'sticky'; th.style.top = h0 + 'px'; th.style.zIndex = '2'; });
+      }
+    }
   }
 
   set hass(hass) {

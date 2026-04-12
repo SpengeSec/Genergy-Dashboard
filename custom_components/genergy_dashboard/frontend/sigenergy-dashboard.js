@@ -2773,7 +2773,7 @@ class SigenergySettingsCard extends HTMLElement {
                     found.push('  Pack ' + (pi + 1) + ' SoC: ' + blePacks[pi].soc);
                   }
                 }
-                // Use first pack's voltage/current as battery-level entities
+                // Use first pack's voltage/current/power/temp as battery-level entities
                 if (blePacks[0].hasVolt && !cfg2.entities.battery_voltage) {
                   cfg2.entities.battery_voltage = blePacks[0].prefix + '_voltage';
                   found.push('  Battery Voltage: ' + blePacks[0].prefix + '_voltage');
@@ -2781,6 +2781,26 @@ class SigenergySettingsCard extends HTMLElement {
                 if (blePacks[0].hasCurr && !cfg2.entities.battery_current) {
                   cfg2.entities.battery_current = blePacks[0].prefix + '_current';
                   found.push('  Battery Current: ' + blePacks[0].prefix + '_current');
+                }
+                // Power
+                if (blePacks[0].prefix && !cfg2.entities.battery_power) {
+                  const pwr = allKeys.find(k => k === blePacks[0].prefix + '_power');
+                  if (pwr) { cfg2.entities.battery_power = pwr; found.push('  Battery Power: ' + pwr); }
+                }
+                // Temperature
+                if (blePacks[0].prefix && !cfg2.entities.battery_temp) {
+                  const temp = allKeys.find(k => k === blePacks[0].prefix + '_temperature') || allKeys.find(k => k === blePacks[0].prefix + '_temp');
+                  if (temp) { cfg2.entities.battery_temp = temp; found.push('  Battery Temp: ' + temp); }
+                }
+                // Cycle count
+                if (blePacks[0].prefix && !cfg2.entities.battery_cycles) {
+                  const cycles = allKeys.find(k => k === blePacks[0].prefix + '_cycle_count') || allKeys.find(k => k === blePacks[0].prefix + '_cycles') || allKeys.find(k => k === blePacks[0].prefix + '_cycle_charge');
+                  if (cycles) { cfg2.entities.battery_cycles = cycles; found.push('  Battery Cycles: ' + cycles); }
+                }
+                // Capacity
+                if (blePacks[0].prefix && !cfg2.entities.battery_capacity) {
+                  const cap = allKeys.find(k => k === blePacks[0].prefix + '_capacity') || allKeys.find(k => k === blePacks[0].prefix + '_battery_capacity');
+                  if (cap) { cfg2.entities.battery_capacity = cap; found.push('  Battery Capacity: ' + cap); }
                 }
               }
             }
@@ -4450,7 +4470,7 @@ return [];`;
         series.push({
           entity: e.buy_price, name: 'Import Price (plan)', color: '#FFD54F',
           type: 'line', extend_to: false, unit: priceUnit,
-          float_precision: 4, stroke_width: 1, opacity: 0.7,
+          float_precision: 2, stroke_width: 1, opacity: 0.7,
           show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: buyDG,
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 5
@@ -4460,7 +4480,7 @@ return [];`;
           series.push({
             entity: e.buy_price, name: 'Import Price', color: '#FFB300',
             type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
-            unit: priceUnit, float_precision: 4,
+            unit: priceUnit, float_precision: 2,
             group_by: { func: 'avg', duration: '30min' },
             show: { in_header: false, legend_value: true },
             yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
@@ -4476,7 +4496,7 @@ return [];`;
         series.push({
           entity: e.sell_price, name: 'Export Price (plan)', color: '#A5D6A7',
           type: 'line', extend_to: false, unit: priceUnit,
-          float_precision: 4, stroke_width: 1, opacity: 0.7,
+          float_precision: 2, stroke_width: 1, opacity: 0.7,
           show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: sellDG,
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 5
@@ -4486,7 +4506,7 @@ return [];`;
           series.push({
             entity: e.sell_price, name: 'Export Price', color: '#43A047',
             type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
-            unit: priceUnit, float_precision: 4,
+            unit: priceUnit, float_precision: 2,
             group_by: { func: 'avg', duration: '30min' },
             show: { in_header: false, legend_value: true },
             yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
@@ -4498,7 +4518,7 @@ return [];`;
         series.push({
           entity: e.current_import_price, name: 'Import Price', color: '#FFB300',
           type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
+          unit: priceUnit, float_precision: 2,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
@@ -4508,7 +4528,7 @@ return [];`;
         series.push({
           entity: e.current_export_price, name: 'Export Price', color: '#43A047',
           type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
+          unit: priceUnit, float_precision: 2,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
@@ -4835,7 +4855,7 @@ return forecast.map(function(d) {
           }
         },
         now: { show: true, label: 'Now', color: '#00d4b8' },
-        span: showExtendedChart ? { start: 'hour', offset: '-6h' } : undefined,
+        span: showExtendedChart ? { start: 'hour', offset: '-12h' } : undefined,
         all_series_config: { stroke_width: 2 },
         yaxis: yaxis,
         series: series
@@ -5024,12 +5044,13 @@ return forecast.map(function(d) {
       const mainLayout = overviewView.cards[0];
       if (!mainLayout || mainLayout.type !== 'custom:layout-card') throw new Error('Layout card not found');
 
-      // Responsive grid: 3 columns on desktop (house|sankey|battery), 2 on tablet, 1 on mobile
+      // Responsive grid: 3 columns on desktop (house|sankey|battery), 2 on tablet landscape, 1 on mobile/tablet portrait
+      // iPad portrait (768-834px) stays single column to avoid cramped layout
       if (mainLayout.layout) {
         mainLayout.layout['grid-template-columns'] = '1fr';
         mainLayout.layout['align-items'] = 'start';
         if (mainLayout.layout.mediaquery) {
-          mainLayout.layout.mediaquery['(min-width: 769px)'] = {
+          mainLayout.layout.mediaquery['(min-width: 1025px)'] = {
             'grid-template-columns': '1fr 1fr',
             'align-items': 'start'
           };
@@ -5462,7 +5483,7 @@ return forecast.map(function(d) {
             'grid-gap': '8px',
             'padding': '0',
             mediaquery: {
-              '(max-width: 600px)': { 'grid-template-columns': '1fr' }
+              '(max-width: 1024px)': { 'grid-template-columns': '1fr' }
             }
           },
           cards: [smartLoadsCard, insightsCard],
@@ -6360,7 +6381,7 @@ class SigenergySankeyPanel extends HTMLElement {
           this._expanded = false;
         } else {
           this._selectedNode = node.id;
-          this._expanded = true;
+          this._expanded = false;
         }
         this._updatePanel();
       };
@@ -6775,14 +6796,8 @@ class SigenergySankeyPanel extends HTMLElement {
   }
 
   _toggleExpand() {
-    if (this._expanded) {
-      // First click: collapse the breakdown section
-      this._expanded = false;
-    } else {
-      // Second click when already collapsed: deselect the node entirely
-      this._selectedNode = null;
-      this._expanded = false;
-    }
+    // Toggle between expanded and collapsed breakdown
+    this._expanded = !this._expanded;
     this._updatePanel();
   }
 
@@ -6894,15 +6909,20 @@ class SigenergySankeyPanel extends HTMLElement {
           margin-top: 2px;
         }
         .expand-btn {
-          text-align: center; padding: 4px 0; cursor: pointer;
+          text-align: center; padding: 6px 0; cursor: pointer;
           background: ${_panelBg};
           border-left: 1px solid var(--divider-color, #2d3451);
           border-right: 1px solid var(--divider-color, #2d3451);
           color: var(--secondary-text-color, #aaa);
           user-select: none; line-height: 1;
+          display: flex; align-items: center; justify-content: center; gap: 6px;
         }
-        .expand-btn svg { transition: transform 0.3s ease; }
-        .expand-btn.expanded svg { transform: rotate(180deg); }
+        .expand-btn .expand-chevron {
+          font-size: 10px; transition: transform 0.2s ease;
+        }
+        .expand-btn.expanded .expand-chevron { transform: rotate(180deg); }
+        .expand-btn .expand-hint { font-size: 10px; opacity: 0.5; transition: opacity 0.3s ease; }
+        .expand-btn.expanded .expand-hint { opacity: 0; width: 0; overflow: hidden; }
         .breakdown {
           display: flex; flex-wrap: wrap; gap: 0;
           background: ${_panelBg};
@@ -6921,7 +6941,7 @@ class SigenergySankeyPanel extends HTMLElement {
         .breakdown-item .dot {
           width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
         }
-        .breakdown-item .details { flex: 1; }
+        .breakdown-item .details { flex: 1; text-align: center; }
         .breakdown-item .pct {
           font-size: 20px; font-weight: bold;
           color: var(--primary-text-color, #fff);
@@ -6932,9 +6952,7 @@ class SigenergySankeyPanel extends HTMLElement {
         .breakdown-item .kwh {
           font-size: 12px; color: var(--secondary-text-color, #aaa);
         }
-        .chevron-icon {
-          width: 18px; height: 18px; fill: currentColor; vertical-align: middle;
-        }
+
         @media (max-width: 500px) {
           .stat-grid { grid-template-columns: 1fr 1fr; }
           .stat-chip .chip-val { font-size: 16px; }
@@ -6953,8 +6971,8 @@ class SigenergySankeyPanel extends HTMLElement {
       <div class="sankey-info-panel hidden" id="panel">
         <div class="info-main" id="infoMain"></div>
         <div class="expand-btn" id="expandBtn">
-          <svg class="chevron-icon" viewBox="0 0 24 24"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>
-          <svg class="chevron-icon" style="margin-left:-14px;" viewBox="0 0 24 24"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>
+          <span class="expand-chevron">▼</span>
+          <span class="expand-hint">tap to expand</span>
         </div>
         <div class="breakdown collapsed" id="breakdown"></div>
       </div>
@@ -7043,7 +7061,7 @@ class SigenergySankeyPanel extends HTMLElement {
             this._expanded = false;
           } else {
             this._selectedNode = nodeId;
-            this._expanded = true;
+            this._expanded = false;
           }
           this._updatePanel();
         });
@@ -7393,6 +7411,25 @@ class SigenergyInsightsCard extends HTMLElement {
     if (unit === 'kW' || unit === 'KW') return v;          // kW ≈ kWh for display
     if (unit === 'MW') return v * 1000;
     return v;
+  }
+
+  /** Return {value, unit} for a power entity, normalised for display.
+   *  Reads the sensor's unit_of_measurement and auto-scales to W or kW. */
+  _getValPower(entityId) {
+    if (!this._hass || !entityId) return null;
+    const s = this._hass.states[entityId];
+    if (!s || s.state === 'unavailable' || s.state === 'unknown') return null;
+    const raw = parseFloat(s.state);
+    if (isNaN(raw)) return null;
+    const unit = (s.attributes?.unit_of_measurement || 'W').toString().trim();
+    // Normalise to watts
+    let w = raw;
+    if (unit === 'kW' || unit === 'KW') w = raw * 1000;
+    else if (unit === 'MW') w = raw * 1000000;
+    // Auto-scale for display
+    const abs = Math.abs(w);
+    if (abs >= 1000) return { value: w / 1000, unit: ' kW', decimals: 2 };
+    return { value: w, unit: ' W', decimals: 0 };
   }
 
   _statusColor(status) {
@@ -7766,7 +7803,12 @@ class SigenergyInsightsCard extends HTMLElement {
     const ents = cfg.entities || {};
     const rows = [];
 
-    const addRow = (label, entityId, unit, decimals, useKWhConvert) => {
+    const addRow = (label, entityId, unit, decimals, useKWhConvert, usePowerConvert) => {
+      if (usePowerConvert) {
+        const p = this._getValPower(entityId);
+        if (p !== null) rows.push({ label, value: p.value.toFixed(p.decimals) + p.unit });
+        return;
+      }
       const v = useKWhConvert ? this._getValKWh(entityId) : this._getVal(entityId);
       if (v !== null) rows.push({ label, value: v.toFixed(decimals ?? 1) + (unit || '') });
     };
@@ -7777,7 +7819,7 @@ class SigenergyInsightsCard extends HTMLElement {
         addRow('Temperature', ents.battery_temp, '°C', 1);
         addRow('Voltage', ents.battery_voltage, ' V', 1);
         addRow('Current', ents.battery_current, ' A', 2);
-        addRow('Power', ents.battery_power, ' W', 0);
+        addRow('Power', ents.battery_power, null, null, false, true);
         addRow('Capacity', ents.battery_capacity, ' kWh', 1);
         addRow('Max SoC', ents.battery_max_soc, '%', 0);
         addRow('Min SoC', ents.battery_min_soc, '%', 0);
@@ -7787,25 +7829,25 @@ class SigenergyInsightsCard extends HTMLElement {
         addRow('Total Capacity', ents.battery_capacity, ' kWh', 1);
         addRow('Max SoC Limit', ents.battery_max_soc, '%', 0);
         addRow('Min SoC Limit', ents.battery_min_soc, '%', 0);
-        addRow('Charge Power', ents.battery_charge_power, ' W', 0);
-        addRow('Discharge Power', ents.battery_discharge_power, ' W', 0);
+        addRow('Charge Power', ents.battery_charge_power, null, null, false, true);
+        addRow('Discharge Power', ents.battery_discharge_power, null, null, false, true);
         break;
       case 'environmental':
         addRow('Solar Today', ents.solar_energy_today, ' kWh', 1, true);
         addRow('Grid Export', ents.grid_export_today, ' kWh', 1, true);
         addRow('Grid Import', ents.grid_import_today, ' kWh', 1, true);
         addRow('Self-Sufficiency', ents.self_sufficiency, '%', 0);
-        addRow('Solar Power Now', ents.solar_power, ' W', 0);
+        addRow('Solar Power Now', ents.solar_power, null, null, false, true);
         break;
       case 'equipment':
         addRow('Inverter Temp', ents.inverter_temp || ents.inverter_internal_temp, '°C', 1);
-        addRow('Inverter Power', ents.inverter_active_power, ' W', 0);
+        addRow('Inverter Power', ents.inverter_active_power, null, null, false, true);
         addRow('Grid Frequency', ents.grid_frequency, ' Hz', 2);
         break;
       case 'network':
         addRow('Voltage', ents.grid_voltage, ' V', 1);
         addRow('Frequency', ents.grid_frequency, ' Hz', 2);
-        addRow('Grid Power', ents.grid_active_power || ents.grid_power, ' W', 0);
+        addRow('Grid Power', ents.grid_active_power || ents.grid_power, null, null, false, true);
         addRow('Import Today', ents.grid_import_today, ' kWh', 1, true);
         addRow('Export Today', ents.grid_export_today, ' kWh', 1, true);
         break;
@@ -8718,15 +8760,15 @@ console.info(
 // ═══════════════════════════════════════════════════════════
 (function() {
   var RESPONSIVE_CSS = [
-    '/* Mobile: 1 column, all items stacked */',
-    '@media (max-width: 800px) {',
+    '/* Mobile + Tablet portrait: 1 column, all items stacked */',
+    '@media (max-width: 1024px) {',
     '  :host { overflow-x: hidden !important; max-width: 100vw !important; }',
     '  #root { grid-template-columns: 1fr !important; grid-template-rows: repeat(10, auto) !important; overflow-x: hidden !important; max-width: 100% !important; box-sizing: border-box !important; }',
     '  #root > * { grid-column: 1 !important; grid-row: auto !important; max-width: 100% !important; overflow: hidden !important; box-sizing: border-box !important; }',
     '}',
     '',
-    '/* Tablet: 2 columns with explicit placement */',
-    '@media (min-width: 801px) and (max-width: 1200px) {',
+    '/* Tablet landscape: 2 columns with explicit placement */',
+    '@media (min-width: 1025px) and (max-width: 1200px) {',
     '  #root { grid-template-columns: 1fr 1fr !important; grid-template-rows: repeat(6, auto) !important; }',
     '  #root > *:nth-child(1) { grid-column: 1 !important; grid-row: 1 !important; }',
     '  #root > *:nth-child(2) { grid-column: 2 !important; grid-row: 1 !important; }',
