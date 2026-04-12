@@ -78,6 +78,7 @@ Built-in visual cable path editor for customizing the animated power flow routes
 - **Responsive House Design** — Toggle EV charger/heat pump in settings and the house card updates dynamically: garage gate opens to show EV charging, heat pump unit appears on the house exterior
 - **Cable Path Editor** — Built-in visual editor for customizing animated power flow cable routes with drag-to-reposition control points and snap-to-grid
 - **Native Energy Flow Card** — Built-in SVG energy flow visualization (`sigenergy-energy-flow-card`) with thick gradient ribbon flows, proportional bar sizing, and interactive hover highlighting. Replaces the third-party `ha-sankey-chart` dependency — no external HACS plugin needed. Three adaptive label modes (Normal/Compact/Inline) based on bar height, with Safari/Chrome/Firefox cross-browser compatibility. Entities below 0.1 kWh are automatically hidden for a cleaner chart
+- **Dual-Tariff Grid Support** — When your inverter exposes separate high/low tariff daily import or export sensors, the Sankey chart and breakdown panel automatically sum both tariffs if no combined daily total entity is available
 - **Battery System Card** — SVG-based battery stack visualization with expandable detail panels for each inverter and battery pack (SoC, SoH, voltage, current, cycles, cell voltages, temperatures)
 - **Status Cards** — Real-time power values (Solar, Home, Battery, Grid) and daily energy totals (kWh)
 

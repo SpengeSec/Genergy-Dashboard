@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.21.1] - 2026-04-12
+
+### Fixed — Dual Tariff Sankey Grid Totals
+- **Grid Nodes Missing with Dual Tariff** — Fixed the built-in Sankey energy flow card and detail panel when `dual_tariff` is enabled and only high/low tariff daily entities are configured. Grid import/export nodes now carry `add_entities`, both `_getKwh()` implementations sum primary + secondary tariff sensors with unit conversion, and rerender detection includes aggregated tariff values so the grid bars and totals stay visible.
+
 ## [2.21.0] - 2025-07-12
 
 ### Added — V2 Event Cards (by Roving-Ronin)

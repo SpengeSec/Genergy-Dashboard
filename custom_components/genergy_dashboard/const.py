@@ -1,7 +1,7 @@
 """Constants for the Genergy Dashboard integration."""
 
 DOMAIN = "genergy_dashboard"
-VERSION = "2.21.0"
+VERSION = "2.21.1"
 DASHBOARD_URL_PATH = "dashboard-sigenergy"
 DASHBOARD_TITLE = "Genergy"
 

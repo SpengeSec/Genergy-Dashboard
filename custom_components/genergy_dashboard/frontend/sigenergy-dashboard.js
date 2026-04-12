@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.21.0-pre.1 — Bundled Distribution
+ * Genergy Dashboard v2.21.1 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -5343,10 +5343,14 @@ return forecast.map(function(d) {
         id: 'bat_d', name: 'Battery', color: _sTheme.battery, entity_id: e.battery_discharge_today, type: 'source',
         children: battDischargeChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
       });
-      if (_gridImportId) _sankeyNodes.push({
-        id: 'grid_i', name: 'Grid', color: _sTheme.grid_import, entity_id: _gridImportId, type: 'source',
-        children: gridImportChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
-      });
+      if (_gridImportId) {
+        const _giNode = {
+          id: 'grid_i', name: 'Grid', color: _sTheme.grid_import, entity_id: _gridImportId, type: 'source',
+          children: gridImportChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
+        };
+        if (_gridImportAdd) _giNode.add_entities = _gridImportAdd;
+        _sankeyNodes.push(_giNode);
+      }
       // Destination nodes
       if (e.load_energy_today) _sankeyNodes.push({
         id: 'load', name: 'Home', color: _sTheme.home, entity_id: e.load_energy_today, type: 'dest',
@@ -5356,10 +5360,14 @@ return forecast.map(function(d) {
         id: 'bat_c', name: 'Battery', color: _sTheme.battery, entity_id: e.battery_charge_today, type: 'dest',
         children: [], parents: [e.solar_energy_today, _gridImportId].filter(Boolean)
       });
-      if (_gridExportId) _sankeyNodes.push({
-        id: 'grid_e', name: 'Grid', color: _sTheme.grid_export, entity_id: _gridExportId, type: 'dest',
-        children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
-      });
+      if (_gridExportId) {
+        const _geNode = {
+          id: 'grid_e', name: 'Grid', color: _sTheme.grid_export, entity_id: _gridExportId, type: 'dest',
+          children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
+        };
+        if (_gridExportAdd) _geNode.add_entities = _gridExportAdd;
+        _sankeyNodes.push(_geNode);
+      }
       if (f.show_ev_in_sankey && evSankeyEntity) _sankeyNodes.push({
         id: 'ev', name: 'EV', color: _sTheme.ev, entity_id: evSankeyEntity, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
@@ -5393,10 +5401,14 @@ return forecast.map(function(d) {
         id: 'bat_d', name: 'Battery Discharged', color: _sTheme.battery, entity_id: e.battery_discharge_today, type: 'source',
         children: battDischargeChildren.map(eid => eid), parents: []
       });
-      if (_gridImportId) _panelNodes.push({
-        id: 'grid_i', name: 'Grid Imported', color: _sTheme.grid_import, entity_id: _gridImportId, type: 'source',
-        children: gridImportChildren.map(eid => eid), parents: []
-      });
+      if (_gridImportId) {
+        const _giPanelNode = {
+          id: 'grid_i', name: 'Grid Imported', color: _sTheme.grid_import, entity_id: _gridImportId, type: 'source',
+          children: gridImportChildren.map(eid => eid), parents: []
+        };
+        if (_gridImportAdd) _giPanelNode.add_entities = _gridImportAdd;
+        _panelNodes.push(_giPanelNode);
+      }
       // Destination nodes
       if (e.load_energy_today) _panelNodes.push({
         id: 'load', name: 'Home Consumed', color: _sTheme.home, entity_id: e.load_energy_today, type: 'dest',
@@ -5406,10 +5418,14 @@ return forecast.map(function(d) {
         id: 'bat_c', name: 'Battery Charged', color: _sTheme.battery, entity_id: e.battery_charge_today, type: 'dest',
         children: [], parents: [e.solar_energy_today, _gridImportId].filter(Boolean)
       });
-      if (_gridExportId) _panelNodes.push({
-        id: 'grid_e', name: 'Grid Exported', color: _sTheme.grid_export, entity_id: _gridExportId, type: 'dest',
-        children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
-      });
+      if (_gridExportId) {
+        const _gePanelNode = {
+          id: 'grid_e', name: 'Grid Exported', color: _sTheme.grid_export, entity_id: _gridExportId, type: 'dest',
+          children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
+        };
+        if (_gridExportAdd) _gePanelNode.add_entities = _gridExportAdd;
+        _panelNodes.push(_gePanelNode);
+      }
       if (f.show_ev_in_sankey && evSankeyEntity) _panelNodes.push({
         id: 'ev', name: 'EV Charger', color: _sTheme.ev, entity_id: evSankeyEntity, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
@@ -5805,7 +5821,13 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     const states = this._overriddenStates || (this._hass && this._hass.states) || {};
     const key = nodes.map(n => {
       const s = states[n.entity_id];
-      const raw = s ? parseFloat(s.state) || 0 : 0;
+      let raw = s ? parseFloat(s.state) || 0 : 0;
+      if (n.add_entities) {
+        for (const ae of n.add_entities) {
+          const as = states[ae];
+          raw += as ? parseFloat(as.state) || 0 : 0;
+        }
+      }
       return Math.round(raw * 10);
     }).join(',');
     if (key === this._lastRenderKey) return false;
@@ -5824,16 +5846,29 @@ class SigenergyEnergyFlowCard extends HTMLElement {
   connectedCallback() { this._scheduleRender(); }
   disconnectedCallback() { if (this._renderRAF) { cancelAnimationFrame(this._renderRAF); this._renderRAF = null; } }
 
-  _getKwh(entityId) {
+  _getKwh(entityId, addEntities) {
     if (!entityId) return 0;
     const states = this._overriddenStates || (this._hass && this._hass.states) || {};
     const s = states[entityId];
     if (!s) return 0;
     const raw = parseFloat(s.state) || 0;
     const unit = (s.attributes && s.attributes.unit_of_measurement) || 'kWh';
-    if (unit === 'MWh') return raw * 1000;
-    if (unit === 'Wh') return raw / 1000;
-    return raw;
+    let total;
+    if (unit === 'MWh') total = raw * 1000;
+    else if (unit === 'Wh') total = raw / 1000;
+    else total = raw;
+    if (addEntities && addEntities.length) {
+      for (const ae of addEntities) {
+        const as = states[ae];
+        if (!as) continue;
+        const ar = parseFloat(as.state) || 0;
+        const au = (as.attributes && as.attributes.unit_of_measurement) || 'kWh';
+        if (au === 'MWh') total += ar * 1000;
+        else if (au === 'Wh') total += ar / 1000;
+        else total += ar;
+      }
+    }
+    return total;
   }
 
   _formatValue(kwh) {
@@ -5847,8 +5882,8 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     if (!this.shadowRoot || !this._config.nodes) return;
     const nodes = this._config.nodes || [];
     const minKwh = this._config.min_flow || 0.1;
-    const sources = nodes.filter(n => n.type === 'source' && this._getKwh(n.entity_id) >= minKwh);
-    const dests = nodes.filter(n => n.type === 'dest' && this._getKwh(n.entity_id) >= minKwh);
+    const sources = nodes.filter(n => n.type === 'source' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
+    const dests = nodes.filter(n => n.type === 'dest' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
     if (sources.length === 0 && dests.length === 0) {
       this.shadowRoot.innerHTML = '<div style="padding:24px;text-align:center;color:#aaa;font-size:13px;">No energy data available</div>';
       return;
@@ -5859,8 +5894,8 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     const gap = 8;
 
     // Compute totals
-    const totalSrc = sources.reduce((s, n) => s + this._getKwh(n.entity_id), 0);
-    const totalDst = dests.reduce((s, n) => s + this._getKwh(n.entity_id), 0);
+    const totalSrc = sources.reduce((s, n) => s + this._getKwh(n.entity_id, n.add_entities), 0);
+    const totalDst = dests.reduce((s, n) => s + this._getKwh(n.entity_id, n.add_entities), 0);
 
     // Proportional box height allocation — bars scale with energy values
     const minBarH = 20;
@@ -5869,7 +5904,7 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     const _allocateBoxes = (nodeList, totalKwh, avail) => {
       if (nodeList.length === 0) return [];
       const boxes = nodeList.map(n => {
-        const kwh = this._getKwh(n.entity_id);
+        const kwh = this._getKwh(n.entity_id, n.add_entities);
         return { ...n, kwh, h: totalKwh > 0 ? (kwh / totalKwh) * avail : avail / nodeList.length, cursor: 0 };
       });
       // Enforce minimum heights: bump small bars, shrink large bars proportionally
@@ -6781,7 +6816,7 @@ class SigenergySankeyPanel extends HTMLElement {
     return deepFind(document, 'sigenergy-energy-flow-card', 0) || deepFind(document, 'sankey-chart-base', 0);
   }
 
-  _getKwh(entityId) {
+  _getKwh(entityId, addEntities) {
     if (!entityId || !this._hass) return 0;
     // When viewing a historical date, read from the overridden states
     // so stats panel and detail panel show historical values, not live.
@@ -6790,9 +6825,22 @@ class SigenergySankeyPanel extends HTMLElement {
     if (!stateObj) return 0;
     const raw = parseFloat(stateObj.state) || 0;
     const unit = (stateObj.attributes?.unit_of_measurement || 'kWh').toString();
-    if (unit === 'MWh') return raw * 1000;
-    if (unit === 'Wh') return raw / 1000;
-    return raw;
+    let total;
+    if (unit === 'MWh') total = raw * 1000;
+    else if (unit === 'Wh') total = raw / 1000;
+    else total = raw;
+    if (addEntities && addEntities.length) {
+      for (const ae of addEntities) {
+        const as = states[ae];
+        if (!as) continue;
+        const ar = parseFloat(as.state) || 0;
+        const au = (as.attributes?.unit_of_measurement || 'kWh').toString();
+        if (au === 'MWh') total += ar * 1000;
+        else if (au === 'Wh') total += ar / 1000;
+        else total += ar;
+      }
+    }
+    return total;
   }
 
   _toggleExpand() {
@@ -7006,8 +7054,8 @@ class SigenergySankeyPanel extends HTMLElement {
     const solarVal = solar ? this._getKwh(solar.entity_id) : 0;
     const loadVal = load ? this._getKwh(load.entity_id) : 0;
     const batCVal = batC ? this._getKwh(batC.entity_id) : 0;
-    const gridEVal = gridE ? this._getKwh(gridE.entity_id) : 0;
-    const gridIVal = gridI ? this._getKwh(gridI.entity_id) : 0;
+    const gridEVal = gridE ? this._getKwh(gridE.entity_id, gridE.add_entities) : 0;
+    const gridIVal = gridI ? this._getKwh(gridI.entity_id, gridI.add_entities) : 0;
     const evVal = ev ? this._getKwh(ev.entity_id) : 0;
     const hpVal = hp ? this._getKwh(hp.entity_id) : 0;
 
@@ -7092,7 +7140,7 @@ class SigenergySankeyPanel extends HTMLElement {
     panel.className = 'sankey-info-panel visible';
 
     // Get the value of the selected entity
-    const val = this._getKwh(node.entity_id);
+    const val = this._getKwh(node.entity_id, node.add_entities);
     infoMain.innerHTML = `
       <div class="value">${val.toFixed(2)} <span class="unit">kWh</span></div>
       <div class="label">${node.name}</div>
@@ -7122,10 +7170,10 @@ class SigenergySankeyPanel extends HTMLElement {
     const flowMatrix = {};
     const remaining = {};
     // Initialize remaining capacity for each destination
-    allDests.forEach(d => { remaining[d.entity_id] = this._getKwh(d.entity_id); });
+    allDests.forEach(d => { remaining[d.entity_id] = this._getKwh(d.entity_id, d.add_entities); });
     // Greedy allocation: sources in order (Grid first = smallest, then Battery, then Solar)
     allSources.forEach(src => {
-      const srcVal = this._getKwh(src.entity_id);
+      const srcVal = this._getKwh(src.entity_id, src.add_entities);
       let srcRemaining = srcVal;
       flowMatrix[src.entity_id] = {};
       const childSet = new Set((src.children || []).filter(eid => remaining[eid] !== undefined));
