@@ -1,10 +1,10 @@
-// EM Events Card
+// EM Events Card - https://github.com/Roving-Ronin/EMS-Events-Card
 // Combines Future Decisions (timeline) and Past Decisions (history) in one card
 // Requires: sensor.energy_manager_plan + inverter sensors
 // Copy to /config/www/em-events-card.js
 // Add resource: /local/em-events-card.js (type: JavaScript module)
 
-const _EMEC_VERSION = 'v2.4.8';
+const _EMEC_VERSION = 'v2.4.11';
 
 // Currency symbol — set from card config, defaults to '$'
 let _EMEC_CUR = '$';
@@ -293,14 +293,14 @@ const _EMEC_STYLE = [
   '.pane.active { display: block; }',
   /* All data-table rules scoped to .dt to prevent leaking into legend tables */
   '.dt { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 700px; table-layout: fixed; }',
-  '.dt thead { position: sticky; top: 0; z-index: 2; }',
-  '.dt th, .dt td { padding: 3px 4px; border-bottom: 1px solid var(--divider-color,#444); font-size: 11px; line-height: 1.3; white-space: nowrap; text-align: right; overflow: hidden; text-overflow: ellipsis; }',
+														
+  '.dt th, .dt td { padding: 4px 6px; border-bottom: 1px solid var(--divider-color,#444); font-size: 12px; line-height: 1.3; white-space: nowrap; text-align: right; overflow: hidden; text-overflow: ellipsis; }',
   '.dt th:nth-child(1) { text-align: left; box-shadow: inset -1px 0 0 #555; }',
   '.dt td:nth-child(1) { text-align: left !important; box-shadow: inset -1px 0 0 #555; font-size: 11px; }',
   /* nth-child(2) = Event col: left-align data rows, but NOT !important so th inline style can override to center */
   '.dt td:nth-child(2) { text-align: left; white-space: normal; box-shadow: inset -1px 0 0 #555; font-size: 11px; }',
   '.dt th:nth-child(2) { white-space: normal; box-shadow: inset -1px 0 0 #555; }',
-  '.cur-unit { font-size: 9px; font-weight: normal; opacity: 0.7; }',
+  '.cur-unit { font-size: 9px; font-weight: normal; opacity:0.7;}',							 
   '.dt thead { background-color: var(--primary-background-color,#1c1c1c); }',
   '.dt thead th { background-color: var(--primary-background-color,#1c1c1c); font-weight: bold; color: var(--primary-text-color); border-bottom: 1px solid #666; }',
   /* Last row of thead = kW/kWh row — thick bottom border separates header from data */
@@ -314,7 +314,7 @@ const _EMEC_STYLE = [
   '.msg { padding: 20px; text-align: center; color: var(--secondary-text-color); }',
   '.err { padding: 10px; color: #f44336; }',
   '.leg summary::-webkit-details-marker { display: none; }',
-  '.leg[open] .leg-chevron { transform: rotate(90deg); }',
+  '.leg[open] .leg-chevron { transform: rotate(90deg); }',														  
 ].join('\n');
 
 function _emec_buildHTML() {
@@ -343,10 +343,10 @@ function _emec_buildHTML() {
     // Single table with sticky header inside scroll area
     '<div class="wrap"><table class="dt">' +
     '<colgroup>' +
-    '<col style="width:52px;"><col style="width:30%;"><col style="width:62px;"><col style="width:62px;">' +
-    '<col style="width:40px;"><col style="width:44px;"><col style="width:40px;"><col style="width:44px;">' +
-    '<col style="width:40px;"><col style="width:44px;"><col style="width:40px;"><col style="width:44px;">' +
-    '<col style="width:44px;"><col style="width:62px;">' +
+    '<col style="width:52px;"><col style="width:40%;"><col style="width:68px;"><col style="width:68px;">' +
+    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
+    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
+    '<col style="width:46px;"><col style="width:68px;">' +
     '</colgroup>' +
     '<thead>' +
     '<tr>' +
@@ -372,6 +372,15 @@ function _emec_buildHTML() {
     '<th class="bgi" style="text-align:right;">kWh</th>' +
     '</tr>' +
     '</thead>' +
+    '</table>' +
+    // Body scroll area
+    '<div class="wrap"><table class="dt">' +
+    '<colgroup>' +
+    '<col style="width:52px;"><col style="width:40%;"><col style="width:68px;"><col style="width:68px;">' +
+    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
+    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
+    '<col style="width:46px;"><col style="width:68px;">' +
+    '</colgroup>' +
     '<tbody id="tb-future"><tr><td colspan="14" class="msg">⏳ Loading...</td></tr></tbody>' +
     '</table></div>' +
     '</div>' +
@@ -385,10 +394,10 @@ function _emec_buildHTML() {
     // Single table with sticky header inside scroll area
     '<div class="wrap"><table class="dt">' +
     '<colgroup>' +
-    '<col style="width:52px;"><col style="width:30%;"><col style="width:62px;"><col style="width:62px;">' +
-    '<col style="width:40px;"><col style="width:44px;"><col style="width:40px;"><col style="width:44px;">' +
-    '<col style="width:40px;"><col style="width:44px;"><col style="width:40px;"><col style="width:44px;">' +
-    '<col style="width:44px;"><col style="width:62px;">' +
+    '<col style="width:52px;"><col style="width:40%;"><col style="width:68px;"><col style="width:68px;">' +
+    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
+    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
+    '<col style="width:46px;"><col style="width:68px;">' +
     '</colgroup>' +
     '<thead>' +
     '<tr>' +
@@ -414,6 +423,15 @@ function _emec_buildHTML() {
     '<th class="bgi" style="text-align:right;">kWh</th>' +
     '</tr>' +
     '</thead>' +
+    '</table>' +
+    // Body scroll area
+    '<div class="wrap"><table class="dt">' +
+    '<colgroup>' +
+    '<col style="width:52px;"><col style="width:40%;"><col style="width:68px;"><col style="width:68px;">' +
+    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
+    '<col style="width:44px;"><col style="width:46px;"><col style="width:44px;"><col style="width:46px;">' +
+    '<col style="width:46px;"><col style="width:68px;">' +
+    '</colgroup>' +
     '<tbody id="tb-past"><tr><td colspan="14" class="msg">⏳ Select range to load...</td></tr></tbody>' +
     '</table></div>' +
     '</div>' +
@@ -434,14 +452,17 @@ class EmEventsCard extends HTMLElement {
     this._lastPlanTs   = null;
     this._lastRenderTs = 0;
     this._pastState    = 'idle';
+    this._pastLoadTs   = 0;
   }
 
   setConfig(config) {
     this._config = config || {};
-    _EMEC_CUR = this._config.currency_symbol || '$';
+    _EMEC_CUR = this._config.currency_symbol || '$';													
     if (!this.shadowRoot.getElementById('tb-future')) {
       this.shadowRoot.innerHTML = _emec_buildHTML();
       this._wireRange();
+      this._pastState  = 'idle';
+      this._lastPlanTs = null;
       requestAnimationFrame(() => this._setWrapHeight());
       if (!this._ro) {
         this._ro = new ResizeObserver(() => this._setWrapHeight());
@@ -562,7 +583,11 @@ class EmEventsCard extends HTMLElement {
     // Auto-load past on first hass set
     if (this._pastState === 'idle') {
       this._pastState = 'loading';
+      this._pastLoadTs = Date.now();
       this._loadPast();
+    } else if (this._pastState === 'loading' && this._pastLoadTs && (Date.now() - this._pastLoadTs) > 30000) {
+      // Stuck in loading for >30s — reset and retry
+      this._pastState = 'idle';
     }
   }
 
@@ -673,12 +698,13 @@ class EmEventsCard extends HTMLElement {
     const nowTs    = Date.now();
     const todayStr = new Date().toLocaleDateString('en-CA');
 
-    // Daily cost and kWh totals (provider-aware prices)
+    // Daily cost and kWh totals (provider-aware prices) — only future rows, matching render loop
     const dailyCosts = {};
     const dailyKwh  = {}; // { load, pv, grid (signed), batt (signed) }
     let curDay = '', curTotal = 0, curKwh = { load:0, pv:0, grid:0, batt:0 };
     for (const row of timeline) {
       const ts      = new Date(row.ts).getTime();
+      if (ts < nowTs) continue;  // skip past slots — matches render loop
       const day     = new Date(ts).toLocaleDateString('en-CA');
       const rowStepH = (row.interval_minutes || meta.step_minutes || 30) / 60;
       const { buyP, sellP } = _emec_getPrices(ts, provider, this._hass, row.inputs.buy_price || 0, row.inputs.sell_price || 0);
@@ -870,6 +896,11 @@ class EmEventsCard extends HTMLElement {
       const fGridKwh  = gridKw  * rowStepH;  // signed: negative=export, positive=import
       const fBattKwh  = battKw  * rowStepH;  // signed: negative=discharge, positive=charge
 
+      const fmtKw  = (v) => Math.abs(v) < 0.005 ? '<span style="color:' + c.txt + ';">—</span>' : '<span style="color:' + c.txt + ';">' + v.toFixed(2) + '</span>';
+      const fmtGKw = (v) => Math.abs(v) < 0.005 ? '<span style="color:' + c.txt + ';">—</span>' : '<span style="color:' + gridCol + ';">' + v.toFixed(2) + '</span>';
+      const fmtBKw = (v) => Math.abs(v) < 0.005 ? '<span style="color:' + c.txt + ';">—</span>' : '<span style="color:' + battCol + ';">' + v.toFixed(2) + '</span>';
+      const fmtGKwh = (v) => Math.abs(v) < 0.001 ? '—' : '<span style="color:' + gridCol + ';">' + v.toFixed(3) + '</span>';
+      const fmtBKwh = (v) => Math.abs(v) < 0.001 ? '—' : '<span style="color:' + battCol + ';">' + v.toFixed(3) + '</span>';
       const sellDisp = _emec_fmtP(sellP) + (capHit ? ' ⚠' : '');
 
       rows.push('<tr style="background-color:' + c.bg + ';color:' + c.txt + ';">' +
@@ -1108,6 +1139,12 @@ class EmEventsCard extends HTMLElement {
         const eGrid  = (eGridRaw  !== null && Math.abs(gridKw)  < 0.05) ? 0 : eGridRaw;
         const eBattRaw = battCKw  > 0.2 ? eBattC : (eBattD !== null ? -eBattD : null);
         const eBatt  = (eBattRaw  !== null && Math.abs(battKw)  < 0.05) ? 0 : eBattRaw;
+
+        const fmtKw  = (v) => Math.abs(v) < 0.005 ? '<span style="color:' + c.txt + ';">—</span>' : '<span style="color:' + c.txt + ';">' + v.toFixed(2) + '</span>';
+        const fmtGKw = (v) => Math.abs(v) < 0.005 ? '<span style="color:' + c.txt + ';">—</span>' : '<span style="color:' + gridCol + ';">' + v.toFixed(2) + '</span>';
+        const fmtBKw = (v) => Math.abs(v) < 0.005 ? '<span style="color:' + c.txt + ';">—</span>' : '<span style="color:' + battCol + ';">' + v.toFixed(2) + '</span>';
+        const fmtGKwh = (v) => (v === null || Math.abs(v) < 0.001) ? '—' : '<span style="color:' + gridCol + ';">' + v.toFixed(3) + '</span>';
+        const fmtBKwh = (v) => (v === null || Math.abs(v) < 0.001) ? '—' : '<span style="color:' + battCol + ';">' + v.toFixed(3) + '</span>';
 
         rows.push('<tr style="background-color:' + c.bg + ';color:' + c.txt + ';">' +
           '<td>' + timeStr + '</td>' +
