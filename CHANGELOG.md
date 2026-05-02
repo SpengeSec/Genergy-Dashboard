@@ -2,6 +2,181 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.21.1] - 2026-04-12
+
+### Fixed — Dual Tariff Sankey Grid Totals
+- **Grid Nodes Missing with Dual Tariff** — Fixed the built-in Sankey energy flow card and detail panel when `dual_tariff` is enabled and only high/low tariff daily entities are configured. Grid import/export nodes now carry `add_entities`, both `_getKwh()` implementations sum primary + secondary tariff sensors with unit conversion, and rerender detection includes aggregated tariff values so the grid bars and totals stay visible.
+
+## [2.21.0] - 2025-07-12
+
+### Added — V2 Event Cards (by Roving-Ronin)
+- **HAEO Events Card V2** — Integrated the [HAEO Events Card](https://github.com/Roving-Ronin/myHomeAssistant) by [@Roving-Ronin](https://github.com/Roving-Ronin). Replaces the Jinja2 html-template-card for HAEO users with a native custom element featuring two tabs: "Future Decisions" (forecast-based event classification with 16 color-coded scenarios) and "Past Events" (historical kWh deltas via HA history API). Includes status bar with live SoC, buy/sell prices, and grid timing predictions
+- **EMHASS Events Card V2** — Integrated the EMHASS Events Card by [@Roving-Ronin](https://github.com/Roving-Ronin). Three-tier sensor fallback (card YAML → MPC sensors → standard EMHASS sensors), per-slot cost calculation from forecast data (grid power × price × step duration), daily cost totals, and 16 color-coded event scenarios
+- **Energy Manager Events Card V2** — Integrated the Energy Manager Events Card by [@Roving-Ronin](https://github.com/Roving-Ronin) for Node-RED Energy Manager users. Same V2 feature set adapted for `sensor.energy_manager_plan` and `sensor.energy_manager_decision` entities
+- **Entity Auto-Mapping** — All three V2 event cards automatically map entities from the Genergy config store to the card's entity config keys
+
+### Added — Forecast Modal Overlay
+- **SigForecastModal** — New `sigenergy-forecast-modal` custom element replaces the old toggle + conditional card pattern for forecast tables. Compact trigger bar on the dashboard opens a fullscreen modal overlay (position: fixed, z-index: 999, backdrop blur) with the V2 event card inside. Close via ✕ button, backdrop click, or Escape key. Mobile-responsive (100vw × 100vh on small screens). Lazy card creation on first open for better page load performance
+- **No More `input_boolean` Dependency** — Removed the `input_boolean.genergy_forecast_table` toggle requirement. Single card replaces two (toggle + conditional)
+
+### Added — Energy Manager Provider
+- **4th EMS Provider Option** — Added "Energy Manager" as a fourth EMS provider alongside None, EMHASS, and HAEO. Auto-detects `sensor.energy_manager_decision` and `sensor.energy_manager_plan` entities. Includes dedicated entity configuration section in Settings with links to the Energy Manager GitHub repository
+
+### Added — Currency Symbol Support
+- **Settings-Driven Currency** — All three V2 event cards now read `currency_symbol` from their config (passed from `cfg.pricing.currency` via the dashboard builder). Replaces hardcoded `$` with the user's configured currency symbol in all cost columns, daily totals, and price headers
+
+### Added — Smart Load Types
+- **Shelly Device** — New smart load type with keyword matching for Shelly-based devices
+- **Generator** — New smart load type with multilingual keyword support (generator, genset, aggregaat, groupe electrogene, etc.)
+- **Circuit Breaker** — New smart load type with keywords for circuit breakers, RCBOs, MCBs, switchboards, and distribution boards (multilingual)
+
+### Changed — V2 Card UX Improvements
+- **Collapsible Legend** — Changed V2 event card legends from always-visible `<div>` to collapsible `<details>` elements. Start collapsed to save space; click "📘 Legend" to expand
+- **Tightened Table Layout** — Reduced column widths (Event 40%→30%, Buy/Sell 68→62px, data cols 44–46→40–44px), font size (12→11px), and cell padding (4px 6px→3px 4px) with overflow:hidden + text-overflow:ellipsis to prevent table overflow on narrow screens
+
+### Changed — Local Lottie Animations
+- **CDN Independence** — Downloaded `lottie.min.js` locally. The `_loadLottie()` function now tries the local path first (derived from `import.meta.url`), falling back to the CDN only on error. Removes dependency on the Sigenergy CDN for animated icons
+
+### Fixed
+- **Heat Pump Label** — House card now respects `heat_pump_label` config for the heat pump tile (was only reading `battery_label` for battery)
+- **Smart Load Empty State** — Smart load card no longer clears rendered content when load list temporarily becomes empty (keeps last known state visible)
+- **V2 Card Registration** — `__init__.py` now registers all three V2 event card JS files (`haeo-events-card.js`, `emhass-events-card.js`, `em-events-card.js`) with MD5 hash-based cache busting
+
+### Changed — V2 Event Card Table Improvements
+- **Sticky Table Headers** — All V2 event card tables now use `position: sticky; top: 0; z-index: 2` headers that stay visible while scrolling through timeslots. Consolidated from separate header/body tables into a single table with sticky `<thead>`
+- **Collapsible Legend Chevron** — Added animated rotating chevron indicator (`▶` → `▼`) to legend collapse toggle for clearer expand/collapse affordance
+- **Theme Variable Fix** — Replaced `--card-background-color` with `--primary-background-color` for sticky header backgrounds — ensures correct rendering across HA light and dark themes
+- **Table Scroll Fix** — Changed overflow from `overflow-y: auto` to `overflow: auto` enabling horizontal scrolling when table exceeds container width (`min-width: 700px`)
+- **Grid Export Classification** — EMHASS events card now correctly classifies grid export scenarios in forecast data
+
+### Changed — Responsive Layout
+- **iPad Portrait Breakpoint** — Updated responsive breakpoint from `769px`/`800px` to `1025px`, keeping iPad portrait (768–834px) in single-column layout to avoid cramped cards
+- **Smart Load Grid** — Smart loads section now switches to single-column at `≤1024px` (was `≤600px`), matching the main dashboard breakpoint
+
+### Changed — Energy Charts
+- **Price Precision** — Reduced price chart `float_precision` from `4` to `2` decimal places for cleaner price display
+- **Extended Chart Span** — Changed extended chart history from `-6h` to `-12h` for better context when viewing past data
+
+### Changed — Battery Auto-Detect
+- **Extended Battery Entity Matching** — Auto-detect now discovers battery power, temperature, cycle count, and capacity entities from battery pack prefixes (previously only voltage and current were detected)
+
+### Changed — Sankey Panel
+- **Click Toggle Behavior** — Clicking a Sankey node now toggles selection (select/deselect) instead of the previous expand → collapse → deselect three-state cycle
+- **Expand Button** — Expand/collapse button now correctly toggles the breakdown panel with visual state feedback
+
+### Changed — Insights Power Display
+- **Auto-Scaling Power Units** — Power values in System Insights (battery, solar, inverter, grid) now auto-scale between W/kW/MW using `_getValPower()` instead of always displaying in watts
+
+## [2.20.1] - 2025-04-09
+
+### Fixed — Smart Load Persistence (Critical)
+- **`_merge()` Metadata Preservation** — Fixed critical bug where `_ts`, `_version`, and `_saved` metadata keys were silently dropped during config merge (only `Object.keys(defaults)` were iterated). This broke timestamp-based conflict resolution in `setHass()`, causing stale HA dashboard config to always overwrite fresh localStorage data (`0 >= 0` always true). Smart loads configured by users would disappear on page refresh if `_saveToHA()` hadn't completed yet
+
+### Fixed — Config Store Resilience
+- **`_loadFromHA()` — Search All Cards** — Now searches all cards in the overview view for `_sigenergy_config`, not just `cards[0]`. Prevents silent config loss if the layout card structure changes or a card is reordered
+- **`_saveToHA()` — Retry Logic** — Added retry mechanism (up to 2 retries with 1.5s delay) when saving config to HA dashboard YAML fails. Logs clear warnings when dashboard or view is not found instead of failing silently
+
+### Fixed — Unit Conversion
+- **`_getValKWh()` Power Unit Handling** — Added support for power units (`W`, `kW`/`KW`, `MW`) alongside existing energy units (`Wh`, `kWh`, `MWh`). Fixes incorrect display where e.g. 30 kW solar production was shown as "30 W" on the System Insights Environment tile
+- **Unit String Trimming** — Added `.trim()` to unit-of-measurement string to handle trailing whitespace from some integrations
+
+## [2.20.0] - 2025-04-08
+
+### Added — Auto-Detection for New Integrations
+- **HomeWizard Auto-Detect** — Discovers HomeWizard P1 meter and Energy Socket entities (`_total_power_import_kwh`, `_active_power_w`, `_state_of_charge_pct` suffixes). Maps grid import/export, load power, and battery SoC when available
+- **Marstek Auto-Detect** — Discovers Marstek battery inverters via both Modbus (`sensor.marstek*` prefix) and Local API integrations. Detects system aggregates versus per-device entities using sensor naming patterns
+- **Zendure Auto-Detect** — Discovers Zendure portable power stations via `_electric_level` + `_solar_input_power` suffix patterns. Maps battery SoC and solar input power
+- **Battery Sign Convention Update** — Battery charge/discharge detection updated to recognize Marstek and Zendure naming patterns alongside existing Sigenergy Modbus conventions
+
+### Fixed — Sankey Energy Flow Labels (Safari)
+- **Proportional Font Scaling** — Rewrote `makeLabel()` to use linear proportional scaling based on bar height (`scale = (h - 40) / 160`, clamped 0.45–1.0) instead of fixed breakpoints. Font sizes: name 7–10px, value 14–26px, unit 8–12px, pct 9–13px
+- **Calculate-Based Element Visibility** — Unit and percentage elements are only rendered if their calculated height fits within the available bar space, preventing overflow clipping on any browser
+- **Safari Auto-Margin Centering** — Replaced `justify-content: center` with `margin-top: auto` / `margin-bottom: auto` on first/last children. Auto margins collapse to 0 on overflow (instead of clipping the top on Safari)
+- **Explicit Inline Styles** — All font sizes, line-heights, margins, and padding are set via inline `style=` attributes, eliminating browser-default variations between Chrome and Safari
+- **Panel Overflow Fix** — Changed `.node-panel` from `overflow: hidden` to `overflow: visible` so the parent `.node-bar` handles clipping symmetrically
+
+### Fixed — Sankey Historical Navigation
+- **Historical Date Click Fix** — Clicking bars on historical dates now works reliably. Added identity check in `set states()` setter and conditional re-apply guard in `_checkDateNavigation()` to prevent constant DOM re-renders that destroyed click handlers
+- **Post-Fetch Click Handler Re-Attachment** — After fetching historical data, click handlers are re-attached via double-RAF timing to ensure new DOM nodes are ready
+- **Safari `:has()` Fallback** — Added `.lbl-inline-wrap` class as fallback for Safari versions without `:has()` pseudo-class support
+
+### Changed
+- **Dashboard JS Version** — Updated console banner to v2.20.0
+- **Removed Fixed CSS Breakpoints** — Removed `.lbl-compact` rules and `@media` blocks with `!important` overrides that conflicted with proportional inline sizing
+
+## [2.19.0] - 2026-04-08
+
+### Added — Native Energy Flow Card (replaces ha-sankey-chart dependency)
+- **Custom SVG Energy Flow Card** — New `sigenergy-energy-flow-card` custom element replaces the third-party `ha-sankey-chart` HACS plugin. Renders thick gradient SVG ribbon flows between source and destination bars with smooth hover highlighting, click interaction, and proportional bar sizing. No external Sankey chart dependency required
+- **Proportional Bar Allocation** — Energy flow bars use a true proportional algorithm: `(kWh / totalKwh) × availableHeight` with 20px minimum floor and proportional shrinkage of larger bars to compensate. Bars always fill the full container height (520px)
+- **Adaptive Bar Labels** — Three label modes based on bar height: Normal (≥105px: badge + value + unit + percentage), Compact (55–104px: badge + value + unit), and Inline (<55px: badge + value as single line)
+- **Safari Cross-Browser Compatibility** — Defensive CSS (`overflow: hidden` on panels, `flex-shrink: 1` + `min-height: 0` on flex children) ensures consistent rendering across Chrome, Safari, and Firefox
+- **Sankey Hover Highlighting** — Flow paths respond to hover with smooth opacity transitions. Hovering a bar highlights its connected flows while dimming unrelated paths
+- **Sankey Stats Panel** — Click any node (Solar, Battery, Grid, Home, EV, HP) in the info panel to see a breakdown with current power/energy values. Re-render flash eliminated via `_lastStatsKey` comparison
+
+### Added — Kiosk Mode
+- **Kiosk Mode** — New Display setting that hides the HA sidebar, header, and toolbar for dedicated display/tablet installations. Injects CSS overrides into HA's shadow DOM hierarchy with resolution-aware spacing (1080p, 1440p, 4K)
+- **Kiosk Exit Button** — Floating ✕ button in top-right corner when kiosk is active. Click to disable kiosk mode and reload. Hover effect transitions between subtle and red highlight
+- **Kiosk Warning Label** — Orange warning in Display settings below the kiosk toggle explaining that it hides all navigation
+- **Kiosk Redirect** — Enabling kiosk mode automatically redirects to the main dashboard tab (`/dashboard-sigenergy/0`)
+
+### Added — BMS Auto-Detection
+- **Third-Party BMS Integration** — Auto-detect now discovers JK BMS, PACE BMS, Seplos BMS, BMS BLE (generic Bluetooth), and BMS Connector entities. Detects per-pack SoC sensors and maps them to battery pack slots, with voltage and current entity inference
+- **Battery System Settings Section** — Battery Voltage and Battery Current entities moved from the Inverter & PV section to a new dedicated Battery System section in Settings
+
+### Added — Smart Load Enhancements
+- **Hide Inactive Loads** — New toggle to hide smart load tiles for devices below the standby threshold
+- **Adaptive Column Count** — Smart load grid automatically adjusts columns based on load count (2 cols for ≤2 loads, 3 for ≤6, 4 for more) when no explicit column count is set
+- **Standby Threshold Parsing** — Fixed threshold comparison using `parseFloat()` for consistent numeric handling
+
+### Added — Chart & Visual Enhancements
+- **Sunrise/Sunset Annotations** — Energy chart now shows ☀ sunrise and 🌙 sunset vertical line annotations on the time axis, derived from the `sun.sun` entity. Covers yesterday, today, and tomorrow for full 48h span
+- **Losses Node in Energy Flow** — When "Show Losses" is enabled, a Losses destination node appears in the energy flow chart showing conversion/distribution losses
+- **Light Theme** — New `sigenergy_light` theme bundled and auto-installed alongside the dark theme. Backend `_install_theme()` now iterates both themes
+
+### Added — Settings & UX
+- **Settings Tab Persistence** — Active settings tab is remembered via `sessionStorage` across page navigations within the same session
+- **Section Dividers** — Settings sections now use styled divider elements with icons for clearer visual grouping
+
+### Fixed
+- **Device Card Hover Flash** — `SigenergyDeviceCard` no longer re-renders on every `hass` update. New `_shouldRerender()` method with `_lastRenderKey` comparison prevents unnecessary DOM rebuilds
+- **Smart Load Tile State Classes** — Tiles now correctly apply `off` CSS class when power is zero/unavailable (was missing `tileCls = 'off'` assignment)
+- **House Card Solar Color** — Updated solar accent color from `#f5c542` to `#F0D850` across all house card references (path editor, cable editor, YAML output)
+- **House Card SoC Ring Color** — Updated ring accent from `#00d4aa` to `#00d4b8` for better contrast
+- **House Card Button Transitions** — Added `transition: background 0.2s` to copy, apply, and small buttons in the cable path editor for smoother hover effects
+
+### Changed
+- **Sankey Chart Dependency Removed** — The third-party `ha-sankey-chart` HACS plugin is no longer required. The dashboard now uses the built-in `sigenergy-energy-flow-card` for energy flow visualization. Existing installations that still have the Sankey chart plugin can keep it — it will simply not be used
+- **Dashboard JS Version** — Updated console banner to v2.19.0
+- **House Card Version** — v3.16.2 (color tweaks, transition improvements)
+
+## [2.18.3] - 2026-06-17
+
+### Fixed
+- **Smart Load Card Tile Flashing** — Tiles no longer flash between grey and normal color on hover or during state updates. Replaced full `innerHTML` re-render on every `hass` update with in-place DOM value updates (`_updateValues()` method). Full re-render only triggers on initial load or when configured load keys change
+- **Sankey Click Target Mismatch** — Clicking "Battery" on the Sankey destination side no longer opens "Heat Pump" detail. Reordered destination entities so EV and Heat Pump appear after Battery and Grid Export (hidden items at bottom don't shift main click targets). Increased `min_state` threshold from 0.01 to 0.1 kWh to prevent tiny energy consumers from briefly appearing
+
+### Thanks
+- **@Roving-Ronin** for reporting both the tile flashing and Sankey click target issues
+
+## [2.18.2] - 2026-06-17
+
+### Added
+- **Smart Load Monitoring Card** — New `sigenergy-smart-load-card` custom element displaying auto-detected appliance power consumption in a responsive grid. 24 appliance types with multilingual keyword matching, auto-classification by entity name, real-time power display with animated icons
+- **Smart Load Auto-Detect** — Automatically finds power sensors for appliances (dishwasher, washing machine, dryer, fridge, oven, etc.) by filtering out system sensors (inverter, battery, grid, solar, EMHASS). Configurable on the Features tab
+- **Smart Load Entity Autocomplete** — Entity input fields for smart loads now feature autocomplete dropdown (search by name or entity_id, shows friendly name + current value)
+- **Include EMS Loads Toggle** — Optional toggle on Features tab to include entities already assigned as Heat Pump, Boiler, or Deferrable Loads in the EMS config in auto-detect results
+
+### Fixed
+- **html-template-card HACS Install Link** — Corrected the HACS repository owner/name from `nicufarmache/lovelace-html-template-card` (non-existent) to `PiotrMachowski/Home-Assistant-Lovelace-HTML-Jinja2-Template-card`. The prerequisite banner now links to the correct repository (fixes install error on fresh setups)
+- **Grid Frequency Missing from Sigenergy Defaults** — When using "Use Sigenergy Default Sensors", the Grid Frequency field was left empty. Now defaults to `sensor.sigen_inverter_grid_frequency` which is the correct inverter-level entity from Sigenergy Local Modbus
+
+### Changed
+- **README Prerequisites Table** — Added HTML Jinja2 Template Card to the required HACS plugins table with correct install link
+
+### Thanks
+- **@Roving-Ronin** for reporting both the broken HACS install link and the missing grid frequency default
+
 ## [2.18.1] - 2026-06-17
 
 ### Fixed

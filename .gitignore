@@ -4,3 +4,10 @@ node_modules/
 __pycache__/
 .DS_Store
 submit_*.py
+*.bak
+IMPLEMENTATION_PLAN.md
+
+# Unused mySigen assets (reserved for future features)
+custom_components/genergy_dashboard/frontend/images/big_screen/
+custom_components/genergy_dashboard/frontend/images/topology/
+custom_components/genergy_dashboard/frontend/three3d/

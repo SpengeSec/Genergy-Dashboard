@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.14.3 — Bundled Distribution
+ * Genergy Dashboard v2.19.0 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -18,6 +18,8 @@ const _SIGENERGY_SCRIPT_URL = import.meta.url;
 const _SIGENERGY_SCRIPT_DIR = new URL('.', _SIGENERGY_SCRIPT_URL).pathname.replace('/js/', '/frontend/');
 
 // House card auto-load is deferred until after SigConfigStore is initialised (see below)
+// Smart load card auto-load
+import('./sigenergy-smart-load-card.js').catch(e => console.warn('Smart load card import failed:', e));
 
 // ═══════════════════════════════════════════════════════════
 // Config Store (singleton)
@@ -172,12 +174,19 @@ const DEFAULT_CONFIG = {
     dual_tariff: false,
     show_ev_in_sankey: false,
     show_hp_in_sankey: false,
+    show_losses_in_sankey: true,
     ev_energy_is_cumulative: false,
     hp_energy_is_cumulative: false,
     battery_positive_charging: true,
     battery_runtime: true,
     pv_strings: 2,
+    smart_loads: false,
+    smart_load_columns: 4,
+    smart_load_sort: 'power',
+    smart_load_standby_threshold: 5,
+    smart_load_hide_inactive: false,
   },
+  smart_loads: [],
   pricing: {
     source: 'custom',
     cheap_threshold: 0.10,
@@ -194,6 +203,7 @@ const DEFAULT_CONFIG = {
     chart_range: 'today',
     soc_ring_low: 40,
     soc_ring_high: 60,
+    kiosk_mode: false,
   },
 };
 
@@ -351,6 +361,120 @@ window._sigenergyResolveTheme = function(hass) {
 };
 
 // Auto-load house card from same directory (after ConfigStore is available)
+
+// ── Kiosk mode ───────────────────────────────────────────
+// Hides HA sidebar + header for fullscreen wall-tablet experience
+window._sigenergyKioskStyleId = 'sigenergy-kiosk-css';
+window._sigenergyApplyKiosk = function(enable) {
+  // Inject/remove a <style> in each shadow root level
+  const _inject = (root, id, css, on) => {
+    if (!root) return;
+    let tag = root.getElementById ? root.getElementById(id) : root.querySelector('#' + id);
+    if (on && !tag) {
+      tag = document.createElement('style');
+      tag.id = id;
+      tag.textContent = css;
+      root.appendChild(tag);
+    } else if (!on && tag) {
+      tag.remove();
+    }
+  };
+
+  try {
+    // Level 1: home-assistant shadow root → hide sidebar + make main full-width
+    const ha = document.querySelector('home-assistant');
+    if (!ha || !ha.shadowRoot) return;
+    const haMain = ha.shadowRoot.querySelector('home-assistant-main');
+    if (!haMain || !haMain.shadowRoot) return;
+
+    _inject(haMain.shadowRoot, window._sigenergyKioskStyleId + '-main',
+      'ha-sidebar { display: none !important; } ' +
+      'ha-drawer { --mdc-drawer-width: 0px !important; } ' +
+      ':host { --mdc-top-app-bar-width: 100% !important; }',
+      enable);
+
+    // Level 2: panel-lovelace → hui-root → hide toolbar header + big-screen scaling
+    const panel = haMain.shadowRoot.querySelector('ha-panel-lovelace');
+    if (panel && panel.shadowRoot) {
+      const huiRoot = panel.shadowRoot.querySelector('hui-root');
+      if (huiRoot && huiRoot.shadowRoot) {
+        _inject(huiRoot.shadowRoot, window._sigenergyKioskStyleId + '-header',
+          '.header { display: none !important; }',
+          enable);
+
+        // Big-screen scaling CSS — injected into hui-root shadow
+        const bigScreenCSS = `
+          /* 1080p kiosk: add padding and increase card gap */
+          @media (min-width: 1200px) {
+            #view { padding: 12px 16px !important; }
+          }
+          /* 1440p+ kiosk: larger spacing */
+          @media (min-width: 1800px) {
+            #view { padding: 16px 24px !important; }
+            #view hui-view { --grid-card-gap: 8px !important; }
+          }
+          /* 4K kiosk: even more spacing */
+          @media (min-width: 2400px) {
+            #view { padding: 24px 32px !important; }
+          }
+        `;
+        _inject(huiRoot.shadowRoot, window._sigenergyKioskStyleId + '-bigscreen',
+          bigScreenCSS, enable);
+
+        // Level 3: hui-view — inject card-level scaling
+        const huiView = huiRoot.shadowRoot.querySelector('#view hui-view');
+        if (huiView && huiView.shadowRoot) {
+          const viewCSS = `
+            @media (min-width: 1200px) {
+              :host { --card-primary-font-size: 22px !important; --card-secondary-font-size: 13px !important; }
+            }
+            @media (min-width: 1800px) {
+              :host { --card-primary-font-size: 26px !important; --card-secondary-font-size: 15px !important; }
+            }
+          `;
+          _inject(huiView.shadowRoot, window._sigenergyKioskStyleId + '-viewscale',
+            viewCSS, enable);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Genergy] Kiosk mode error:', e);
+  }
+
+  // Add/remove floating exit button
+  const _exitId = 'sigenergy-kiosk-exit';
+  let _exitBtn = document.getElementById(_exitId);
+  if (enable && !_exitBtn) {
+    _exitBtn = document.createElement('div');
+    _exitBtn.id = _exitId;
+    _exitBtn.innerHTML = '✕';
+    _exitBtn.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;width:36px;height:36px;background:rgba(42,48,72,0.85);border:1px solid rgba(255,255,255,0.15);border-radius:50%;color:rgba(255,255,255,0.5);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:all 0.2s;';
+    _exitBtn.addEventListener('mouseenter', () => { _exitBtn.style.background = 'rgba(231,76,60,0.9)'; _exitBtn.style.color = '#fff'; });
+    _exitBtn.addEventListener('mouseleave', () => { _exitBtn.style.background = 'rgba(42,48,72,0.85)'; _exitBtn.style.color = 'rgba(255,255,255,0.5)'; });
+    _exitBtn.addEventListener('click', () => {
+      const _cfg = window.SigenergyConfig ? window.SigenergyConfig.get() : {};
+      if (_cfg.display) _cfg.display.kiosk_mode = false;
+      if (window.SigenergyConfig) window.SigenergyConfig.save(_cfg);
+      window._sigenergyApplyKiosk(false);
+      location.reload();
+    });
+    document.body.appendChild(_exitBtn);
+  } else if (!enable && _exitBtn) {
+    _exitBtn.remove();
+  }
+};
+
+// Apply kiosk on load if previously enabled
+try {
+  const _kioskCfg = window.SigenergyConfig ? window.SigenergyConfig.get() : {};
+  if (_kioskCfg.display && _kioskCfg.display.kiosk_mode) {
+    // Delay to let HA finish rendering its shadow DOM hierarchy
+    setTimeout(() => window._sigenergyApplyKiosk(true), 2000);
+    setTimeout(() => window._sigenergyApplyKiosk(true), 5000);
+  }
+} catch (e) { /* ignore */ }
+
+// Auto-load house card from same directory (after ConfigStore is available)
 if (!customElements.get('sigenergy-house-card')) {
   const _hcUrl = new URL('sigenergy-house-card.js', _SIGENERGY_SCRIPT_URL);
   // Forward cache-buster from parent module URL (set by __init__.py)
@@ -367,7 +491,7 @@ class SigenergySettingsCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._activeTab = 0;
+    this._activeTab = parseInt(sessionStorage.getItem('genergy_settings_tab') || '0') || 0;
     this._config = {};
     this._hass = null;
     this._pathEditorOn = false;
@@ -593,7 +717,7 @@ class SigenergySettingsCard extends HTMLElement {
           border: none; background: none;
           border-bottom: 2px solid transparent;
           white-space: nowrap;
-          transition: all 0.2s;
+          transition: color 0.2s, background 0.2s, border-bottom-color 0.2s;
         }
         .tab:hover { color: var(--primary-text-color, #fff); background: rgba(0,212,184,0.08); }
         .tab.active { color: #00d4b8; border-bottom-color: #00d4b8; }
@@ -607,7 +731,7 @@ class SigenergySettingsCard extends HTMLElement {
         .row {
           display: flex; align-items: center; gap: 8px;
           margin-bottom: 6px; padding: 6px 8px;
-          background: rgba(45,52,81,0.4); border-radius: 8px;
+          background: var(--secondary-background-color, rgba(45,52,81,0.4)); border-radius: 8px;
         }
         .row-label { min-width: 100px; max-width: 140px; font-size: 12px; color: var(--secondary-text-color, #8892a4); overflow: hidden; text-overflow: ellipsis; }
         .row-input {
@@ -626,7 +750,7 @@ class SigenergySettingsCard extends HTMLElement {
         .row-state.err { color: #e74c3c; }
         .toggle-row {
           display: flex; align-items: center; justify-content: space-between;
-          padding: 10px 12px; background: rgba(45,52,81,0.4);
+          padding: 10px 12px; background: var(--secondary-background-color, rgba(45,52,81,0.4));
           border-radius: 8px; margin-bottom: 6px;
         }
         .toggle-text { flex: 1; }
@@ -652,7 +776,7 @@ class SigenergySettingsCard extends HTMLElement {
           border-radius: 10px; background: var(--card-background-color, #1a1f2e);
           color: var(--primary-text-color, #fff);
           cursor: pointer; text-align: center; font-size: 13px;
-          font-weight: 500; transition: all 0.2s;
+          font-weight: 500; transition: border-color 0.2s, background 0.2s;
         }
         .price-btn:hover { border-color: #00d4b8; }
         .price-btn.active { border-color: #00d4b8; background: rgba(0,212,184,0.12); }
@@ -685,7 +809,7 @@ class SigenergySettingsCard extends HTMLElement {
         .section-detect-btn {
           background: none; border: 1px solid rgba(0,212,184,0.3); border-radius: 4px;
           color: #00d4b8; cursor: pointer; font-size: 11px; padding: 2px 6px;
-          margin-left: 8px; transition: all 0.2s;
+          margin-left: 8px; transition: background 0.2s, border-color 0.2s;
         }
         .section-detect-btn:hover { background: rgba(0,212,184,0.15); border-color: #00d4b8; }
         .candidate-picker {
@@ -697,7 +821,7 @@ class SigenergySettingsCard extends HTMLElement {
           display: flex; align-items: center; justify-content: space-between;
           padding: 4px 6px; margin: 2px 0; cursor: pointer; border-radius: 4px;
           background: rgba(255,255,255,0.03); border: 1px solid transparent;
-          transition: all 0.15s;
+          transition: background 0.2s, border-color 0.2s;
         }
         .candidate-item:hover { border-color: #00d4b8; background: rgba(0,212,184,0.1); cursor: pointer; }
         .candidate-item.cand-disabled { opacity: 0.5; cursor: help; }
@@ -804,6 +928,7 @@ class SigenergySettingsCard extends HTMLElement {
     this.shadowRoot.querySelectorAll('.tab').forEach(btn => {
       btn.addEventListener('click', () => {
         this._activeTab = parseInt(btn.dataset.tab);
+        try { sessionStorage.setItem('genergy_settings_tab', String(this._activeTab)); } catch(e) {}
         this._render();
       });
     });
@@ -1087,10 +1212,10 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Battery Charge Today', 'battery_charge_today', e)}
         ${this._entityRow('Battery Discharge Today', 'battery_discharge_today', e)}
       </div>
-      <div class="section" style="border:1px solid ${cfg.features?.dual_tariff ? '#6b7fd4' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
+      <div class="section" style="border:1px solid ${cfg.features?.dual_tariff ? '#00d4b8' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${cfg.features?.dual_tariff ? '12' : '0'}px;">
           <div>
-            <div style="font-size:14px;font-weight:700;color:${cfg.features?.dual_tariff ? '#6b7fd4' : '#8892a4'};">⚡ Grid Energy Metering</div>
+            <div style="font-size:14px;font-weight:700;color:${cfg.features?.dual_tariff ? '#00d4b8' : '#8892a4'};">⚡ Grid Energy Metering</div>
             <div style="font-size:11px;color:#8892a4;margin-top:2px;">Toggle dual tariff if your smart meter reports separate high/low tariff readings</div>
           </div>
           <div class="switch ${cfg.features?.dual_tariff ? 'on' : 'off'}" data-key="dual_tariff_toggle" style="flex-shrink:0;margin-left:12px;"></div>
@@ -1223,7 +1348,7 @@ class SigenergySettingsCard extends HTMLElement {
           </div>
         ` : ''}
       </div>
-      <div class="section" style="border:1px solid ${cfg.features?.show_ev_in_sankey ? '#ff69b4' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
+      <div class="section" style="border:1px solid ${cfg.features?.show_ev_in_sankey ? '#E8705A' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
         <div class="section-title">🔌 EV / Charger</div>
         ${this._entityRow('Charger Power', 'ev_charger_power', e)}
         ${this._entityRow('Charger State', 'ev_charger_state', e)}
@@ -1232,7 +1357,7 @@ class SigenergySettingsCard extends HTMLElement {
         <div style="margin-top:8px;border-top:1px solid rgba(155,89,182,0.2);padding-top:8px;">
           <div style="display:flex;align-items:center;justify-content:space-between;">
             <div>
-              <div style="font-size:12px;font-weight:600;color:${cfg.features?.show_ev_in_sankey ? '#ff69b4' : '#8892a4'};">📊 Show EV in Sankey Graph</div>
+              <div style="font-size:12px;font-weight:600;color:${cfg.features?.show_ev_in_sankey ? '#E8705A' : '#8892a4'};">📊 Show EV in Sankey Graph</div>
               <div style="font-size:10px;color:#8892a4;margin-top:1px;">Add EV consumption as a destination node in the energy flow chart</div>
             </div>
             <div class="switch ${cfg.features?.show_ev_in_sankey ? 'on' : 'off'}" data-key="show_ev_in_sankey_toggle" style="flex-shrink:0;margin-left:12px;"></div>
@@ -1241,12 +1366,12 @@ class SigenergySettingsCard extends HTMLElement {
             <div style="margin-top:8px;">
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
                 <div style="flex:1;">${this._entityRow('EV Energy Today', 'ev_energy_today', e)}</div>
-                <button class="auto-detect-btn" data-key="auto_detect_ev" style="flex-shrink:0;padding:6px 12px;background:#ff69b4;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;" title="Auto-detect from HA Energy Dashboard device list">🔍 Detect</button>
+                <button class="auto-detect-btn" data-key="auto_detect_ev" style="flex-shrink:0;padding:6px 12px;background:#E8705A;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;" title="Auto-detect from HA Energy Dashboard device list">🔍 Detect</button>
               </div>
               <div class="ev-detect-status" style="font-size:10px;color:#8892a4;display:none;margin-bottom:4px;"></div>
               ${cfg.features?.ev_energy_is_cumulative ? `
                 <div style="background:rgba(155,89,182,0.1);border:1px solid rgba(155,89,182,0.3);border-radius:8px;padding:8px;margin-bottom:6px;">
-                  <div style="font-size:10px;font-weight:600;color:#ff69b4;">📊 Cumulative sensor detected</div>
+                  <div style="font-size:10px;font-weight:600;color:#E8705A;">📊 Cumulative sensor detected</div>
                   <div style="font-size:10px;color:#8892a4;margin-top:2px;">Source entity tracks lifetime total. ${e.ev_energy_daily_meter ? 'Using daily utility meter: <b>' + e.ev_energy_daily_meter + '</b>' : 'No daily meter configured yet — click Detect to auto-create one.'}</div>
                   ${e.ev_energy_daily_meter ? this._entityRow('Daily Meter', 'ev_energy_daily_meter', e) : ''}
                 </div>
@@ -1286,6 +1411,15 @@ class SigenergySettingsCard extends HTMLElement {
           ` : ''}
         </div>
       </div>
+      <div class="section" style="border:1px solid ${cfg.features?.show_losses_in_sankey ? '#444' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:${cfg.features?.show_losses_in_sankey ? '#aaa' : '#8892a4'};">📉 Show Losses in Sankey Graph</div>
+            <div style="font-size:10px;color:#8892a4;margin-top:1px;">Display conversion/distribution losses as a destination node in the energy flow chart</div>
+          </div>
+          <div class="switch ${cfg.features?.show_losses_in_sankey ? 'on' : 'off'}" data-key="show_losses_in_sankey_toggle" style="flex-shrink:0;margin-left:12px;"></div>
+        </div>
+      </div>
       <div class="section" style="border:1px solid ${cfg.features?.solar_forecast ? '#FFA500' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${cfg.features?.solar_forecast ? '12' : '0'}px;">
           <div>
@@ -1314,10 +1448,10 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Inverter Temp', 'inverter_temp', e)}
         ${this._entityRow('Inv Internal Temp', 'inverter_internal_temp', e)}
         ${this._entityRow('Battery Temp', 'battery_temp', e)}
-        <div style="border:1px solid ${cfg.features?.three_phase ? '#c8b84a' : '#2d3451'};border-radius:10px;padding:10px;margin:8px 0;transition:all 0.3s;">
+        <div style="border:1px solid ${cfg.features?.three_phase ? '#F0D850' : '#2d3451'};border-radius:10px;padding:10px;margin:8px 0;transition:all 0.3s;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${cfg.features?.three_phase ? '8' : '0'}px;">
             <div>
-              <div style="font-size:13px;font-weight:600;color:${cfg.features?.three_phase ? '#c8b84a' : '#8892a4'};">⚡ Grid Voltage</div>
+              <div style="font-size:13px;font-weight:600;color:${cfg.features?.three_phase ? '#F0D850' : '#8892a4'};">⚡ Grid Voltage</div>
               <div style="font-size:10px;color:#8892a4;margin-top:1px;">Enable 3-phase to configure per-phase voltage sensors</div>
             </div>
             <div class="switch ${cfg.features?.three_phase ? 'on' : 'off'}" data-key="three_phase_toggle" style="flex-shrink:0;margin-left:12px;"></div>
@@ -1346,18 +1480,18 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Inverter Rated', 'inverter_rated_power', e)}
         ${this._entityRow('Rated Power', 'rated_power', e)}
         <div style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;">
-          <span style="font-size:12px;font-weight:600;color:#c8b84a;">☀️ PV Strings</span>
+          <span style="font-size:12px;font-weight:600;color:#F0D850;">☀️ PV Strings</span>
           <select class="pv-strings-select" data-key="pv_strings" style="background:var(--card-background-color,#1a1f2e);color:var(--primary-text-color,#e0e6f0);border:1px solid var(--divider-color,#2d3451);border-radius:6px;padding:3px 8px;font-size:11px;">
             ${[1,2,3,4,5,6].map(n => `<option value="${n}" ${(cfg.features?.pv_strings || 2) == n ? 'selected' : ''}>${n} string${n > 1 ? 's' : ''}</option>`).join('')}
           </select>
         </div>
         ${Array.from({length: cfg.features?.pv_strings || 2}, (_, i) => this._entityRow('PV' + (i+1) + ' Power', 'pv' + (i+1) + '_power', e)).join('\n        ')}
-        ${this._entityRow('Battery Voltage', 'battery_voltage', e)}
-        ${this._entityRow('Battery Current', 'battery_current', e)}
       </div>
       <div class="section">
-        <div class="section-title">🔋 Battery Pack SoC</div>
-        <div class="toggle-desc" style="margin-bottom:8px;color:#8892a4;font-size:11px;">Individual SoC sensors for each battery pack. Leave blank to use the main Battery SoC entity as fallback.</div>
+        <div class="section-title">🔋 Battery System</div>
+        <div class="toggle-desc" style="margin-bottom:8px;color:#8892a4;font-size:11px;">Battery voltage, current, and individual pack SoC sensors. Leave pack SoC blank to use the main Battery SoC entity as fallback.</div>
+        ${this._entityRow('Battery Voltage', 'battery_voltage', e)}
+        ${this._entityRow('Battery Current', 'battery_current', e)}
         ${Array.from({length: Math.min(cfg.features?.battery_packs || 2, 8)}, (_, i) => this._entityRow('Pack ' + (i+1) + ' SoC', 'battery_pack' + (i+1) + '_soc', e)).join('\n        ')}
       </div>
     `;
@@ -1552,6 +1686,22 @@ class SigenergySettingsCard extends HTMLElement {
         if (this._hass) {
           this._buildDashboard().then(ok => {
             if (ok) console.log('Dashboard rebuilt after toggling HP Sankey');
+            this._render();
+          }).catch(() => this._render());
+        } else { this._render(); }
+      });
+    }
+
+    // Losses in Sankey toggle handler
+    const lossesSankeyToggle = el.querySelector('[data-key="show_losses_in_sankey_toggle"]');
+    if (lossesSankeyToggle) {
+      lossesSankeyToggle.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        cfg2.features.show_losses_in_sankey = !cfg2.features.show_losses_in_sankey;
+        this._storeSave(cfg2);
+        if (this._hass) {
+          this._buildDashboard().then(ok => {
+            if (ok) console.log('Dashboard rebuilt after toggling Losses Sankey');
             this._render();
           }).catch(() => this._render());
         } else { this._render(); }
@@ -2128,6 +2278,58 @@ class SigenergySettingsCard extends HTMLElement {
               if (this._hass.states[l3Guess]) {
                 cfg2.entities.grid_voltage_l3 = l3Guess;
                 found.push('Grid Voltage L3: ' + l3Guess);
+              }
+            }
+          }
+
+          // ── Auto-detect BMS integrations (JK BMS, PACE BMS, Seplos BMS) ──
+          if (this._hass && this._hass.states) {
+            const allKeys = Object.keys(this._hass.states);
+            // Common BMS entity patterns:
+            // JK BMS:    sensor.jk_bms_*_state_of_charge, sensor.jk_bms_*_soc
+            // PACE BMS:  sensor.pace_bms_*_soc, sensor.pace_bms_*_state_of_charge
+            // Seplos BMS: sensor.seplos_*_soc, sensor.seplos_bms_*_soc
+            // BMS BLE (generic): sensor.*_bms_*_soc, sensor.*_bms_*_state_of_charge
+            // bms_connector: sensor.bms_*_soc
+            const bmsPatterns = [
+              { name: 'JK BMS', prefix: /^sensor\.jk_bms_/ },
+              { name: 'PACE BMS', prefix: /^sensor\.pace_bms_/ },
+              { name: 'Seplos BMS', prefix: /^sensor\.seplos[_.]/ },
+              { name: 'BMS BLE', prefix: /^sensor\.[a-z0-9_]*bms_ble_/ },
+              { name: 'BMS Connector', prefix: /^sensor\.bms_connector_/ },
+            ];
+            let bmsDetected = false;
+            for (const bms of bmsPatterns) {
+              const bmsKeys = allKeys.filter(k => bms.prefix.test(k));
+              if (bmsKeys.length === 0) continue;
+              // Find SoC entities
+              const socKeys = bmsKeys.filter(k => k.endsWith('_soc') || k.endsWith('_state_of_charge'));
+              if (socKeys.length > 0) {
+                bmsDetected = true;
+                found.push('🔋 ' + bms.name + ' detected (' + socKeys.length + ' pack' + (socKeys.length > 1 ? 's' : '') + ')');
+                // Auto-assign pack SoC entities
+                const sortedSocs = socKeys.sort();
+                const packCount = Math.min(sortedSocs.length, 8);
+                cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, packCount);
+                for (let pi = 0; pi < packCount; pi++) {
+                  const packKey = 'battery_pack' + (pi + 1) + '_soc';
+                  if (!cfg2.entities[packKey]) {
+                    cfg2.entities[packKey] = sortedSocs[pi];
+                    found.push('  Pack ' + (pi + 1) + ' SoC: ' + sortedSocs[pi]);
+                  }
+                }
+                // Also look for battery voltage/current from this BMS
+                const voltKey = bmsKeys.find(k => k.endsWith('_total_voltage') || k.endsWith('_pack_voltage') || k.endsWith('_voltage'));
+                const currKey = bmsKeys.find(k => k.endsWith('_current') || k.endsWith('_pack_current'));
+                if (voltKey && !cfg2.entities.battery_voltage) {
+                  cfg2.entities.battery_voltage = voltKey;
+                  found.push('  Battery Voltage: ' + voltKey);
+                }
+                if (currKey && !cfg2.entities.battery_current) {
+                  cfg2.entities.battery_current = currKey;
+                  found.push('  Battery Current: ' + currKey);
+                }
+                break; // Use first detected BMS brand
               }
             }
           }
@@ -2928,6 +3130,40 @@ class SigenergySettingsCard extends HTMLElement {
         </div>
       </div>
       <div class="section">
+        <div class="section-title">⚡ Smart Load Monitoring</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Track individual appliance power consumption. Enable the feature, then add loads below or use Auto-Detect to find power sensors.</div>
+        ${this._toggleHtml('Smart Loads', 'Show a grid of individual appliance tiles with real-time power and daily energy', 'smart_loads', f.smart_loads)}
+        ${f.smart_loads ? `
+          ${this._toggleHtml('Include EMS Loads', 'Also detect entities already assigned as Heat Pump, Boiler, or Deferrable Loads in the EMS/Entities config', 'smart_load_include_ems', f.smart_load_include_ems)}
+          ${this._toggleHtml('Hide Inactive Loads', 'Only show devices that are currently consuming energy (above standby threshold)', 'smart_load_hide_inactive', f.smart_load_hide_inactive)}
+          <div style="margin-top:8px;">
+            <div class="row">
+              <span class="row-label" style="font-size:12px;color:#8892a4;">Grid Columns</span>
+              <input class="row-input smart-load-setting" type="number" min="2" max="6" value="${f.smart_load_columns || 4}" data-sl-key="smart_load_columns" style="width:60px;" />
+            </div>
+            <div class="row" style="margin-top:4px;">
+              <span class="row-label" style="font-size:12px;color:#8892a4;">Sort By</span>
+              <select class="row-input smart-load-setting" data-sl-key="smart_load_sort" style="width:100px;background:var(--card-background-color,#1a1f2e);color:var(--primary-text-color,#fff);border:1px solid var(--divider-color,#2d3451);border-radius:6px;padding:4px;">
+                <option value="power" ${(f.smart_load_sort||'power')==='power'?'selected':''}>Power ↓</option>
+                <option value="energy" ${f.smart_load_sort==='energy'?'selected':''}>Energy ↓</option>
+                <option value="name" ${f.smart_load_sort==='name'?'selected':''}>Name A-Z</option>
+              </select>
+            </div>
+            <div class="row" style="margin-top:4px;">
+              <span class="row-label" style="font-size:12px;color:#8892a4;">Standby Threshold (W)</span>
+              <input class="row-input smart-load-setting" type="number" min="1" max="50" value="${f.smart_load_standby_threshold || 5}" data-sl-key="smart_load_standby_threshold" style="width:60px;" />
+            </div>
+          </div>
+          <div style="margin-top:10px;display:flex;gap:6px;">
+            <button class="action-btn" id="sl-auto-detect" style="flex:1;padding:8px;background:rgba(0,212,184,0.12);border:1px solid rgba(0,212,184,0.3);border-radius:8px;color:#00d4b8;font-size:11px;font-weight:600;cursor:pointer;">🔍 Auto-Detect Loads</button>
+            <button class="action-btn" id="sl-add-manual" style="flex:1;padding:8px;background:rgba(63,81,181,0.12);border:1px solid rgba(63,81,181,0.3);border-radius:8px;color:#7c8cf8;font-size:11px;font-weight:600;cursor:pointer;">➕ Add Manual</button>
+          </div>
+          <div id="sl-load-list" style="margin-top:10px;">
+            ${this._renderSmartLoadList(cfg)}
+          </div>
+        ` : ''}
+      </div>
+      <div class="section">
         <div class="section-title">🛠️ Developer</div>
         ${this._toggleHtml('Cable Path Editor', 'Drag-to-position cable routing overlay on house card (for layout customization)', 'path_editor', this._pathEditorOn)}
       </div>
@@ -3043,6 +3279,299 @@ class SigenergySettingsCard extends HTMLElement {
         this._syncSocTargetsToDashboard(cfg2);
       });
     }
+
+    // Smart Load settings bindings
+    el.querySelectorAll('.smart-load-setting').forEach(input => {
+      const handler = () => {
+        const cfg2 = this._storeGet();
+        const key = input.dataset.slKey;
+        if (input.type === 'number') {
+          cfg2.features[key] = parseInt(input.value) || parseInt(input.min) || 4;
+        } else {
+          cfg2.features[key] = input.value;
+        }
+        this._storeSave(cfg2);
+      };
+      input.addEventListener('change', handler);
+    });
+
+    // Smart Load auto-detect button
+    const slAutoBtn = el.querySelector('#sl-auto-detect');
+    if (slAutoBtn) {
+      slAutoBtn.addEventListener('click', async () => {
+        slAutoBtn.textContent = '⏳ Detecting...';
+        slAutoBtn.disabled = true;
+        try {
+          const detected = await this._autoDetectSmartLoads();
+          if (detected.length === 0) {
+            slAutoBtn.textContent = '✅ No new loads found';
+            setTimeout(() => { slAutoBtn.textContent = '🔍 Auto-Detect Loads'; slAutoBtn.disabled = false; }, 2000);
+            return;
+          }
+          const cfg2 = this._storeGet();
+          if (!cfg2.smart_loads) cfg2.smart_loads = [];
+          const existingPower = new Set(cfg2.smart_loads.map(l => l.entity_power));
+          let added = 0;
+          for (const load of detected) {
+            if (!existingPower.has(load.entity_power)) {
+              cfg2.smart_loads.push(load);
+              existingPower.add(load.entity_power);
+              added++;
+            }
+          }
+          this._storeSave(cfg2);
+          slAutoBtn.textContent = `✅ Added ${added} load${added !== 1 ? 's' : ''}`;
+          setTimeout(() => { slAutoBtn.textContent = '🔍 Auto-Detect Loads'; slAutoBtn.disabled = false; }, 2000);
+          // Rebuild the load list
+          const listEl = el.querySelector('#sl-load-list');
+          if (listEl) { listEl.innerHTML = this._renderSmartLoadList(cfg2); this._bindSmartLoadListEvents(el); this._bindSmartLoadEntityAutocomplete(el); }
+          // Rebuild dashboard to add smart load card
+          if (this._hass) this._buildDashboard();
+        } catch (e) {
+          console.error('Smart load auto-detect failed:', e);
+          slAutoBtn.textContent = '❌ Error';
+          setTimeout(() => { slAutoBtn.textContent = '🔍 Auto-Detect Loads'; slAutoBtn.disabled = false; }, 2000);
+        }
+      });
+    }
+
+    // Smart Load manual add button
+    const slAddBtn = el.querySelector('#sl-add-manual');
+    if (slAddBtn) {
+      slAddBtn.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        if (!cfg2.smart_loads) cfg2.smart_loads = [];
+        cfg2.smart_loads.push({
+          id: 'load_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+          entity_power: '',
+          entity_energy: '',
+          type: 'plug_socket',
+          label: 'New Load',
+          show_in_sankey: false,
+        });
+        this._storeSave(cfg2);
+        const listEl = el.querySelector('#sl-load-list');
+        if (listEl) {
+          listEl.innerHTML = this._renderSmartLoadList(cfg2);
+          this._bindSmartLoadListEvents(el);
+          this._bindSmartLoadEntityAutocomplete(el);
+          // Scroll to and focus the newly added item
+          const newItem = listEl.querySelector(`.sl-item[data-idx="${cfg2.smart_loads.length - 1}"]`);
+          if (newItem) {
+            newItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            const labelInput = newItem.querySelector('.sl-label');
+            if (labelInput) { labelInput.focus(); labelInput.select(); }
+          }
+        }
+        // Rebuild dashboard to include new load
+        if (this._hass) this._buildDashboard();
+      });
+    }
+
+    // Bind existing smart load list events
+    this._bindSmartLoadListEvents(el);
+    this._bindSmartLoadEntityAutocomplete(el);
+  }
+
+  _renderSmartLoadList(cfg) {
+    const loads = cfg.smart_loads || [];
+    if (!loads.length) {
+      return '<div style="font-size:11px;color:#666;text-align:center;padding:12px;">No smart loads configured. Use Auto-Detect or Add Manual.</div>';
+    }
+    const types = window.__sigApplianceTypes || [];
+    const imgBase = _SIGENERGY_SCRIPT_DIR + 'images/smart_load/';
+    return loads.map((load, idx) => `
+      <div class="sl-item" data-idx="${idx}" style="display:flex;align-items:center;gap:8px;padding:8px;margin-bottom:6px;background:rgba(255,255,255,0.03);border:1px solid rgba(92,156,230,0.12);border-radius:8px;">
+        <img src="${imgBase}${load.type || 'plug_socket'}_mid.png" style="width:28px;height:28px;object-fit:contain;" onerror="this.src='${imgBase}plug_socket_mid.png'" />
+        <div style="flex:1;min-width:0;">
+          <input class="sl-label" data-idx="${idx}" value="${(load.label || '').replace(/"/g, '&quot;')}" placeholder="Label" style="width:100%;border:none;background:transparent;color:var(--primary-text-color,#fff);font-size:12px;font-weight:600;outline:none;" />
+          <div class="entity-input-wrap" style="position:relative;">
+            <input class="sl-entity" data-idx="${idx}" value="${load.entity_power || ''}" placeholder="sensor.xxx_power — type to search" autocomplete="off" style="width:100%;border:none;background:transparent;color:#8892a4;font-size:10px;outline:none;margin-top:2px;" />
+            <div class="entity-dropdown sl-entity-dropdown" data-dropdown-idx="${idx}"></div>
+          </div>
+        </div>
+        <select class="sl-type" data-idx="${idx}" style="width:80px;background:var(--card-background-color,#1a1f2e);color:var(--secondary-text-color,#8892a4);border:1px solid var(--divider-color,#2d3451);border-radius:4px;font-size:10px;padding:2px;">
+          ${types.map(t => `<option value="${t.id}" ${load.type === t.id ? 'selected' : ''}>${t.label}</option>`).join('')}
+        </select>
+        <button class="sl-delete" data-idx="${idx}" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:16px;padding:4px;">✕</button>
+      </div>
+    `).join('');
+  }
+
+  _bindSmartLoadListEvents(el) {
+    // Label changes
+    el.querySelectorAll('.sl-label').forEach(input => {
+      input.addEventListener('change', () => {
+        const cfg2 = this._storeGet();
+        const idx = parseInt(input.dataset.idx);
+        if (cfg2.smart_loads?.[idx]) {
+          cfg2.smart_loads[idx].label = input.value;
+          this._storeSave(cfg2);
+        }
+      });
+    });
+    // Entity changes
+    el.querySelectorAll('.sl-entity').forEach(input => {
+      input.addEventListener('change', () => {
+        const cfg2 = this._storeGet();
+        const idx = parseInt(input.dataset.idx);
+        if (cfg2.smart_loads?.[idx]) {
+          cfg2.smart_loads[idx].entity_power = input.value;
+          this._storeSave(cfg2);
+          if (this._hass) this._buildDashboard();
+        }
+      });
+    });
+    // Type selector changes
+    el.querySelectorAll('.sl-type').forEach(select => {
+      select.addEventListener('change', () => {
+        const cfg2 = this._storeGet();
+        const idx = parseInt(select.dataset.idx);
+        if (cfg2.smart_loads?.[idx]) {
+          cfg2.smart_loads[idx].type = select.value;
+          this._storeSave(cfg2);
+          // Update the icon
+          const itemEl = select.closest('.sl-item');
+          if (itemEl) {
+            const img = itemEl.querySelector('img');
+            if (img) img.src = _SIGENERGY_SCRIPT_DIR + 'images/smart_load/' + select.value + '_mid.png';
+          }
+        }
+      });
+    });
+    // Delete buttons
+    el.querySelectorAll('.sl-delete').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        const idx = parseInt(btn.dataset.idx);
+        if (cfg2.smart_loads?.[idx]) {
+          cfg2.smart_loads.splice(idx, 1);
+          this._storeSave(cfg2);
+          const listEl = el.querySelector('#sl-load-list');
+          if (listEl) { listEl.innerHTML = this._renderSmartLoadList(cfg2); this._bindSmartLoadListEvents(el); this._bindSmartLoadEntityAutocomplete(el); }
+          if (this._hass) this._buildDashboard();
+        }
+      });
+    });
+  }
+
+  _bindSmartLoadEntityAutocomplete(el) {
+    if (!this._hass || !this._hass.states) return;
+    const allEntityIds = Object.keys(this._hass.states);
+    const closeAllSLDropdowns = () => {
+      el.querySelectorAll('.sl-entity-dropdown.open').forEach(d => d.classList.remove('open'));
+    };
+    el.querySelectorAll('.sl-entity').forEach(input => {
+      const wrap = input.closest('.entity-input-wrap');
+      const dropdown = wrap ? wrap.querySelector('.sl-entity-dropdown') : null;
+      if (!dropdown) return;
+      const showDropdown = (filter) => {
+        const q = (filter || '').toLowerCase();
+        if (!q || q.length < 2) { dropdown.classList.remove('open'); return; }
+        const matches = allEntityIds.filter(k => {
+          const st = this._hass.states[k];
+          const fn = (st?.attributes?.friendly_name || '').toLowerCase();
+          return k.toLowerCase().includes(q) || fn.includes(q);
+        }).slice(0, 40);
+        if (matches.length === 0) { dropdown.classList.remove('open'); return; }
+        dropdown.innerHTML = matches.map(k => {
+          const st = this._hass.states[k];
+          const fn = st?.attributes?.friendly_name || '';
+          const val = st?.state || '';
+          const uom = st?.attributes?.unit_of_measurement || '';
+          return '<div class="entity-dropdown-item" data-eid="' + this._esc(k) + '"><span class="entity-name">' + this._esc(k) + '</span>' + (fn ? ' <span class="entity-state">' + this._esc(fn) + '</span>' : '') + ' <span class="entity-state">= ' + this._esc(val) + (uom ? ' ' + this._esc(uom) : '') + '</span></div>';
+        }).join('');
+        dropdown.classList.add('open');
+        dropdown.querySelectorAll('.entity-dropdown-item').forEach(item => {
+          item.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            input.value = item.dataset.eid;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            closeAllSLDropdowns();
+          });
+        });
+      };
+      input.addEventListener('focus', () => showDropdown(input.value));
+      input.addEventListener('input', () => showDropdown(input.value));
+      input.addEventListener('blur', () => { setTimeout(closeAllSLDropdowns, 200); });
+    });
+  }
+
+  async _autoDetectSmartLoads() {
+    if (!this._hass) return [];
+    const allStates = this._hass.states;
+    const cfg = this._storeGet();
+    const includeEms = cfg.features?.smart_load_include_ems;
+
+    // Entity keys that represent actual end-device power (not system-level)
+    const emsLoadKeys = new Set(['heat_pump_power', 'deferrable0_power', 'deferrable1_power', 'ev_charger_power']);
+
+    // Gather all entities already assigned to core/system roles
+    const assignedEntities = new Set();
+    const entities = cfg.entities || {};
+    for (const [key, val] of Object.entries(entities)) {
+      if (val && typeof val === 'string' && val.startsWith('sensor.')) {
+        // When includeEms is on, don't exclude EMS load entities from detection
+        if (includeEms && emsLoadKeys.has(key)) continue;
+        assignedEntities.add(val);
+      }
+    }
+    // Also exclude already-configured smart loads
+    for (const load of (cfg.smart_loads || [])) {
+      if (load.entity_power) assignedEntities.add(load.entity_power);
+      if (load.entity_energy) assignedEntities.add(load.entity_energy);
+    }
+
+    const classify = window.__sigClassifyByName || ((name) => 'plug_socket');
+
+    // System-level entity ID patterns to exclude
+    const systemIdRegex = /(inverter|battery|grid|solar|pv[\d_]|mpc_|emhass|solcast|capaciteit|peak_|yambms|plant|sigen_|photovoltaic|deferr|slimmeleze|_no_var_|home_power|house.load|total.power|net.power|remain|forecast|cost_|price_|tarif|production|all_standby|home_consumption|home_total|total_consumption|essential_load|non_essential_load|grid_load|load_power$|daily_load)/;
+    // System-level friendly name patterns to exclude
+    const systemFnRegex = /(slimmeleze|p1.meter|energy.meter|smart.meter|home.?power|net.?power|home.?consumption|total.?(power|consumption|load)|essential.?load|grid.?load)/i;
+
+    // Find candidate power sensors
+    const candidates = [];
+    for (const [entityId, state] of Object.entries(allStates)) {
+      if (!entityId.startsWith('sensor.')) continue;
+      if (assignedEntities.has(entityId)) continue;
+      const uom = state.attributes?.unit_of_measurement;
+      const dc = state.attributes?.device_class;
+      if (!((dc === 'power') || uom === 'W' || uom === 'kW')) continue;
+      // Exclude system-level sensors (inverters, battery, grid, solar, EMHASS, meters, photovoltaics, etc.)
+      if (systemIdRegex.test(entityId.toLowerCase())) continue;
+      // Skip generic meter entity IDs (P1 meter: power_consumed, power_produced, and their phases)
+      if (/^sensor\.(power_consumed|power_produced)/.test(entityId)) continue;
+      // Skip entities with hex addresses (Zigbee devices without friendly names)
+      if (/0x[0-9a-f]{10,}/.test(entityId.toLowerCase())) continue;
+      // Skip entities whose friendly name looks like a raw address or is a known system name
+      const fn = state.attributes?.friendly_name || '';
+      if (/^0x[0-9a-f]{10,}/i.test(fn)) continue;
+      if (systemFnRegex.test(fn)) continue;
+      candidates.push([entityId, state]);
+    }
+
+    return candidates.map(([entityId, state]) => {
+      const friendlyName = state.attributes?.friendly_name || entityId;
+      const type = classify(friendlyName);
+
+      // Try to find a matching energy sensor
+      const baseName = entityId.replace(/_power$/, '');
+      const energyCandidates = [baseName + '_energy', baseName + '_consumption', baseName + '_kwh',
+                                 baseName + '_energy_today', baseName + '_daily_energy'];
+      const energyEntity = energyCandidates.find(e => e in allStates) || '';
+
+      return {
+        id: 'load_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        entity_power: entityId,
+        entity_energy: energyEntity,
+        type,
+        label: friendlyName
+          .replace(/\s*(Vermogen|Power|Puissance|Leistung|Watt|Consumed|Produced|Phase\s*\d*)\s*/gi, '')
+          .replace(/_/g, ' ')
+          .trim() || entityId.split('.')[1].replace(/_power$/, '').replace(/_/g, ' '),
+        show_in_sankey: false,
+      };
+    });
   }
 
   async _syncBatteryCapacityKwhToDashboard(value) {
@@ -3213,12 +3742,13 @@ class SigenergySettingsCard extends HTMLElement {
   _buildApexSeries(e, features, cfg) {
     const series = [];
     // Unit-aware power transform: only divide by 1000 if sensor reports in W (not kW)
-    const powerTransform = "const u = entity?.attributes?.unit_of_measurement || ''; return u === 'MW' ? x * 1000 : u === 'kW' ? x : x / 1000;";
+    // Also rejects energy units (Wh/kWh/MWh) to prevent cumulative counters from breaking the axis
+    const powerTransform = "const u = (entity?.attributes?.unit_of_measurement || '').trim(); if (/wh$/i.test(u)) return null; return u === 'MW' ? x * 1000 : u === 'kW' ? x : x / 1000;";
     const fp = this._storeGet()?.display?.decimal_places ?? 1;
     // Actual solar
     if (e.solar_power) series.push({
       entity: e.solar_power,
-      name: 'Solar', color: '#FF8F00', type: 'area', opacity: 0.35,
+      name: 'Solar', color: '#F0A830', type: 'area', opacity: 0.25,
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
       group_by: { func: 'last', duration: '1min' },
@@ -3228,7 +3758,7 @@ class SigenergySettingsCard extends HTMLElement {
     // Actual battery
     if (e.battery_power) series.push({
       entity: e.battery_power,
-      name: 'Battery', color: '#00C853', type: 'line',
+      name: 'Battery', color: '#00d4b8', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
       group_by: { func: 'last', duration: '1min' },
@@ -3238,7 +3768,7 @@ class SigenergySettingsCard extends HTMLElement {
     // Actual grid
     if (e.grid_active_power || e.grid_power) series.push({
       entity: e.grid_active_power || e.grid_power,
-      name: 'Grid', color: '#D32F2F', type: 'line',
+      name: 'Grid', color: '#E53935', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
       group_by: { func: 'last', duration: '1min' },
@@ -3248,7 +3778,7 @@ class SigenergySettingsCard extends HTMLElement {
     // Actual consumption (inverted)
     if (e.load_power) series.push({
       entity: e.load_power,
-      name: 'Consumption', color: '#8E24AA', type: 'area', opacity: 0.08,
+      name: 'Consumption', color: '#AB47BC', type: 'area', opacity: 0.10,
       stroke_width: 1.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
       group_by: { func: 'last', duration: '1min' },
@@ -3263,7 +3793,7 @@ class SigenergySettingsCard extends HTMLElement {
         entity: e.mpc_pv, name: 'Solar (plan)', color: '#FFF59D',
         type: 'area', opacity: 0.06, curve: 'smooth', extend_to: false,
         unit: ' kW', float_precision: fp, stroke_width: 1, stroke_dash: 5,
-        show: { in_header: false, legend_value: false },
+        show: { in_header: false, legend_value: false, in_legend: false },
         data_generator: "const data = entity.attributes.forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_pv_power) / 1000]);",
         yaxis_id: 'power'
       });
@@ -3273,7 +3803,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.mpc_battery, name: 'Battery (plan)', color: '#A5D6A7',
           type: 'area', opacity: 0.06, curve: 'stepline', extend_to: false,
           unit: ' kW', stroke_width: 1, stroke_dash: 5,
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: "const data = entity.attributes.battery_scheduled_power;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_batt_power) / 1000]);",
           yaxis_id: 'power', float_precision: 0
         });
@@ -3284,7 +3814,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.mpc_grid, name: 'Grid (plan)', color: '#EF5350',
           type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
           extend_to: false, unit: ' kW',
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: "const data = entity.attributes.forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_grid_power) / 1000]);",
           yaxis_id: 'power', float_precision: 0
         });
@@ -3295,7 +3825,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.mpc_load, name: 'Load (plan)', color: '#CE93D8',
           type: 'line', curve: 'smooth', extend_to: false, unit: ' kW',
           float_precision: fp, stroke_width: 1, stroke_dash: 4,
-          show: { in_header: false, legend_value: false, in_chart: true },
+          show: { in_header: false, legend_value: false, in_chart: true, in_legend: false },
           data_generator: "const data = entity.attributes.forecasts;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_load_power) / 1000]);",
           yaxis_id: 'power', invert: true, opacity: 0.6
         });
@@ -3306,7 +3836,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.mpc_soc, name: 'SOC (plan)', color: '#81C784',
           type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
           extend_to: false, unit: ' %',
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: "const data = entity.attributes.battery_scheduled_soc;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_batt_soc)]);",
           yaxis_id: 'soc', float_precision: 1
         });
@@ -3333,7 +3863,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.haeo_battery_charge, name: 'Charge (plan)', color: '#A5D6A7',
           type: 'area', opacity: 0.06, curve: 'stepline', extend_to: false,
           unit: ' kW', stroke_width: 1, stroke_dash: 5,
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power', float_precision: 2
         });
@@ -3344,7 +3874,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.haeo_battery_discharge, name: 'Discharge (plan)', color: '#FFCC80',
           type: 'area', opacity: 0.06, curve: 'stepline', extend_to: false,
           unit: ' kW', stroke_width: 1, stroke_dash: 5,
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), -(p.value || 0)]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), -(parseFloat(e[1]) || 0)]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power', float_precision: 2
         });
@@ -3355,7 +3885,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.haeo_solar_power, name: 'Solar (plan)', color: '#FFF59D',
           type: 'area', opacity: 0.06, curve: 'smooth', extend_to: false,
           unit: ' kW', float_precision: fp, stroke_width: 1, stroke_dash: 5,
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power'
         });
@@ -3366,7 +3896,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.haeo_grid_power, name: 'Grid (plan)', color: '#EF5350',
           type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
           extend_to: false, unit: ' kW',
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power', float_precision: 2
         });
@@ -3377,7 +3907,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.haeo_load_power, name: 'Load (plan)', color: '#CE93D8',
           type: 'line', curve: 'smooth', extend_to: false, unit: ' kW',
           float_precision: fp, stroke_width: 1, stroke_dash: 4,
-          show: { in_header: false, legend_value: false, in_chart: true },
+          show: { in_header: false, legend_value: false, in_chart: true, in_legend: false },
           data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'power', invert: true, opacity: 0.6
         });
@@ -3388,7 +3918,7 @@ class SigenergySettingsCard extends HTMLElement {
           entity: e.haeo_battery_soc, name: 'SOC (plan)', color: '#81C784',
           type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
           extend_to: false, unit: ' %',
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: `var fc = entity.attributes.forecast; if (!fc) return []; if (Array.isArray(fc)) return fc.map(function(p){ return [new Date(p.time).getTime(), p.value || 0]; }).sort(function(a,b){ return a[0]-b[0]; }); return Object.entries(fc).map(function(e){ return [new Date(e[0]).getTime(), parseFloat(e[1]) || 0]; }).sort(function(a,b){ return a[0]-b[0]; });`,
           yaxis_id: 'soc', float_precision: 1
         });
@@ -3425,22 +3955,22 @@ var fc = entity.attributes.forecasts || entity.attributes.forecast;
 if (fc && Array.isArray(fc) && fc.length) return fc.map(function(p){ return [new Date(p.start_time || p.time || p.date).getTime(), parseFloat(p.per_kwh || p.price || p.value || 0)]; });
 return [];`;
         series.push({
-          entity: e.buy_price, name: 'Import Price (plan)', color: '#EF9A9A',
+          entity: e.buy_price, name: 'Import Price (plan)', color: '#FFD54F',
           type: 'line', extend_to: false, unit: priceUnit,
-          float_precision: 4, stroke_width: 1, opacity: 0.9,
-          show: { in_header: false, legend_value: false },
+          float_precision: 4, stroke_width: 1, opacity: 0.7,
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: buyDG,
-          yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
+          yaxis_id: 'price', curve: 'stepline', stroke_dash: 5
         });
         // State-tracked line (actual price history) — only if no separate current_import_price
         if (!e.current_import_price || e.current_import_price === e.buy_price) {
           series.push({
-            entity: e.buy_price, name: 'Import Price', color: '#EF5350',
-            type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+            entity: e.buy_price, name: 'Import Price', color: '#FFB300',
+            type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
             unit: priceUnit, float_precision: 4,
             group_by: { func: 'avg', duration: '30min' },
             show: { in_header: false, legend_value: true },
-            yaxis_id: 'price', curve: 'stepline'
+            yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
           });
         }
       }
@@ -3451,44 +3981,44 @@ var fc = entity.attributes.forecasts || entity.attributes.forecast;
 if (fc && Array.isArray(fc) && fc.length) return fc.map(function(p){ return [new Date(p.start_time || p.time || p.date).getTime(), parseFloat(p.per_kwh || p.price || p.value || 0)]; });
 return [];`;
         series.push({
-          entity: e.sell_price, name: 'Export Price (plan)', color: '#90CAF9',
+          entity: e.sell_price, name: 'Export Price (plan)', color: '#A5D6A7',
           type: 'line', extend_to: false, unit: priceUnit,
-          float_precision: 4, stroke_width: 1, opacity: 0.9,
-          show: { in_header: false, legend_value: false },
+          float_precision: 4, stroke_width: 1, opacity: 0.7,
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: sellDG,
-          yaxis_id: 'price', curve: 'stepline', stroke_dash: 4
+          yaxis_id: 'price', curve: 'stepline', stroke_dash: 5
         });
         // State-tracked line — only if no separate current_export_price
         if (!e.current_export_price || e.current_export_price === e.sell_price) {
           series.push({
-            entity: e.sell_price, name: 'Export Price', color: '#42A5F5',
-            type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+            entity: e.sell_price, name: 'Export Price', color: '#43A047',
+            type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
             unit: priceUnit, float_precision: 4,
             group_by: { func: 'avg', duration: '30min' },
             show: { in_header: false, legend_value: true },
-            yaxis_id: 'price', curve: 'stepline'
+            yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
           });
         }
       }
       // Actual prices (separate entities — used when buy/sell are EMHASS-specific and these are the actual Amber/Nordpool sensors)
       if (e.current_import_price && e.current_import_price !== e.buy_price) {
         series.push({
-          entity: e.current_import_price, name: 'Import Price', color: '#EF5350',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          entity: e.current_import_price, name: 'Import Price', color: '#FFB300',
+          type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
           unit: priceUnit, float_precision: 4,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
+          yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
         });
       }
       if (e.current_export_price && e.current_export_price !== e.sell_price) {
         series.push({
-          entity: e.current_export_price, name: 'Export Price', color: '#42A5F5',
-          type: 'line', opacity: 0.55, stroke_width: 2, extend_to: false,
+          entity: e.current_export_price, name: 'Export Price', color: '#43A047',
+          type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
           unit: priceUnit, float_precision: 4,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
-          yaxis_id: 'price', curve: 'stepline'
+          yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
         });
       }
     }
@@ -3526,7 +4056,7 @@ return forecast.map(function(d) {
           type: 'area', opacity: 0.08, curve: 'smooth',
           extend_to: false, unit: ' kW', float_precision: 1,
           stroke_width: 1, stroke_dash: 6,
-          show: { in_header: false, legend_value: false, in_chart: true },
+          show: { in_header: false, legend_value: false, in_chart: true, in_legend: false },
           data_generator: `var forecast = entity.attributes.detailedForecast || entity.attributes.detailed_forecast || [];
 if (!forecast || !forecast.length) return [];
 return forecast.map(function(d) {
@@ -3547,7 +4077,7 @@ return forecast.map(function(d) {
           entity: e.mpc_deferrable0, name: (e.deferrable0_label || 'Deferrable 0') + ' (plan)',
           color: '#FF6D00', type: 'area', opacity: 0.05, curve: 'stepline',
           extend_to: false, unit: ' kW', stroke_width: 0.8, stroke_dash: 4,
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: "const data = entity.attributes.deferrables_schedule;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_deferrable0) / 1000]);",
           yaxis_id: 'power', invert: true, float_precision: 0
         });
@@ -3557,7 +4087,7 @@ return forecast.map(function(d) {
           entity: e.mpc_deferrable1, name: (e.deferrable1_label || 'Deferrable 1') + ' (plan)',
           color: '#26A69A', type: 'area', opacity: 0.05, curve: 'stepline',
           extend_to: false, unit: ' kW', stroke_width: 0.8, stroke_dash: 4,
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: "const data = entity.attributes.deferrables_schedule;\nif (!data) return [];\nreturn data.map(d => [new Date(d.date).getTime(), parseFloat(d.mpc_deferrable1) / 1000]);",
           yaxis_id: 'power', invert: true, float_precision: 0
         });
@@ -3569,7 +4099,7 @@ return forecast.map(function(d) {
           color: '#E65100', type: 'line', stroke_width: 1.5, extend_to: false,
           transform: powerTransform, unit: ' kW',
           group_by: { func: 'avg', duration: '5min' },
-          show: { in_header: false, legend_value: false },
+          show: { in_header: false, legend_value: false, in_legend: false },
           yaxis_id: 'power', invert: true, opacity: 1, float_precision: fp
         });
       }
@@ -3603,7 +4133,8 @@ return forecast.map(function(d) {
       {
         id: 'power', min: 'auto', max: 'auto', decimals: 1,
         apex_config: {
-          title: { text: 'Power (kW)', style: { fontSize: '12px' } },
+          title: { text: 'Power (kW)', style: { fontSize: '11px', color: 'rgba(255,255,255,0.6)', fontWeight: 500 } },
+          labels: { style: { fontSize: '10px', colors: ['rgba(255,255,255,0.5)'] } },
           forceNiceScale: true, tickAmount: 6
         }
       }
@@ -3713,10 +4244,44 @@ return forecast.map(function(d) {
       const hasPriceOverlay = (e.buy_price || e.sell_price) && cfg.pricing?.show_price_overlay;
       const showExtendedChart = hasForecasts || hasSolarForecast || hasPriceOverlay;
 
+      // Theme-aware card style — resolves 'auto' / 'dark' / 'light'
+      const _resolvedTheme = this._resolveTheme();
+
+      // Compute sunrise/sunset xaxis annotations from sun.sun entity
+      const _sunXAnnotations = [];
+      const _sunEntity = this._hass?.states?.['sun.sun'];
+      if (f.sunrise_sunset && _sunEntity?.attributes?.next_rising && _sunEntity?.attributes?.next_setting) {
+        const _nextRise = new Date(_sunEntity.attributes.next_rising);
+        const _nextSet = new Date(_sunEntity.attributes.next_setting);
+        const _todayUtc = new Date().toISOString().slice(0, 10);
+        // If next event is tomorrow (UTC date differs), today's was 24h earlier
+        const _todayRise = _nextRise.toISOString().slice(0, 10) === _todayUtc
+          ? _nextRise : new Date(_nextRise.getTime() - 86400000);
+        const _todaySet = _nextSet.toISOString().slice(0, 10) === _todayUtc
+          ? _nextSet : new Date(_nextSet.getTime() - 86400000);
+        const _fmt = (d) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        const _sunAnno = (ts, text, clr) => ({
+          x: ts, borderColor: clr, strokeDashArray: 4,
+          label: { text, borderColor: clr, orientation: 'horizontal', position: 'top',
+            style: { color: '#fff', background: clr, fontSize: '9px', padding: { left: 3, right: 3, top: 1, bottom: 1 } } }
+        });
+        // Yesterday, today, tomorrow sunrise/sunset (covers 48h span)
+        for (const offset of [-86400000, 0, 86400000]) {
+          const r = new Date(_todayRise.getTime() + offset);
+          const s = new Date(_todaySet.getTime() + offset);
+          _sunXAnnotations.push(_sunAnno(r.getTime(), '☀ ' + _fmt(r), offset === 0 ? 'rgba(255,165,0,0.6)' : 'rgba(255,165,0,0.35)'));
+          _sunXAnnotations.push(_sunAnno(s.getTime(), '🌙 ' + _fmt(s), offset === 0 ? 'rgba(100,80,180,0.6)' : 'rgba(100,80,180,0.35)'));
+        }
+      }
+
+      const _apexCardModStyle = _resolvedTheme === 'light'
+        ? 'ha-card { background: var(--ha-card-background, rgba(255,255,255,0.95)) !important; border: 1px solid var(--divider-color, rgba(0,0,0,0.08)) !important; border-radius: var(--ha-card-border-radius, 16px) !important; color: var(--primary-text-color, #1a1f2e); box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important; } .apexcharts-tooltip { background: rgba(255,255,255,0.96) !important; border: 1px solid rgba(0,212,184,0.25) !important; border-radius: 8px !important; color: #333 !important; font-size: 12px !important; backdrop-filter: blur(8px) !important; box-shadow: 0 4px 16px rgba(0,0,0,0.1) !important; } .apexcharts-tooltip-title { background: rgba(0,212,184,0.08) !important; border-bottom: 1px solid rgba(0,212,184,0.15) !important; color: #1a1f2e !important; font-weight: 600 !important; } .apexcharts-toolbar { top: 4px !important; right: 4px !important; } .apexcharts-toolbar svg { fill: rgba(0,0,0,0.4) !important; } .apexcharts-toolbar svg:hover { fill: #00b89c !important; } .apexcharts-legend-series { display: inline-flex !important; align-items: center !important; gap: 4px !important; } .apexcharts-legend-text:empty { display: none !important; } .apexcharts-legend-text:empty + .apexcharts-legend-marker, .apexcharts-legend-series:has(.apexcharts-legend-text:empty) { display: none !important; } @media (max-width: 600px) { .apexcharts-legend-text { font-size: 13px !important; } .apexcharts-legend-marker { width: 10px !important; height: 10px !important; } }'
+        : 'ha-card { background: var(--ha-card-background, linear-gradient(135deg, rgba(30,33,40,0.95) 0%, rgba(40,44,52,0.98) 100%)) !important; border: 1px solid var(--divider-color, rgba(92,156,230,0.12)) !important; border-radius: var(--ha-card-border-radius, 16px) !important; color: var(--primary-text-color, #fff); } .apexcharts-tooltip { background: rgba(26,31,46,0.95) !important; border: 1px solid rgba(0,212,184,0.3) !important; border-radius: 8px !important; color: #e0e0e0 !important; font-size: 12px !important; backdrop-filter: blur(8px) !important; box-shadow: 0 4px 16px rgba(0,0,0,0.4) !important; } .apexcharts-tooltip-title { background: rgba(0,212,184,0.12) !important; border-bottom: 1px solid rgba(0,212,184,0.2) !important; color: #fff !important; font-weight: 600 !important; } .apexcharts-toolbar { top: 4px !important; right: 4px !important; } .apexcharts-toolbar .apexcharts-zoom-icon svg, .apexcharts-toolbar .apexcharts-pan-icon svg, .apexcharts-toolbar .apexcharts-reset-icon svg, .apexcharts-toolbar .apexcharts-zoomin-icon svg, .apexcharts-toolbar .apexcharts-zoomout-icon svg, .apexcharts-toolbar .apexcharts-selection-icon svg { fill: rgba(255,255,255,0.5) !important; } .apexcharts-toolbar svg:hover { fill: #00d4b8 !important; } .apexcharts-legend-series { display: inline-flex !important; align-items: center !important; gap: 4px !important; } .apexcharts-legend-text:empty { display: none !important; } .apexcharts-legend-text:empty + .apexcharts-legend-marker, .apexcharts-legend-series:has(.apexcharts-legend-text:empty) { display: none !important; } @media (max-width: 600px) { .apexcharts-legend-text { font-size: 13px !important; } .apexcharts-legend-marker { width: 10px !important; height: 10px !important; } }';
+
       const apexChart = {
         type: 'custom:apexcharts-card',
         card_mod: {
-          style: 'ha-card { background: var(--ha-card-background, linear-gradient(135deg, rgba(30,33,40,0.95) 0%, rgba(40,44,52,0.98) 100%)) !important; border: 1px solid var(--divider-color, rgba(92,156,230,0.12)) !important; border-radius: var(--ha-card-border-radius, 16px) !important; color: var(--primary-text-color, #fff); }'
+          style: _apexCardModStyle
         },
         header: {
           show: true, show_states: true, colorize_states: true,
@@ -3727,33 +4292,56 @@ return forecast.map(function(d) {
         apex_config: {
           chart: {
             height: showExtendedChart ? '500px' : '350px',
-            animations: { enabled: false },
+            animations: { enabled: true, easing: 'easeinout', speed: 400, dynamicAnimation: { enabled: true, speed: 200 } },
             stacked: false,
-            zoom: { enabled: true, type: 'x' },
+            zoom: { enabled: true, type: 'x', autoScaleYaxis: true },
             toolbar: {
               show: true,
-              tools: { download: false, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true }
-            }
+              tools: { download: false, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true },
+              autoSelected: 'zoom'
+            },
+            pinch: { enabled: true },
+            dropShadow: { enabled: false }
           },
           xaxis: {
             type: 'datetime',
             labels: {
               datetimeFormatter: { minute: 'HH:mm', hour: 'HH:00', day: 'dd MMM' },
-              style: { fontSize: '10px' },
+              style: { fontSize: '10px', colors: _resolvedTheme === 'light' ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)' },
               rotateAlways: false, hideOverlappingLabels: true
             },
-            tickAmount: showExtendedChart ? 24 : 12
+            tickAmount: showExtendedChart ? 24 : 12,
+            axisBorder: { show: false },
+            axisTicks: { show: true, color: _resolvedTheme === 'light' ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.1)' },
+            crosshairs: { show: true, stroke: { color: '#00d4b8', width: 1, dashArray: 3 } }
           },
-          tooltip: { x: { format: 'HH:mm' }, shared: true, intersect: false },
+          tooltip: {
+            x: { format: 'dd MMM HH:mm' }, shared: true, intersect: false,
+            followCursor: true,
+            theme: _resolvedTheme === 'light' ? 'light' : 'dark'
+          },
           legend: {
-            show: true, position: 'top', horizontalAlign: 'center',
-            fontSize: '10px', itemMargin: { horizontal: 4, vertical: 1 }
+            show: true, position: 'bottom', horizontalAlign: 'center',
+            fontSize: '11px',
+            fontFamily: 'inherit',
+            labels: { colors: _resolvedTheme === 'light' ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.7)' },
+            markers: { size: 4, strokeWidth: 0, offsetX: -2 },
+            itemMargin: { horizontal: 8, vertical: 2 }
           },
           stroke: { curve: 'smooth' },
-          grid: { strokeDashArray: 3 },
-          annotations: showExtendedChart ? { yaxis: [{ y: 0, yAxisIndex: 0, borderColor: 'rgba(255,255,255,0.35)', strokeDashArray: 0 }] } : undefined
+          grid: {
+            borderColor: _resolvedTheme === 'light' ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)',
+            strokeDashArray: 4,
+            xaxis: { lines: { show: false } },
+            yaxis: { lines: { show: true } },
+            padding: { left: 8, right: 8 }
+          },
+          annotations: {
+            yaxis: showExtendedChart ? [{ y: 0, yAxisIndex: 0, borderColor: _resolvedTheme === 'light' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.2)', strokeDashArray: 3 }] : [],
+            xaxis: _sunXAnnotations.length > 0 ? _sunXAnnotations : undefined
+          }
         },
-        now: showExtendedChart ? { show: true, label: 'Now' } : undefined,
+        now: { show: true, label: 'Now', color: '#00d4b8' },
         span: showExtendedChart ? { start: 'hour', offset: '-6h' } : undefined,
         all_series_config: { stroke_width: 2 },
         yaxis: yaxis,
@@ -3774,7 +4362,7 @@ return forecast.map(function(d) {
             icon: "{% if states('" + e.emhass_mode + "') == 'CHARGE' %}mdi:battery-charging{% elif states('" + e.emhass_mode + "') == 'DISCHARGE' %}mdi:battery-arrow-down{% else %}mdi:battery-clock{% endif %}",
             icon_color: "{% if states('" + e.emhass_mode + "') == 'CHARGE' %}green{% elif states('" + e.emhass_mode + "') == 'DISCHARGE' %}orange{% else %}grey{% endif %}",
             fill_container: true, multiline_secondary: true,
-            card_mod: { style: 'ha-card { background: linear-gradient(135deg, rgba(0,180,120,0.15), rgba(0,120,80,0.08)) !important; border: 1px solid rgba(0,180,120,0.25) !important; border-radius: 12px !important; color: var(--primary-text-color, #fff); } mushroom-state-info { --card-primary-font-size: 15px; --card-secondary-font-size: 11px; overflow: visible !important; white-space: normal !important; }' }
+            card_mod: { style: 'ha-card { background: linear-gradient(135deg, rgba(0,180,120,0.15), rgba(0,120,80,0.08)) !important; border: 1px solid rgba(0,180,120,0.25) !important; border-radius: 12px !important; color: var(--primary-text-color, #fff); } mushroom-state-info { --card-primary-font-size: 16px; --card-secondary-font-size: 12px; overflow: visible !important; white-space: normal !important; }' }
           }
         };
       } else if (emsP === 'haeo' && e.haeo_optim_status) {
@@ -3789,7 +4377,7 @@ return forecast.map(function(d) {
             icon: "{% if states('" + e.haeo_optim_status + "') == 'success' %}mdi:check-circle{% elif states('" + e.haeo_optim_status + "') == 'failed' %}mdi:alert-circle{% else %}mdi:timer-sand{% endif %}",
             icon_color: "{% if states('" + e.haeo_optim_status + "') == 'success' %}green{% elif states('" + e.haeo_optim_status + "') == 'failed' %}red{% else %}amber{% endif %}",
             fill_container: true, multiline_secondary: true,
-            card_mod: { style: 'ha-card { background: linear-gradient(135deg, rgba(124,77,255,0.15), rgba(80,50,180,0.08)) !important; border: 1px solid rgba(124,77,255,0.25) !important; border-radius: 12px !important; color: var(--primary-text-color, #fff); } mushroom-state-info { --card-primary-font-size: 15px; --card-secondary-font-size: 11px; overflow: visible !important; white-space: normal !important; }' }
+            card_mod: { style: 'ha-card { background: linear-gradient(135deg, rgba(124,77,255,0.15), rgba(80,50,180,0.08)) !important; border: 1px solid rgba(124,77,255,0.25) !important; border-radius: 12px !important; color: var(--primary-text-color, #fff); } mushroom-state-info { --card-primary-font-size: 16px; --card-secondary-font-size: 12px; overflow: visible !important; white-space: normal !important; }' }
           }
         };
       }
@@ -3806,11 +4394,10 @@ return forecast.map(function(d) {
                "{% if w >= " + pwrThresh + " %}{{ (w / 1000) | round(2) }} kW{% else %}{{ w | round(0) }} W{% endif %}";
       };
 
-      // Theme-aware card style — resolves 'auto' / 'dark' / 'light'
-      const _resolvedTheme = this._resolveTheme();
+      // Card styles
       const _cardStyle = _resolvedTheme === 'light'
-        ? 'ha-card { background: var(--ha-card-background, #fff) !important; border: 1px solid var(--divider-color, #e0e0e0) !important; border-radius: 12px !important; color: var(--primary-text-color, #1a1a2e) !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }'
-        : 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; } mushroom-state-info { --card-primary-font-size: 20px !important; font-weight: bold !important; --card-secondary-font-size: 11px; }';
+        ? 'ha-card { background: linear-gradient(135deg, rgba(0,212,184,0.06) 0%, rgba(255,255,255,0.92) 60%, rgba(240,252,250,0.95) 100%) !important; backdrop-filter: blur(14px) !important; -webkit-backdrop-filter: blur(14px) !important; border: 1px solid rgba(0,212,184,0.18) !important; border-radius: 16px !important; color: var(--primary-text-color, #1a1f2e) !important; box-shadow: 0 2px 12px rgba(0,212,184,0.08), inset 0 1px 0 rgba(255,255,255,0.8) !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; } ha-card:active { transform: scale(0.97) !important; } mushroom-state-info { --card-primary-font-size: 14px !important; --card-secondary-font-size: 14px !important; }'
+        : 'ha-card { background: linear-gradient(135deg, rgba(18,24,40,0.95) 0%, rgba(26,31,46,0.98) 50%, rgba(20,28,42,0.95) 100%) !important; backdrop-filter: blur(14px) !important; -webkit-backdrop-filter: blur(14px) !important; border: 1px solid rgba(0,212,184,0.18) !important; border-radius: 16px !important; box-shadow: 0 4px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(0,212,184,0.06) !important; transition: transform 0.15s ease, box-shadow 0.15s ease !important; } ha-card:active { transform: scale(0.97) !important; } mushroom-state-info { --card-primary-font-size: 14px !important; --card-secondary-font-size: 14px !important; }';
       const statusCards = [];
       if (e.solar_power) statusCards.push({
         type: 'custom:mushroom-template-card',
@@ -3916,8 +4503,8 @@ return forecast.map(function(d) {
           "{{ ((solar / load) * 100) | round(1) if load > 0 else 0 }}%",
         icon: 'mdi:check-decagram', icon_color: 'green',
         card_mod: { style: _resolvedTheme === 'light'
-          ? 'ha-card { background: var(--ha-card-background, #fff) !important; border: 1px solid var(--divider-color, #e0e0e0) !important; border-radius: 12px !important; color: var(--primary-text-color, #1a1a2e) !important; }'
-          : 'ha-card { background: var(--ha-card-background, rgba(30,35,54,0.94)) !important; border: 1px solid var(--divider-color, #2d3451) !important; border-radius: 12px !important; }' }
+          ? 'ha-card { background: linear-gradient(135deg, rgba(0,212,184,0.08), rgba(255,255,255,0.9)) !important; backdrop-filter: blur(14px) !important; -webkit-backdrop-filter: blur(14px) !important; border: 1px solid rgba(0,212,184,0.2) !important; border-radius: 16px !important; color: var(--primary-text-color, #1a1f2e) !important; box-shadow: 0 2px 12px rgba(0,212,184,0.1) !important; } mushroom-state-info { --card-primary-font-size: 14px !important; --card-secondary-font-size: 18px !important; --card-secondary-color: #00b89c !important; }'
+          : 'ha-card { background: linear-gradient(135deg, rgba(0,212,184,0.12), rgba(45,52,81,0.5)) !important; backdrop-filter: blur(14px) !important; -webkit-backdrop-filter: blur(14px) !important; border: 1px solid rgba(0,212,184,0.2) !important; border-radius: 16px !important; box-shadow: 0 4px 16px rgba(0,212,184,0.1), inset 0 1px 0 rgba(0,212,184,0.1) !important; } mushroom-state-info { --card-primary-font-size: 14px !important; --card-secondary-font-size: 18px !important; --card-secondary-color: #00d4b8 !important; }' }
       } : null;
 
       // Build Solcast forecast card (conditional)
@@ -3937,16 +4524,35 @@ return forecast.map(function(d) {
       const overviewView = config.views.find(v => v.path === 'overview');
       if (!overviewView) throw new Error('Overview view not found');
 
+      // Set view theme based on resolved theme setting
+      overviewView.theme = _resolvedTheme === 'light' ? 'sigenergy_light' : 'sigenergy_dark';
+
       // Get the layout card
       const mainLayout = overviewView.cards[0];
       if (!mainLayout || mainLayout.type !== 'custom:layout-card') throw new Error('Layout card not found');
 
-      // Ensure responsive grid proportions — give battery card enough room
-      if (mainLayout.layout && mainLayout.layout.mediaquery) {
-        mainLayout.layout.mediaquery['(min-width: 1201px)'] = {
-          'grid-template-columns': 'minmax(0, 4fr) minmax(0, 3.5fr) minmax(420px, 4.5fr)',
-          'grid-template-rows': 'auto auto auto'
-        };
+      // Responsive grid: 3 columns on desktop (house|sankey|battery), 2 on tablet, 1 on mobile
+      if (mainLayout.layout) {
+        mainLayout.layout['grid-template-columns'] = '1fr';
+        mainLayout.layout['align-items'] = 'start';
+        if (mainLayout.layout.mediaquery) {
+          mainLayout.layout.mediaquery['(min-width: 769px)'] = {
+            'grid-template-columns': '1fr 1fr',
+            'align-items': 'start'
+          };
+          mainLayout.layout.mediaquery['(min-width: 1201px)'] = {
+            'grid-template-columns': '1fr 1fr 1fr',
+            'grid-template-rows': 'auto',
+            'align-items': 'start'
+          };
+          mainLayout.layout.mediaquery['(min-width: 1800px)'] = {
+            'grid-template-columns': '1fr 1fr 1fr',
+            'grid-template-rows': 'auto',
+            'max-width': '2200px',
+            'margin': '0 auto',
+            'align-items': 'start'
+          };
+        }
       }
 
       // Build new cards array
@@ -3954,7 +4560,17 @@ return forecast.map(function(d) {
 
       // Card 0: House + optional EMS status
       // Get existing house card or create default, sync entities from store, and add min-height
-      const houseCardOrig = mainLayout.cards[0]?.cards?.[0] || { type: 'custom:sigenergy-house-card' };
+      // mainLayout.cards[0] may be a layout-card (after rebuild) wrapping [houseVerticalStack, batteryCard]
+      // Or it may be the original vertical-stack. Find the sigenergy-house-card wherever it is.
+      const _findHouseCard = (cards) => {
+        if (!cards) return null;
+        for (const c of cards) {
+          if (c.type === 'custom:sigenergy-house-card') return c;
+          if (c.cards) { const h = _findHouseCard(c.cards); if (h) return h; }
+        }
+        return null;
+      };
+      const houseCardOrig = _findHouseCard(mainLayout.cards) || { type: 'custom:sigenergy-house-card' };
       // Auto-fill battery_capacity if empty and a capacity entity exists (for runtime estimation)
       if (!e.battery_capacity && !e.battery_capacity_kwh && this._hass) {
         const capKeys = Object.keys(this._hass.states).filter(k => {
@@ -4045,7 +4661,7 @@ return forecast.map(function(d) {
         const _ft = _resolvedTheme;
         const _ftBg = _ft === 'light' ? '#f8f9fa' : 'rgba(30,35,54,0.94)';
         const _ftBorder = _ft === 'light' ? '#e0e0e0' : '#2d3451';
-        const _ftText = _ft === 'light' ? '#1a1a2e' : '#e0e4ec';
+        const _ftText = _ft === 'light' ? '#1a1f2e' : '#e0e4ec';
         const _ftMuted = _ft === 'light' ? '#666' : '#8892a4';
         const _ftRowAlt = _ft === 'light' ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)';
         const _ftNowBg = _ft === 'light' ? 'rgba(0,212,184,0.12)' : 'rgba(0,212,184,0.15)';
@@ -4126,8 +4742,8 @@ return forecast.map(function(d) {
             tpl += "{%- set months = ['January','February','March','April','May','June','July','August','September','October','November','December'] %}\n";
 
             // HTML table start
-            tpl += '<div style="max-height:570px; overflow-y:auto; overflow-x:hidden; position:relative;">\n';
-            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px; table-layout:fixed;">\n';
+            tpl += '<div style="max-height:570px; overflow-y:auto; position:relative;">\n';
+            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px;">\n';
             tpl += '<thead><tr>\n';
             tpl += '<th style="' + _thStyle + '">Time</th>\n';
             if (hImpP) tpl += '<th style="' + _thStyle + '">Buy ' + currency + '</th>\n';
@@ -4318,8 +4934,8 @@ return forecast.map(function(d) {
             tpl += "{%- set months = ['January','February','March','April','May','June','July','August','September','October','November','December'] %}\n";
 
             // HTML table start
-            tpl += '<div style="max-height:570px; overflow-y:auto; overflow-x:hidden; position:relative;">\n';
-            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px; table-layout:fixed;">\n';
+            tpl += '<div style="max-height:570px; overflow-y:auto; position:relative;">\n';
+            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px;">\n';
             tpl += '<thead><tr>\n';
             tpl += '<th style="' + _thStyle + '">Time</th>\n';
             if (bpEnt) tpl += '<th style="' + _thStyle + '">Buy ' + currency + '</th>\n';
@@ -4474,20 +5090,17 @@ return forecast.map(function(d) {
       newCards.push({ type: 'vertical-stack', cards: houseStack });
 
       // Card 1: Sankey (rebuild from store entities)
-      const sankeyTitle = {
-        type: 'custom:mushroom-template-card',
-        primary: 'Energy Statistics', icon: 'mdi:chart-sankey-variant', icon_color: 'teal',
-        card_mod: { style: { 'ha-tile-info$': '.primary { font-size: 20px !important; font-weight: bold !important; color: var(--primary-text-color, #fff) !important; letter-spacing: 0.5px; }', '.': 'ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; border: none !important; padding-bottom: 0 !important; margin-bottom: 0 !important; }' } }
-      };
       // Date navigation — HA's built-in energy-date-selection card for historical date picking
       const sankeyDateNav = {
         type: 'energy-date-selection',
         card_mod: { style: 'ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; border: none !important; margin-top: 0 !important; margin-bottom: -8px !important; }' }
       };
-      // Combine title and date picker on same row 
+      // Date picker right-aligned (no title — date nav IS the header per Sigenergy app)
       const sankeyHeader = {
-        type: 'horizontal-stack',
-        cards: [sankeyTitle, sankeyDateNav]
+        type: 'custom:layout-card',
+        layout_type: 'custom:grid-layout',
+        layout: { 'grid-template-columns': '1fr auto', 'grid-gap': '0' },
+        cards: [sankeyDateNav]
       };
       const _vsCards = mainLayout.cards[1]?.cards || [];
       const sankeyOld = _vsCards.find(c => c.type === 'custom:sankey-chart') || {};
@@ -4496,11 +5109,12 @@ return forecast.map(function(d) {
       const hpSankeyEntity = (f.hp_energy_is_cumulative && e.hp_energy_daily_meter) ? e.hp_energy_daily_meter : e.heat_pump_energy_today;
 
       // Build Sankey destinations list (Load is always present, EV/HP are optional)
+      // IMPORTANT: EV/HP go AFTER Battery and Grid Export so that if ha-sankey-chart
+      // hides them (below min_state), the click target mismatch doesn't affect
+      // the main destination items (Home, Battery, Grid).
       const sankeyDest = [];
-      if (e.load_energy_today) sankeyDest.push({ entity_id: e.load_energy_today, name: 'Home', color: '#e8337f' });
-      if (f.show_ev_in_sankey && evSankeyEntity) sankeyDest.push({ entity_id: evSankeyEntity, name: 'EV', color: '#ff69b4' });
-      if (f.show_hp_in_sankey && hpSankeyEntity) sankeyDest.push({ entity_id: hpSankeyEntity, name: 'HP', color: '#e67e22' });
-      if (e.battery_charge_today) sankeyDest.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#00d4b8' });
+      if (e.load_energy_today) sankeyDest.push({ entity_id: e.load_energy_today, name: 'Home', color: '#9B7AB8' });
+      if (e.battery_charge_today) sankeyDest.push({ entity_id: e.battery_charge_today, name: 'Battery', color: '#4ECDC4' });
 
       // Grid export destination — prefer the non-tariff total entity for accurate Sankey sizing.
       // Only fall back to tariff add_entities summation when grid_export_today is missing.
@@ -4515,23 +5129,56 @@ return forecast.map(function(d) {
           : undefined;
       }
       if (_gridExportId) {
-        const exportNode = { entity_id: _gridExportId, name: 'Grid', color: '#7c5cbf' };
+        const exportNode = { entity_id: _gridExportId, name: 'Grid', color: '#7B8FD4' };
         if (_gridExportAdd) exportNode.add_entities = _gridExportAdd;
         sankeyDest.push(exportNode);
       }
 
+      // EV/HP added last — if ha-sankey-chart hides them (below min_state),
+      // the click target mismatch only affects the bottom items, not main destinations.
+      if (f.show_ev_in_sankey && evSankeyEntity) sankeyDest.push({ entity_id: evSankeyEntity, name: 'EV', color: '#E8705A' });
+      if (f.show_hp_in_sankey && hpSankeyEntity) sankeyDest.push({ entity_id: hpSankeyEntity, name: 'HP', color: '#E8A799' });
+
       // Build source children arrays — sources can flow to all destinations
       // ha-sankey-chart uses greedy allocation: first child claims energy first.
-      // Put small consumers (EV, HP) before large ones (Home, Grid Export) so they
-      // get visible flow lines even when larger destinations would consume everything.
+      // For small consumers (HP/EV), use connection_entity_id to force proportional
+      // multi-source flows (like the Sigenergy app shows). Each source→HP/EV connection
+      // gets a fake entity whose state is calculated proportionally by the runtime IIFE.
       const _gridExportChild = _gridExportId || e.grid_export_today;
-      const _smallConsumers = [];
-      if (f.show_ev_in_sankey && evSankeyEntity) _smallConsumers.push(evSankeyEntity);
-      if (f.show_hp_in_sankey && hpSankeyEntity) _smallConsumers.push(hpSankeyEntity);
+      // Small consumers as simple entity_ids (for destination section)
+      const _smallConsumerIds = [];
+      if (f.show_ev_in_sankey && evSankeyEntity) _smallConsumerIds.push(evSankeyEntity);
+      if (f.show_hp_in_sankey && hpSankeyEntity) _smallConsumerIds.push(hpSankeyEntity);
 
-      const battDischargeChildren = [..._smallConsumers, e.load_energy_today, _gridExportChild].filter(Boolean);
-      const solarChildren = [e.battery_charge_today, ..._smallConsumers, e.load_energy_today, _gridExportChild].filter(Boolean);
-      const gridImportChildren = [e.battery_charge_today, ..._smallConsumers, e.load_energy_today].filter(Boolean);
+      // Small consumers with connection_entity_id for proportional source allocation
+      // _conn_<src>_<dest> entities are injected by the runtime IIFE at render time
+      const _smallConsForSolar = [];
+      const _smallConsForBat = [];
+      const _smallConsForGrid = [];
+      if (f.show_hp_in_sankey && hpSankeyEntity) {
+        _smallConsForSolar.push({ entity_id: hpSankeyEntity, connection_entity_id: '_conn_solar_to_hp' });
+        _smallConsForBat.push({ entity_id: hpSankeyEntity, connection_entity_id: '_conn_bat_to_hp' });
+        _smallConsForGrid.push({ entity_id: hpSankeyEntity, connection_entity_id: '_conn_grid_to_hp' });
+      }
+      if (f.show_ev_in_sankey && evSankeyEntity) {
+        _smallConsForSolar.push({ entity_id: evSankeyEntity, connection_entity_id: '_conn_solar_to_ev' });
+        _smallConsForBat.push({ entity_id: evSankeyEntity, connection_entity_id: '_conn_bat_to_ev' });
+        _smallConsForGrid.push({ entity_id: evSankeyEntity, connection_entity_id: '_conn_grid_to_ev' });
+      }
+
+      // remaining_parent_state virtual child — only used when losses toggle is ON.
+      // When ON, absorbs unaccounted state so flow paths fill the entire source box.
+      // When OFF, completely omitted — no losses entity, no flow, no solid bar inflating.
+      const _remLosses = f.show_losses_in_sankey ? '_sankey_losses' : null;
+
+      // Children order matters: ha-sankey-chart uses greedy sequential allocation
+      // (first child claims energy first). Order by descending energy share from each
+      // source so the visual flows better approximate proportional allocation.
+      // Small consumers use connection_entity_id for accurate multi-source distribution.
+      // _remLosses (when present) always last — absorbs whatever is left over.
+      const battDischargeChildren = [e.load_energy_today, _gridExportChild, ..._smallConsForBat, _remLosses].filter(Boolean);
+      const solarChildren = [e.battery_charge_today, e.load_energy_today, _gridExportChild, ..._smallConsForSolar, _remLosses].filter(Boolean);
+      const gridImportChildren = [e.load_energy_today, e.battery_charge_today, ..._smallConsForGrid, _remLosses].filter(Boolean);
 
       // Grid import source — prefer the non-tariff total entity for accurate Sankey sizing.
       // Only fall back to tariff add_entities summation when grid_import_today is missing.
@@ -4545,331 +5192,170 @@ return forecast.map(function(d) {
           ? [e.grid_import_high_tariff === _gridImportId ? e.grid_import_low_tariff : e.grid_import_high_tariff]
           : undefined;
       }
-      const gridImportNode = { entity_id: _gridImportId, name: 'Grid', color: '#6b7fd4', children: gridImportChildren };
+      const gridImportNode = { entity_id: _gridImportId, name: 'Grid', color: '#6B8FD4', children: gridImportChildren };
       if (_gridImportAdd) gridImportNode.add_entities = _gridImportAdd;
 
-      const sankeyChart = {
-        type: 'custom:sankey-chart',
-        layout: 'horizontal',
-        show_names: true, show_states: true, show_units: true, show_icons: false,
-        round: 1, height: 500, wide: true,
-        min_box_size: 30, min_box_distance: 5, unit_prefix: 'k',
-        min_state: 0.01,
-        throttle: 10000,
-        energy_date_selection: false,
-        sections: [
-          {
-            // Order matters! ha-sankey-chart uses greedy allocation (first source claims
-            // destinations first). Put smallest source (Grid) first so it gets visible
-            // flow lines even when larger sources would otherwise consume all destinations.
-            entities: [
-              gridImportNode,
-              { entity_id: e.battery_discharge_today, name: 'Battery', color: '#00d4b8', children: battDischargeChildren },
-              { entity_id: e.solar_energy_today, name: 'Solar', color: '#c8b84a', children: solarChildren }
-            ].filter(x => x.entity_id)
-          },
-          {
-            entities: sankeyDest.filter(x => x.entity_id)
-          }
-        ],
-        card_mod: sankeyOld.card_mod || {}
-      };
-      // Rebuild the Jinja :host{} block fresh — includes EV/HP CSS variables when enabled
-      // _j returns a Jinja expression that reads the entity state AND normalises to kWh.
-      // Sensors may report in MWh (genergy utility meters), Wh, or kWh — this handles all.
-      const _j = (eid) => "(states('" + eid + "') | float(0)) * (1000 if state_attr('" + eid + "', 'unit_of_measurement') == 'MWh' else (0.001 if state_attr('" + eid + "', 'unit_of_measurement') == 'Wh' else 1))";
-      // Grid import/export Jinja: prefer the non-tariff total entity to match Sankey sizing
-      const _gridImpJinja = e.grid_import_today
-        ? _j(e.grid_import_today)
-        : (e.grid_import_high_tariff && e.grid_import_low_tariff)
-          ? _j(e.grid_import_high_tariff) + " + " + _j(e.grid_import_low_tariff)
-          : _j(_gridImportId || '');
-      const _gridExpJinja = e.grid_export_today
-        ? _j(e.grid_export_today)
-        : (e.grid_export_high_tariff && e.grid_export_low_tariff)
-          ? _j(e.grid_export_high_tariff) + " + " + _j(e.grid_export_low_tariff)
-          : _j(_gridExportId || '');
-      let jinjaHost = "{% set pv = " + _j(e.solar_energy_today || '') + " %}\n";
-      jinjaHost += "{% set bat_d = " + _j(e.battery_discharge_today || '') + " %}\n";
-      jinjaHost += "{% set grid_i = " + _gridImpJinja + " %}\n";
-      jinjaHost += "{% set bat_c = " + _j(e.battery_charge_today || '') + " %}\n";
-      jinjaHost += "{% set load = " + _j(e.load_energy_today || '') + " %}\n";
-      jinjaHost += "{% set grid_e = " + _gridExpJinja + " %}\n";
-      let dstSum = 'bat_c + load + grid_e';
-      if (f.show_ev_in_sankey && evSankeyEntity) {
-        jinjaHost += "{% set ev = " + _j(evSankeyEntity) + " %}\n";
-        dstSum += ' + ev';
-      }
-      if (f.show_hp_in_sankey && hpSankeyEntity) {
-        jinjaHost += "{% set hp = " + _j(hpSankeyEntity) + " %}\n";
-        dstSum += ' + hp';
-      }
-      jinjaHost += "{% set src = pv + bat_d + grid_i %}\n";
-      jinjaHost += "{% set dst = " + dstSum + " %}\n";
-      jinjaHost += ":host {\n";
-      jinjaHost += "  --pct-src-solar: \"{{ '%0.2f' | format((pv/src*100) if src > 0 else 0) }}%\";\n";
-      jinjaHost += "  --pct-src-bat: \"{{ '%0.2f' | format((bat_d/src*100) if src > 0 else 0) }}%\";\n";
-      jinjaHost += "  --pct-src-grid: \"{{ '%0.2f' | format((grid_i/src*100) if src > 0 else 0) }}%\";\n";
-      jinjaHost += "  --pct-dst-bat: \"{{ '%0.2f' | format((bat_c/dst*100) if dst > 0 else 0) }}%\";\n";
-      jinjaHost += "  --pct-dst-load: \"{{ '%0.2f' | format((load/dst*100) if dst > 0 else 0) }}%\";\n";
-      jinjaHost += "  --pct-dst-grid: \"{{ '%0.2f' | format((grid_e/dst*100) if dst > 0 else 0) }}%\";\n";
-      if (f.show_ev_in_sankey && evSankeyEntity) {
-        jinjaHost += "  --pct-dst-ev: \"{{ '%0.2f' | format((ev/dst*100) if dst > 0 else 0) }}%\";\n";
-      }
-      if (f.show_hp_in_sankey && hpSankeyEntity) {
-        jinjaHost += "  --pct-dst-hp: \"{{ '%0.2f' | format((hp/dst*100) if dst > 0 else 0) }}%\";\n";
-      }
-      jinjaHost += "}\n";
-
-      // Fix sankey CSS: strip old :host block + accumulated layout rules, then prepend fresh Jinja
-      if (sankeyChart.card_mod?.style?.['sankey-chart-base$']) {
-        let css = sankeyChart.card_mod.style['sankey-chart-base$'];
-        // Remove ALL old Jinja :host blocks (can accumulate from repeated builds).
-        // Strategy: find the LAST occurrence of the closing "}\n" from a :host block,
-        // then remove everything from the first "{% set" to that point.
-        // First pass: remove individual blocks
-        while (/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/.test(css)) {
-          css = css.replace(/\{%\s*set\s+pv[\s\S]*?:host\s*\{[\s\S]*?\}\n?/, '');
-        }
-        // Second pass: clean up orphaned Jinja fragments from accumulated blocks
-        // These look like: }%";\n  --pct-src-bat: "...";\n  ...\n}\n
-        while (/\}%\\?";?\s*\n\s*--pct-[\s\S]*?\}\n?/.test(css)) {
-          css = css.replace(/\}%\\?";?\s*\n\s*--pct-[\s\S]*?\}\n?/, '');
-        }
-        // Third pass: remove any leftover orphaned --pct- lines
-        css = css.replace(/^\s*--pct-[^\n]*\n/gm, '');
-        // Third-b pass: remove orphaned Jinja template endings like }%";\n}\n
-        css = css.replace(/(\}%\\?";?\s*\n\s*\}\s*\n?)+/g, '');
-        // Fourth pass: remove broken ha-card rules from accumulation (e.g. "ha-card { --ha-card- overflow...")
-        css = css.replace(/ha-card\s*\{\s*--ha-card-\s+overflow[^}]*\}\n?/g, '');
-        css = css.replace(/min-width:\s*140px\s*!important/g, 'min-width: 90px !important');
-        css = css.replace(/min-width:\s*70px\s*!important/g, 'min-width: 90px !important');
-        // Remove the entire .section:first-of-type block (may contain broken CSS or max-width:75%)
-        css = css.replace(/\.section:first-of-type\s*\{[^}]*\}/g, '');
-        css = css.replace(/min-width:\s*80px\s*!important/g, 'min-width: 65px !important');
-        css = css.replace(/min-width:\s*55px\s*!important/g, 'min-width: 65px !important');
-        // Remove any old destination/source section constraints
-        css = css.replace(/\/\* Constrain destination[^*]*\*\/\n?/g, '');
-        css = css.replace(/\/\* Balance source\/destination[^*]*\*\/\n?/g, '');
-        css = css.replace(/\/\* Force section widths[^*]*\*\/\n?/g, '');
-        css = css.replace(/\/\* Fill container[^*]*\*\/\n?/g, '');
-        css = css.replace(/\/\* Sankey full-width[^*]*\*\/\n?/g, '');
-        css = css.replace(/\.section:last-of-type\s*\{\s*max-width:\s*\d+%\s*!important;\s*\}\n?/g, '');
-        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div:first-child\s*\{\s*max-width:\s*\d+px\s*!important;\s*\}\n?/g, '');
-        css = css.replace(/\.section:first-of-type\s*\{[^}]*width[^}]*\}\n?/g, '');
-        css = css.replace(/\.section:last-of-type\s*\{[^}]*width[^}]*flex[^}]*\}\n?/g, '');
-        css = css.replace(/\.section\s*\{\s*flex:[^}]*\}\n?/g, '');
-        css = css.replace(/\.container\s*\{\s*position:[^}]*\}\n?/g, '');
-        css = css.replace(/\.connectors\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/\.connectors\s*svg\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div:first-child\s*\{\s*width:\s*100%\s*!important;\s*\}\n?/g, '');
-        // Remove ALL accumulated layout fix blocks and duplicates
-        css = css.replace(/\/\* Sankey layout fix[^*]*\*\/\n?/g, '');
-        css = css.replace(/\.section:first-of-type\s*\{[^}]*flex[^}]*\}\n?/g, '');
-        css = css.replace(/\.section:last-of-type\s*\{[^}]*flex[^}]*\}\n?/g, '');
-        // Remove ALL accumulated duplicate rules from prior rebuilds
-        css = css.replace(/\.section:last-of-type\s*\.box\s*\{\s*flex-direction:\s*row-reverse\s*!important;\s*\}\n?/g, '');
-        css = css.replace(/@media\s*\(max-width:\s*800px\)\s*\{\s*\}\n?/g, '');
-        css = css.replace(/@media\s*\(max-width:\s*800px\)\s*\{  \}\n?/g, '');
-        // Remove accumulated EV/HP/Home duplicate rules before re-adding
-        css = css.replace(/\.box\s*>\s*div\[title\*="EV"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/\.box\s*>\s*div\[title\*="HP"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/\.box\s*>\s*div\[title\*="Heat"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label\s*\.name\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="EV"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="HP"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Heat"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/\.section:last-of-type\s*\.box\s*>\s*div\[title\*="Home"\]\s*~\s*\.label::after\s*\{[^}]*\}\n?/g, '');
-        // Replace hardcoded dark-theme Sankey background with theme-aware transparent
-        // ha-card reads --ha-card-background in its :host shadow DOM, so set the variable
-        css = css.replace(/ha-card\s*\{\s*background:\s*#1a1f2e\s*!important/g, 'ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; background: var(--ha-card-background, transparent) !important');
-        // Update Sankey card border-radius to 16px.
-        // ha-card has its own shadow DOM with :host { border-radius: var(--ha-card-border-radius) }
-        // Parent layout-card resets --ha-card-border-radius to 0, so we override it on ha-card itself.
-        // Setting the CSS variable propagates into ha-card's shadow DOM :host styling.
-        css = css.replace(/border-radius:\s*4px\s*!important;?/g, '');
-        css = css.replace(/border-radius:\s*var\(--ha-card-border-radius,\s*16px\)\s*!important;?/g, '');
-        css = css.replace(/border-radius:\s*16px\s*!important;?/g, '');
-        // Remove any old --ha-card-border-radius override to avoid duplication
-        css = css.replace(/\n?ha-card\s*\{\s*--ha-card-border-radius:[^}]*\}\n?/g, '');
-        // Remove any standalone ha-card overflow rules that accumulated
-        css = css.replace(/\n?ha-card\s*\{\s*overflow:\s*hidden[^}]*\}\n?/g, '');
-        // Remove old fill-opacity overrides that blocked hover highlighting
-        css = css.replace(/path\[fill-opacity\]\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/path\[fill-opacity="[^"]*"\]\s*\{[^}]*\}\n?/g, '');
-        css = css.replace(/path\s*\{\s*transition:[^}]*\}\n?/g, '');
-        // Remove old box cursor/transition/overflow/min-height rules to avoid duplication
-        css = css.replace(/\.box\s*\{\s*cursor:[^}]*\}\n?/g, '');
-        css = css.replace(/\.box\s*\{\s*transition:\s*height[^}]*\}\n?/g, '');
-        css = css.replace(/\.spacerv\s*\{\s*transition:\s*height[^}]*\}\n?/g, '');
-        css = css.replace(/\.box\s*\{\s*overflow:\s*(hidden|visible)[^}]*\}\n?/g, '');
-        // Remove broken ha-card rules (e.g. "ha-card { --ha-card- overflow...")
-        css = css.replace(/\n?ha-card\s*\{\s*--ha-card-\s+overflow[^}]*\}\n?/g, '');
-        // Add smooth transition and opacity levels for hover highlighting
-        css += 'path { transition: fill-opacity 0.3s ease !important; fill-opacity: 0.55 !important; }\n';
-        css += 'path:hover { fill-opacity: 0.85 !important; }\n';
-        css += 'path[fill-opacity="0.4"] { fill-opacity: 0.55 !important; }\n';
-        css += 'path[fill-opacity="0.85"] { fill-opacity: 0.95 !important; }\n';
-        // Make entire box area hoverable (not just the colored strip)
-        css += '.box { cursor: pointer !important; min-height: 30px !important; overflow: visible !important; }\n';
-        // Reduce box height transition jitter from live value updates
-        css += '.box { transition: height 0.5s ease !important; }\n';
-        css += '.spacerv { transition: height 0.5s ease !important; }\n';
-        // Set the CSS variable on ha-card so its shadow DOM :host picks up 16px
-        // Also override overflow to clip content at rounded corners (connectors are inside .container)
-        css += '\nha-card { --ha-card-border-radius: 16px !important; overflow: hidden !important; }\n';
-        // Collapse multiple blank lines
-        css = css.replace(/\n{3,}/g, '\n\n');
-        // Prepend fresh Jinja :host block
-        css = jinjaHost + css;
-        // Always rebuild the layout/connector/EV/HP rules fresh from scratch
-        css += '\n/* Sankey layout fix */\n';
-        css += '.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n';
-        css += '.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n';
-        css += '.section:last-of-type .box { flex-direction: row-reverse !important; }\n';
-        css += '.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n';
-        css += '.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n';
-        css += '@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } }\n';
-        // EV/HP pill border colors + destination percentages
-        css += '.box > div[title*="EV"] ~ .label .name { border-color: #ff69b4 !important; }\n';
-        css += '.box > div[title*="HP"] ~ .label .name { border-color: #e67e22 !important; }\n';
-        css += '.box > div[title*="Home"] ~ .label .name { border-color: #e8337f !important; }\n';
-        css += '.section:last-of-type .box > div[title*="EV"] ~ .label::after { content: var(--pct-dst-ev); }\n';
-        css += '.section:last-of-type .box > div[title*="HP"] ~ .label::after { content: var(--pct-dst-hp); }\n';
-        css += '.section:last-of-type .box > div[title*="Home"] ~ .label::after { content: var(--pct-dst-load); }\n';
-        // Mobile responsive: smaller labels when boxes are compact
-        css += '@media (max-width: 500px) { .box .label .state { font-size: 18px !important; } .section:first-of-type .box > div:first-child { min-width: 65px !important; } .section:last-of-type .box > div:first-child { min-width: 65px !important; } }\n';
-        sankeyChart.card_mod.style['sankey-chart-base$'] = css;
-      } else {
-        // sankey-chart-base$ CSS doesn't exist — create full CSS from scratch
-        // This happens on first build or when card_mod was corrupted (e.g. inherited wrong CSS)
-        if (!sankeyChart.card_mod) sankeyChart.card_mod = {};
-        if (!sankeyChart.card_mod.style) sankeyChart.card_mod.style = {};
-        // Remove any non-sankey CSS keys that leaked in from other cards
-        delete sankeyChart.card_mod.style['ha-tile-info$'];
-        let css = '';
-        css += 'ha-card {\n';
-        css += '  --ha-card-background: transparent !important; --card-background-color: transparent !important;\n';
-        css += '  border: none !important;\n';
-        css += '  overflow: hidden !important;\n';
-        css += '  padding: 2px !important;\n';
-        css += '  max-width: 100% !important;\n';
-        css += '}\n';
-        css += 'path { transition: fill-opacity 0.3s ease !important; fill-opacity: 0.55 !important; }\n';
-        css += 'path:hover { fill-opacity: 0.85 !important; }\n';
-        css += 'path[fill-opacity="0.4"] { fill-opacity: 0.55 !important; }\n';
-        css += 'path[fill-opacity="0.85"] { fill-opacity: 0.95 !important; }\n';
-        css += '.container, .section { overflow: visible !important; }\n';
-        css += '.spacerv { transition: height 0.5s ease !important; }\n';
-        css += '.box { overflow: visible !important; position: relative !important; min-height: 30px !important; cursor: pointer !important; transition: height 0.5s ease !important; }\n';
-        css += '.section:first-of-type .box > div:first-child { min-width: 90px !important; border-radius: 8px 0 0 8px !important; }\n';
-        css += '.section:last-of-type .box > div:first-child { min-width: 90px !important; border-radius: 0 8px 8px 0 !important; }\n';
-        css += '.box .label { position: absolute !important; top: 2px !important; bottom: 2px !important; transform: none !important; display: flex !important; flex-direction: column !important; justify-content: flex-start !important; gap: 0px !important; line-height: normal !important; z-index: 2 !important; width: auto !important; max-width: 160px !important; overflow: visible !important; padding: 0 6px !important; background: transparent !important; margin: 0 !important; }\n';
-        css += '.section:first-of-type .box .label { left: 6px !important; align-items: flex-start !important; text-align: left !important; }\n';
-        css += '.section:last-of-type .box .label { right: 6px !important; align-items: flex-end !important; text-align: right !important; }\n';
-        css += '.box .label .name { order: -2 !important; background: rgba(0,0,0,0.45) !important; border: 1.5px solid rgba(255,255,255,0.3) !important; border-radius: 10px !important; padding: 1px 8px !important; font-size: 7.5px !important; font-weight: 700 !important; letter-spacing: 1px !important; text-transform: uppercase !important; margin-bottom: 2px !important; white-space: nowrap !important; color: #fff !important; width: fit-content !important; }\n';
-        css += '.box > div[title*="Solar"] ~ .label .name { border-color: #c8b84a !important; }\n';
-        css += '.box > div[title*="Battery"] ~ .label .name { border-color: #00d4b8 !important; }\n';
-        css += '.section:first-of-type .box > div[title*="Grid"] ~ .label .name { border-color: #6b7fd4 !important; }\n';
-        css += '.section:last-of-type .box > div[title*="Grid"] ~ .label .name { border-color: #7c5cbf !important; }\n';
-        css += '.box > div[title*="Load"] ~ .label .name { border-color: #e8337f !important; }\n';
-        css += '.box .label > span:first-child { order: -1 !important; display: flex !important; flex-direction: column !important; }\n';
-        css += '.box .label .state { font-size: 22px !important; font-weight: 800 !important; color: #fff !important; line-height: 1.1 !important; text-shadow: 0 1px 4px rgba(0,0,0,0.7) !important; }\n';
-        css += '.box .label .unit { font-size: 10px !important; font-weight: 500 !important; color: rgba(255,255,255,0.65) !important; text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important; }\n';
-        css += '.box .label::after { font-size: 9px !important; font-weight: 600 !important; color: rgba(255,255,255,0.55) !important; margin-top: auto !important; text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important; white-space: nowrap !important; }\n';
-        css += '.section:first-of-type .box > div[title*="Solar"] ~ .label::after { content: var(--pct-src-solar); }\n';
-        css += '.section:first-of-type .box > div[title*="Battery"] ~ .label::after { content: var(--pct-src-bat); }\n';
-        css += '.section:first-of-type .box > div[title*="Grid"] ~ .label::after { content: var(--pct-src-grid); }\n';
-        css += '.section:last-of-type .box > div[title*="Battery"] ~ .label::after { content: var(--pct-dst-bat); }\n';
-        css += '.section:last-of-type .box > div[title*="Load"] ~ .label::after { content: var(--pct-dst-load); }\n';
-        css += '.section:last-of-type .box > div[title*="Grid"] ~ .label::after { content: var(--pct-dst-grid); }\n';
-        css += 'ha-card { --ha-card-border-radius: 16px !important; overflow: hidden !important; }\n';
-        css += '.section:first-of-type { flex: 1 1 auto !important; max-width: none !important; }\n';
-        css += '.section:last-of-type { flex: 0 0 auto !important; width: auto !important; max-width: none !important; position: relative !important; z-index: 2 !important; }\n';
-        css += '.section:last-of-type .box { flex-direction: row-reverse !important; }\n';
-        css += '.connectors { left: 90px !important; width: calc(100% - 88px) !important; overflow: visible !important; z-index: 1 !important; }\n';
-        css += '.connectors svg { width: 100% !important; left: 0 !important; overflow: visible !important; }\n';
-        css += '@media (max-width: 800px) { .connectors { left: 65px !important; width: calc(100% - 63px) !important; } }\n';
-        css += '.box > div[title*="EV"] ~ .label .name { border-color: #ff69b4 !important; }\n';
-        css += '.box > div[title*="HP"] ~ .label .name { border-color: #e67e22 !important; }\n';
-        css += '.box > div[title*="Home"] ~ .label .name { border-color: #e8337f !important; }\n';
-        css += '.section:last-of-type .box > div[title*="EV"] ~ .label::after { content: var(--pct-dst-ev); }\n';
-        css += '.section:last-of-type .box > div[title*="HP"] ~ .label::after { content: var(--pct-dst-hp); }\n';
-        css += '.section:last-of-type .box > div[title*="Home"] ~ .label::after { content: var(--pct-dst-load); }\n';
-        // Mobile responsive: smaller labels when boxes are compact
-        css += '@media (max-width: 500px) { .box .label .state { font-size: 18px !important; } .section:first-of-type .box > div:first-child { min-width: 65px !important; } .section:last-of-type .box > div:first-child { min-width: 65px !important; } }\n';
-        css = jinjaHost + css;
-        sankeyChart.card_mod.style['sankey-chart-base$'] = css;
-      }
-
-      // Build node metadata for the interactive info panel
+      // Build node metadata for the custom energy flow card AND the interactive info panel
       const _sankeyNodes = [];
       // Source nodes
       if (e.solar_energy_today) _sankeyNodes.push({
-        id: 'solar', name: 'Solar', color: '#c8b84a', entity_id: e.solar_energy_today, type: 'source',
-        children: solarChildren.map(eid => eid), parents: []
+        id: 'solar', name: 'Solar', color: '#D4C850', entity_id: e.solar_energy_today, type: 'source',
+        children: solarChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
       });
       if (e.battery_discharge_today) _sankeyNodes.push({
-        id: 'bat_d', name: 'Battery Discharged', color: '#00d4b8', entity_id: e.battery_discharge_today, type: 'source',
-        children: battDischargeChildren.map(eid => eid), parents: []
+        id: 'bat_d', name: 'Battery', color: '#4ECDC4', entity_id: e.battery_discharge_today, type: 'source',
+        children: battDischargeChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
       });
       if (_gridImportId) _sankeyNodes.push({
-        id: 'grid_i', name: 'Grid Imported', color: '#6b7fd4', entity_id: _gridImportId, type: 'source',
-        children: gridImportChildren.map(eid => eid), parents: []
+        id: 'grid_i', name: 'Grid', color: '#6B8FD4', entity_id: _gridImportId, type: 'source',
+        children: gridImportChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
       });
       // Destination nodes
       if (e.load_energy_today) _sankeyNodes.push({
-        id: 'load', name: 'Home Consumed', color: '#e8337f', entity_id: e.load_energy_today, type: 'dest',
+        id: 'load', name: 'Home', color: '#9B7AB8', entity_id: e.load_energy_today, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
       if (e.battery_charge_today) _sankeyNodes.push({
-        id: 'bat_c', name: 'Battery Charged', color: '#00d4b8', entity_id: e.battery_charge_today, type: 'dest',
+        id: 'bat_c', name: 'Battery', color: '#4ECDC4', entity_id: e.battery_charge_today, type: 'dest',
         children: [], parents: [e.solar_energy_today, _gridImportId].filter(Boolean)
       });
       if (_gridExportId) _sankeyNodes.push({
-        id: 'grid_e', name: 'Grid Exported', color: '#7c5cbf', entity_id: _gridExportId, type: 'dest',
+        id: 'grid_e', name: 'Grid', color: '#7B8FD4', entity_id: _gridExportId, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
       });
       if (f.show_ev_in_sankey && evSankeyEntity) _sankeyNodes.push({
-        id: 'ev', name: 'EV Charger', color: '#ff69b4', entity_id: evSankeyEntity, type: 'dest',
+        id: 'ev', name: 'EV', color: '#E8705A', entity_id: evSankeyEntity, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
       if (f.show_hp_in_sankey && hpSankeyEntity) _sankeyNodes.push({
-        id: 'hp', name: 'Heat Pump', color: '#e67e22', entity_id: hpSankeyEntity, type: 'dest',
+        id: 'hp', name: 'HP', color: '#E8A799', entity_id: hpSankeyEntity, type: 'dest',
+        children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
+      });
+      if (f.show_losses_in_sankey) _sankeyNodes.push({
+        id: 'losses', name: 'Losses', color: '#444444', entity_id: '_sankey_losses', type: 'dest',
+        children: [], parents: []
+      });
+
+      // Custom energy flow card — replaces ha-sankey-chart
+      const sankeyChart = {
+        type: 'custom:sigenergy-energy-flow-card',
+        nodes: _sankeyNodes,
+        height: 520,
+        show_losses: f.show_losses_in_sankey || false,
+        min_flow: 0.1
+      };
+
+      // Build node metadata for the interactive info panel
+      const _panelNodes = [];
+      // Source nodes
+      if (e.solar_energy_today) _panelNodes.push({
+        id: 'solar', name: 'Solar', color: '#D4C850', entity_id: e.solar_energy_today, type: 'source',
+        children: solarChildren.map(eid => eid), parents: []
+      });
+      if (e.battery_discharge_today) _panelNodes.push({
+        id: 'bat_d', name: 'Battery Discharged', color: '#4ECDC4', entity_id: e.battery_discharge_today, type: 'source',
+        children: battDischargeChildren.map(eid => eid), parents: []
+      });
+      if (_gridImportId) _panelNodes.push({
+        id: 'grid_i', name: 'Grid Imported', color: '#6B8FD4', entity_id: _gridImportId, type: 'source',
+        children: gridImportChildren.map(eid => eid), parents: []
+      });
+      // Destination nodes
+      if (e.load_energy_today) _panelNodes.push({
+        id: 'load', name: 'Home Consumed', color: '#9B7AB8', entity_id: e.load_energy_today, type: 'dest',
+        children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
+      });
+      if (e.battery_charge_today) _panelNodes.push({
+        id: 'bat_c', name: 'Battery Charged', color: '#4ECDC4', entity_id: e.battery_charge_today, type: 'dest',
+        children: [], parents: [e.solar_energy_today, _gridImportId].filter(Boolean)
+      });
+      if (_gridExportId) _panelNodes.push({
+        id: 'grid_e', name: 'Grid Exported', color: '#7B8FD4', entity_id: _gridExportId, type: 'dest',
+        children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
+      });
+      if (f.show_ev_in_sankey && evSankeyEntity) _panelNodes.push({
+        id: 'ev', name: 'EV Charger', color: '#E8705A', entity_id: evSankeyEntity, type: 'dest',
+        children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
+      });
+      if (f.show_hp_in_sankey && hpSankeyEntity) _panelNodes.push({
+        id: 'hp', name: 'Heat Pump', color: '#E8A799', entity_id: hpSankeyEntity, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
 
       // Sankey info panel card
       const sankeyInfoPanel = {
         type: 'custom:sigenergy-sankey-panel',
-        nodes: _sankeyNodes
+        nodes: _panelNodes
       };
 
       newCards.push({ type: 'vertical-stack', cards: [sankeyHeader, sankeyChart, sankeyInfoPanel] });
 
-      // Card 2: Battery device card (keep existing)
-      newCards.push(mainLayout.cards[2] || { type: 'vertical-stack', cards: [{ type: 'custom:sigenergy-device-card', battery_packs: f.battery_packs || 2 }] });
-
-      // Card 3: Status mushrooms
-      newCards.push({
-        type: 'custom:layout-card',
-        layout_type: 'custom:grid-layout',
-        layout: { 'grid-template-columns': '1fr 1fr', 'grid-gap': '4px' },
-        cards: statusCards
+      // Section divider helper — creates a styled label between major card groups
+      const _sectionDivider = (label, icon) => ({
+        type: 'markdown',
+        content: `${icon || ''} ${label}`,
+        card_mod: { style: _resolvedTheme === 'light'
+          ? 'ha-card { background: transparent !important; border: none !important; box-shadow: none !important; padding: 6px 4px 4px 4px !important; margin-top: 0px !important; font-size: 11px !important; font-weight: 700 !important; letter-spacing: 2.5px !important; text-transform: uppercase !important; color: rgba(0,130,115,0.6) !important; border-bottom: 2px solid rgba(0,180,155,0.25) !important; } ha-markdown { padding: 0 !important; }'
+          : 'ha-card { background: transparent !important; border: none !important; box-shadow: none !important; padding: 6px 4px 4px 4px !important; margin-top: 0px !important; font-size: 11px !important; font-weight: 700 !important; letter-spacing: 2.5px !important; text-transform: uppercase !important; color: rgba(0,212,184,0.7) !important; border-bottom: 2px solid rgba(0,212,184,0.3) !important; } ha-markdown { padding: 0 !important; }' }
       });
 
-      // Card 4: Energy stat mushrooms
-      newCards.push({
-        type: 'custom:layout-card',
-        layout_type: 'custom:grid-layout',
-        layout: { 'grid-template-columns': '1fr 1fr 1fr', 'grid-gap': '4px' },
-        cards: statCards
-      });
+      // Card 2: Battery device card — separate column in the 3-col grid
+      // Find battery device card from existing layout — search all cards at any level for sigenergy-device-card
+      const _findBatteryCard = (cards) => {
+        if (!cards) return null;
+        for (const c of cards) {
+          if (c.type === 'custom:layout-card' && c.cards?.[1]?.type === 'vertical-stack') {
+            const inner = c.cards[1];
+            if (inner?.cards?.some(ic => ic.type === 'custom:sigenergy-device-card')) return inner;
+            if (inner?.type === 'vertical-stack' && !inner?.cards) return null;
+          }
+          if (c.type === 'vertical-stack' && c.cards?.some(ic => ic.type === 'custom:sigenergy-device-card')) return c;
+          if (c.type === 'custom:sigenergy-device-card') return c;
+        }
+        for (const c of cards) {
+          if (c.cards) {
+            const found = _findBatteryCard(c.cards);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
 
-      // Card 5: Apex chart + self-sufficiency
+      const _defaultBatteryCard = { type: 'vertical-stack', cards: [{ type: 'custom:sigenergy-device-card', battery_packs: f.battery_packs || 2 }] };
+      const batteryCard = _findBatteryCard(mainLayout.cards) || _defaultBatteryCard;
+      // Push battery card as a separate item — grid handles 3-col layout
+      newCards.push(batteryCard);
+
+      // Card 3: Apex chart + self-sufficiency (full width)
+      newCards.push({ ..._sectionDivider('FORECAST', '📈'), view_layout: { 'grid-column': '1 / -1' } });
       const chartStack = [apexChart];
       if (selfSuffCard) chartStack.push(selfSuffCard);
-      newCards.push({ type: 'vertical-stack', cards: chartStack });
+      newCards.push({ type: 'vertical-stack', cards: chartStack, view_layout: { 'grid-column': '1 / -1' } });
+
+      // Card 6+7: Smart Loads + System Insights side by side in a full-width container
+      // Both get full row (1 / -1) so they sit in a proper horizontal layout
+      const insightsCard = { type: 'custom:sigenergy-insights-card' };
+      if (f.smart_loads && cfg.smart_loads?.length > 0) {
+        // Wrap smart loads + insights in a 2-column horizontal layout spanning full width
+        const smartLoadsCard = { type: 'custom:sigenergy-smart-load-card' };
+        newCards.push({
+          type: 'custom:layout-card',
+          layout_type: 'custom:grid-layout',
+          layout: {
+            'grid-template-columns': '1fr 1fr',
+            'grid-gap': '8px',
+            'padding': '0',
+            mediaquery: {
+              '(max-width: 600px)': { 'grid-template-columns': '1fr' }
+            }
+          },
+          cards: [smartLoadsCard, insightsCard],
+          view_layout: { 'grid-column': '1 / -1' }
+        });
+      } else {
+        // Only insights — span 2 of the 3 columns so it gets proper width
+        newCards.push({ ...insightsCard, view_layout: { 'grid-column': '1 / 3' } });
+      }
 
       // Preserve persistent config on the layout card — use current store state
       // (not the version from disk, which may be stale due to async save race)
@@ -4924,6 +5410,16 @@ return forecast.map(function(d) {
           <div class="price-btn ${d.theme==='auto'?'active':''}" data-theme="auto">🔄 Auto</div>
         </div>
         <div style="font-size:10px;color:#666;margin-top:4px;">Auto: follows your HA theme (${this._detectHaTheme() === 'dark' ? 'currently dark' : 'currently light'})</div>
+      </div>
+      <div class="section" style="border:1px solid ${d.kiosk_mode ? '#00d4b8' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:${d.kiosk_mode ? '#00d4b8' : '#8892a4'};">🖥️ Kiosk Mode</div>
+            <div style="font-size:10px;color:#666;margin-top:2px;">Hides sidebar & header for wall-mounted displays</div>
+          </div>
+          <div class="switch ${d.kiosk_mode ? 'on' : 'off'}" data-key="kiosk_mode_toggle" style="flex-shrink:0;margin-left:12px;"></div>
+        </div>
+        <div style="margin-top:8px;padding:8px 10px;background:rgba(255,165,0,0.1);border:1px solid rgba(255,165,0,0.25);border-radius:6px;font-size:10px;color:#ffa726;line-height:1.5;">⚠️ Enabling kiosk mode will redirect you to the overview (main) dashboard page. To exit kiosk mode, click the <b>✕</b> button in the top-right corner.</div>
       </div>
       <div class="section">
         <div class="section-title">Formatting</div>
@@ -5000,6 +5496,25 @@ return forecast.map(function(d) {
       });
     });
 
+    // Kiosk mode toggle
+    const kioskToggle = el.querySelector('[data-key="kiosk_mode_toggle"]');
+    if (kioskToggle) {
+      kioskToggle.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        cfg2.display.kiosk_mode = !cfg2.display.kiosk_mode;
+        this._storeSave(cfg2);
+        if (window._sigenergyApplyKiosk) {
+          window._sigenergyApplyKiosk(cfg2.display.kiosk_mode);
+        }
+        if (cfg2.display.kiosk_mode) {
+          // Redirect to main overview dashboard
+          window.location.href = '/dashboard-sigenergy/0';
+          return;
+        }
+        this._render();
+      });
+    }
+
     // Input/select changes
     el.querySelectorAll('.row-input').forEach(input => {
       input.addEventListener('change', () => {
@@ -5060,6 +5575,520 @@ return forecast.map(function(d) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Custom Energy Flow Card — SVG-based Sankey with thick ribbons
+// Replaces ha-sankey-chart HACS integration
+// ═══════════════════════════════════════════════════════════
+
+class SigenergyEnergyFlowCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    // Immediate host styling so border-radius applies before first render
+    const initStyle = document.createElement('style');
+    initStyle.textContent = ':host { display: block; border-radius: 16px; overflow: hidden; }';
+    this.shadowRoot.appendChild(initStyle);
+    this._config = {};
+    this._hass = null;
+    this._overriddenStates = null;
+    this._lastRenderKey = '';
+    this._renderRAF = null;
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+  }
+
+  static getConfigElement() { return document.createElement('div'); }
+  static getStubConfig() { return { nodes: [], height: 520 }; }
+  getCardSize() { return 6; }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._shouldRerender()) this._scheduleRender();
+  }
+
+  set states(states) {
+    this._overriddenStates = (states && Object.keys(states).length) ? states : null;
+    this._lastRenderKey = '';
+    this._scheduleRender();
+  }
+
+  get __sections() {
+    const nodes = this._config.nodes || [];
+    return [
+      { boxes: nodes.filter(n => n.type === 'source').map(n => ({ entity_id: n.entity_id })) },
+      { boxes: nodes.filter(n => n.type === 'dest').map(n => ({ entity_id: n.entity_id })) }
+    ];
+  }
+
+  _handleMouseEnter(box) {
+    if (!this.shadowRoot) return;
+    const eid = box?.entity_id;
+    if (!eid) return;
+    this.shadowRoot.querySelectorAll('.flow-path').forEach(p => {
+      const src = p.dataset.src, dst = p.dataset.dst;
+      p.style.fillOpacity = (src === eid || dst === eid) ? '0.8' : '0.12';
+    });
+    this.shadowRoot.querySelectorAll('.node-bar').forEach(b => {
+      b.style.filter = b.dataset.entityId === eid ? 'brightness(1.15)' : 'brightness(0.7)';
+    });
+  }
+
+  _handleMouseLeave() {
+    if (!this.shadowRoot) return;
+    this.shadowRoot.querySelectorAll('.flow-path').forEach(p => { p.style.fillOpacity = ''; });
+    this.shadowRoot.querySelectorAll('.node-bar').forEach(b => { b.style.filter = ''; });
+  }
+
+  _shouldRerender() {
+    const nodes = this._config.nodes || [];
+    const states = this._overriddenStates || (this._hass && this._hass.states) || {};
+    const key = nodes.map(n => {
+      const s = states[n.entity_id];
+      const raw = s ? parseFloat(s.state) || 0 : 0;
+      return Math.round(raw * 10);
+    }).join(',');
+    if (key === this._lastRenderKey) return false;
+    this._lastRenderKey = key;
+    return true;
+  }
+
+  _scheduleRender() {
+    if (this._renderRAF) return;
+    this._renderRAF = requestAnimationFrame(() => {
+      this._renderRAF = null;
+      this._render();
+    });
+  }
+
+  connectedCallback() { this._scheduleRender(); }
+  disconnectedCallback() { if (this._renderRAF) { cancelAnimationFrame(this._renderRAF); this._renderRAF = null; } }
+
+  _getKwh(entityId) {
+    if (!entityId) return 0;
+    const states = this._overriddenStates || (this._hass && this._hass.states) || {};
+    const s = states[entityId];
+    if (!s) return 0;
+    const raw = parseFloat(s.state) || 0;
+    const unit = (s.attributes && s.attributes.unit_of_measurement) || 'kWh';
+    if (unit === 'MWh') return raw * 1000;
+    if (unit === 'Wh') return raw / 1000;
+    return raw;
+  }
+
+  _formatValue(kwh) {
+    if (kwh >= 1000) return { v: (kwh / 1000).toFixed(2), u: 'MWh' };
+    if (kwh >= 100) return { v: kwh.toFixed(0), u: 'kWh' };
+    if (kwh >= 10) return { v: kwh.toFixed(1), u: 'kWh' };
+    return { v: kwh.toFixed(2), u: 'kWh' };
+  }
+
+  _render() {
+    if (!this.shadowRoot || !this._config.nodes) return;
+    const nodes = this._config.nodes || [];
+    const minKwh = this._config.min_flow || 0.1;
+    const sources = nodes.filter(n => n.type === 'source' && this._getKwh(n.entity_id) >= minKwh);
+    const dests = nodes.filter(n => n.type === 'dest' && this._getKwh(n.entity_id) >= minKwh);
+    if (sources.length === 0 && dests.length === 0) {
+      this.shadowRoot.innerHTML = '<div style="padding:24px;text-align:center;color:#aaa;font-size:13px;">No energy data available</div>';
+      return;
+    }
+
+    const isDark = (window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark') === 'dark';
+    const height = this._config.height || 520;
+    const gap = 8;
+
+    // Compute totals
+    const totalSrc = sources.reduce((s, n) => s + this._getKwh(n.entity_id), 0);
+    const totalDst = dests.reduce((s, n) => s + this._getKwh(n.entity_id), 0);
+
+    // Proportional box height allocation — bars scale with energy values
+    const minBarH = 20;
+    const srcAvail = height - (sources.length - 1) * gap;
+    const dstAvail = height - (dests.length - 1) * gap;
+    const _allocateBoxes = (nodeList, totalKwh, avail) => {
+      if (nodeList.length === 0) return [];
+      const boxes = nodeList.map(n => {
+        const kwh = this._getKwh(n.entity_id);
+        return { ...n, kwh, h: totalKwh > 0 ? (kwh / totalKwh) * avail : avail / nodeList.length, cursor: 0 };
+      });
+      // Enforce minimum heights: bump small bars, shrink large bars proportionally
+      let deficit = 0, flexTotal = 0;
+      boxes.forEach(b => {
+        if (b.h < minBarH) { deficit += minBarH - b.h; b.h = minBarH; }
+        else { flexTotal += b.h; }
+      });
+      if (deficit > 0 && flexTotal > deficit) {
+        const shrink = (flexTotal - deficit) / flexTotal;
+        boxes.forEach(b => { if (b.h > minBarH) b.h *= shrink; });
+      }
+      let y = 0;
+      boxes.forEach(b => { b.y = y; y += b.h + gap; });
+      return boxes;
+    };
+    const srcBoxes = _allocateBoxes(sources, totalSrc, srcAvail);
+    const dstBoxes = _allocateBoxes(dests, totalDst, dstAvail);
+
+    // Greedy flow allocation
+    const remaining = {};
+    dstBoxes.forEach(d => { remaining[d.entity_id] = d.kwh; });
+    const flows = [];
+    srcBoxes.forEach(src => {
+      let srcRem = src.kwh;
+      const childSet = new Set(src.children || []);
+      dstBoxes.forEach(d => { if ((d.parents || []).includes(src.entity_id)) childSet.add(d.entity_id); });
+      const children = [...childSet]
+        .map(eid => dstBoxes.find(d => d.entity_id === eid))
+        .filter(Boolean);
+      const totalDstRem = children.reduce((s, d) => s + (remaining[d.entity_id] || 0), 0);
+      children.forEach(dst => {
+        if (totalDstRem > 0 && srcRem > 0) {
+          const share = (remaining[dst.entity_id] || 0) / totalDstRem;
+          const flow = Math.min(share * src.kwh, srcRem, remaining[dst.entity_id] || 0);
+          if (flow > 0.005) {
+            flows.push({ src, dst, kwh: flow });
+          }
+          remaining[dst.entity_id] = (remaining[dst.entity_id] || 0) - flow;
+          srcRem -= flow;
+        }
+      });
+    });
+
+    // ── Minimize crossings: reorder destination nodes by weighted source position ──
+    // Compute ideal dest position = weighted average of connected source midpoints
+    const dstIdeal = {};
+    dstBoxes.forEach(d => { dstIdeal[d.entity_id] = { sumKwhY: 0, sumKwh: 0 }; });
+    flows.forEach(f => {
+      const srcMid = f.src.y + f.src.h / 2;
+      dstIdeal[f.dst.entity_id].sumKwhY += f.kwh * srcMid;
+      dstIdeal[f.dst.entity_id].sumKwh += f.kwh;
+    });
+    dstBoxes.sort((a, b) => {
+      const wa = dstIdeal[a.entity_id].sumKwh > 0 ? dstIdeal[a.entity_id].sumKwhY / dstIdeal[a.entity_id].sumKwh : a.y;
+      const wb = dstIdeal[b.entity_id].sumKwh > 0 ? dstIdeal[b.entity_id].sumKwhY / dstIdeal[b.entity_id].sumKwh : b.y;
+      return wa - wb;
+    });
+    // Recompute dest y positions after reorder
+    let _dstY2 = 0;
+    dstBoxes.forEach(d => { d.y = _dstY2; _dstY2 += d.h + gap; });
+
+    // Pre-assign destination cursor positions: within each dest, flows from
+    // upper sources get upper slots
+    const flowsByDest = {};
+    flows.forEach(f => {
+      const deid = f.dst.entity_id;
+      if (!flowsByDest[deid]) flowsByDest[deid] = [];
+      flowsByDest[deid].push(f);
+    });
+    Object.values(flowsByDest).forEach(arr => arr.sort((a, b) => a.src.y - b.src.y));
+    dstBoxes.forEach(d => { d.cursor = 0; });
+    flows.forEach(f => { f._dstSlot = null; });
+    dstBoxes.forEach(dst => {
+      const dstFlows = flowsByDest[dst.entity_id] || [];
+      dstFlows.forEach(f => {
+        const ribbonDst = f.dst.kwh > 0 ? (f.kwh / f.dst.kwh) * f.dst.h : 0;
+        f._dstSlot = { dy1: f.dst.y + f.dst.cursor, ribbonDst };
+        f.dst.cursor += ribbonDst;
+      });
+    });
+    srcBoxes.forEach(s => { s.cursor = 0; });
+    // Process flows by source position for consistent source cursor tracking
+    flows.sort((a, b) => {
+      const srcDiff = a.src.y - b.src.y;
+      if (Math.abs(srcDiff) > 0.1) return srcDiff;
+      return a.dst.y - b.dst.y;
+    });
+
+    // Compute percentage for each node
+    const srcPcts = {};
+    srcBoxes.forEach(b => { srcPcts[b.entity_id] = totalSrc > 0 ? ((b.kwh / totalSrc) * 100).toFixed(2) : '0'; });
+    const dstPcts = {};
+    dstBoxes.forEach(b => { dstPcts[b.entity_id] = totalDst > 0 ? ((b.kwh / totalDst) * 100).toFixed(2) : '0'; });
+
+    // Build SVG paths and gradients — FULL WIDTH flows (mySigen style)
+    const gradients = [];
+    const paths = [];
+    flows.forEach((flow, idx) => {
+      const gradId = `fg${idx}`;
+      gradients.push({ id: gradId, c1: flow.src.color, c2: flow.dst.color });
+
+      const ribbonSrc = flow.src.kwh > 0 ? (flow.kwh / flow.src.kwh) * flow.src.h : 0;
+      const sy1 = flow.src.y + flow.src.cursor;
+      const sy2 = sy1 + ribbonSrc;
+      flow.src.cursor += ribbonSrc;
+
+      // Use pre-computed destination slot (assigned by source position within each dest)
+      const slot = flow._dstSlot || { dy1: flow.dst.y, ribbonDst: 0 };
+      const dy1 = slot.dy1;
+      const dy2 = dy1 + slot.ribbonDst;
+
+      // Flow connects exactly at node panel edges (16% label columns)
+      const x1 = 18;
+      const x2 = 82;
+      const cp1x = 36;
+      const cp2x = 64;
+
+      const d = `M ${x1},${sy1} C ${cp1x},${sy1} ${cp2x},${dy1} ${x2},${dy1} L ${x2},${dy2} C ${cp2x},${dy2} ${cp1x},${sy2} ${x1},${sy2} Z`;
+      // Measure crossing: how far the flow goes against the natural direction
+      const srcMid = (sy1 + sy2) / 2;
+      const dstMid = (dy1 + dy2) / 2;
+      const crossDist = Math.abs(srcMid - dstMid);
+      const isCrossing = (srcMid > dstMid + 50) || (dstMid > srcMid + 200); // upward or long downward
+      paths.push({ d, gradId, srcEid: flow.src.entity_id, dstEid: flow.dst.entity_id, kwh: flow.kwh, crossDist, isCrossing });
+    });
+
+    // mySigen-style colors
+    const brandTeal = '#00CDB8';
+    const txtPrimary = isDark ? '#fff' : '#1a1a2e';
+    const txtSecondary = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)';
+    const cardBg = isDark
+      ? 'linear-gradient(135deg, rgba(18,24,40,0.95) 0%, rgba(26,31,46,0.98) 50%, rgba(20,28,42,0.95) 100%)'
+      : '#ffffff';
+    const labelBg = isDark ? 'rgba(20,26,42,0.92)' : 'rgba(255,255,255,0.95)';
+    const labelBorder = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+
+    // Hex→rgb helper for node-tinted backgrounds
+    const hexRgb = (hex) => {
+      const h = hex.replace('#','');
+      return [parseInt(h.substring(0,2),16), parseInt(h.substring(2,4),16), parseInt(h.substring(4,6),16)];
+    };
+
+    // Build mySigen-style node panel (full-height bar covering flow edge)
+    const makeLabel = (box, pct, align) => {
+      const fmt = this._formatValue(box.kwh);
+      const isTiny = box.h < 55;
+      const isCompact = box.h < 105;
+      const alignCls = align === 'left' ? 'lbl-left' : 'lbl-right';
+      // Per-node color-tinted background (mySigen style)
+      const [r,g,b] = hexRgb(box.color || '#4ECDC4');
+      const panelBg = isDark
+        ? `linear-gradient(180deg, rgba(${r},${g},${b},0.32) 0%, rgba(${r},${g},${b},0.15) 100%)`
+        : `linear-gradient(180deg, rgba(${r},${g},${b},0.18) 0%, rgba(${r},${g},${b},0.08) 100%)`;
+      if (isTiny) {
+        return `<div class="node-panel ${alignCls}" style="background:${panelBg};">
+          <span class="lbl-name">${this._escHtml(box.name)}</span>
+          <span class="lbl-inline">${fmt.v} ${fmt.u.charAt(0) === 'M' ? 'MWh' : 'kWh'}</span>
+        </div>`;
+      }
+      return `<div class="node-panel ${alignCls}${isCompact ? ' lbl-compact' : ''}" style="background:${panelBg};">
+        <span class="lbl-name">${this._escHtml(box.name)}</span>
+        <span class="lbl-val">${fmt.v}</span>
+        <span class="lbl-unit">${fmt.u}</span>
+        ${!isCompact ? `<span class="lbl-pct">${pct}%</span>` : ''}
+      </div>`;
+    };
+
+    // Container height = configured height (bars are allocated to fit within it)
+    const totalH = height;
+    const vbW = 100;
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; border-radius: 16px; overflow: hidden; }
+        .efc-card {
+          background: ${cardBg};
+          border: 1px solid ${isDark ? 'rgba(0,212,184,0.12)' : 'rgba(0,0,0,0.06)'};
+          border-radius: 16px;
+          box-shadow: ${isDark ? '0 4px 24px rgba(0,0,0,0.3)' : '0 2px 12px rgba(0,0,0,0.06)'};
+          overflow: hidden;
+          position: relative;
+          padding: 0;
+        }
+        .efc-container {
+          position: relative;
+          width: 100%;
+          height: ${totalH}px;
+        }
+        .efc-svg {
+          position: absolute;
+          top: 0; left: 0;
+          width: 100%;
+          height: 100%;
+        }
+        .flow-path {
+          transition: fill-opacity 0.3s ease;
+          pointer-events: auto;
+        }
+        .flow-path:hover { fill-opacity: 0.85 !important; }
+
+        /* Node bar columns — flush at chart edges */
+        .label-col {
+          position: absolute;
+          top: 0;
+          width: 18%;
+          height: 100%;
+          z-index: 2;
+          pointer-events: none;
+        }
+        .label-col.left { left: 0; }
+        .label-col.right { right: 0; }
+
+        /* Individual node bar wrappers — full height of node */
+        .node-bar {
+          position: absolute;
+          left: 0;
+          right: 0;
+          pointer-events: auto;
+          cursor: pointer;
+          overflow: hidden;
+        }
+
+        /* mySigen-style node panel (full-height bar) */
+        .node-panel {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          padding: 6px 8px;
+          gap: 0px;
+          box-sizing: border-box;
+          overflow: hidden;
+        }
+        .node-panel > * { flex-shrink: 1; min-height: 0; }
+        .lbl-left { align-items: center; text-align: center; }
+        .lbl-right { align-items: center; text-align: center; }
+
+        .lbl-name {
+          display: inline-block;
+          background: ${brandTeal};
+          color: #fff;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 1.2px;
+          text-transform: uppercase;
+          padding: 2px 8px;
+          border-radius: 4px;
+          line-height: 1.4;
+          margin-bottom: 2px;
+          white-space: nowrap;
+        }
+        .lbl-val {
+          font-size: 22px;
+          font-weight: 900;
+          color: ${txtPrimary};
+          line-height: 1.1;
+        }
+        .lbl-unit {
+          font-size: 11px;
+          font-weight: 600;
+          color: ${txtSecondary};
+          margin-top: -1px;
+        }
+        .lbl-pct {
+          font-size: 12px;
+          font-weight: 700;
+          color: ${txtSecondary};
+          margin-top: 2px;
+        }
+
+        /* Compact (small nodes) */
+        .lbl-compact { padding: 3px 6px; }
+        .lbl-compact .lbl-name { font-size: 8px; padding: 1px 5px; margin-bottom: 1px; }
+        .lbl-compact .lbl-val { font-size: 16px; }
+        .lbl-compact .lbl-unit { font-size: 9px; }
+
+        /* Tiny inline label */
+        .node-panel:has(.lbl-inline) {
+          flex-direction: row;
+          align-items: center;
+          justify-content: flex-start;
+          gap: 4px;
+          padding: 3px 5px;
+        }
+        .node-panel:has(.lbl-inline) .lbl-name {
+          font-size: 8px;
+          padding: 1px 5px;
+          flex-shrink: 0;
+        }
+        .lbl-right:has(.lbl-inline) {
+          justify-content: flex-end;
+        }
+        .lbl-inline {
+          font-size: 11px;
+          font-weight: 700;
+          color: ${txtPrimary};
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          flex: 1;
+          min-width: 0;
+        }
+
+        @media (max-width: 500px) {
+          .lbl-val { font-size: 16px !important; }
+          .lbl-name { font-size: 7px !important; padding: 1px 4px !important; }
+          .lbl-unit { font-size: 9px !important; }
+          .lbl-pct { font-size: 10px !important; }
+          .node-panel { padding: 3px 5px; }
+        }
+        @media (min-width: 769px) {
+          .lbl-val { font-size: 26px !important; }
+          .lbl-name { font-size: 10px !important; }
+          .lbl-unit { font-size: 12px !important; }
+          .lbl-pct { font-size: 13px !important; }
+        }
+      </style>
+      <ha-card class="efc-card">
+        <div class="efc-container">
+          <svg class="efc-svg" viewBox="0 0 ${vbW} ${totalH}" preserveAspectRatio="none">
+            <defs>
+              ${gradients.map(g => `
+                <linearGradient id="${g.id}" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="${g.c1}" stop-opacity="0.75"/>
+                  <stop offset="100%" stop-color="${g.c2}" stop-opacity="0.7"/>
+                </linearGradient>
+              `).join('')}
+            </defs>
+            ${[...paths].sort((a, b) => (b.isCrossing ? 1 : 0) - (a.isCrossing ? 1 : 0)).map(p => `<path class="flow-path" d="${p.d}" fill="url(#${p.gradId})" fill-opacity="${p.isCrossing ? 0.35 : 0.65}" data-src="${p.srcEid}" data-dst="${p.dstEid}"/>`).join('\n            ')}
+          </svg>
+          <div class="label-col left">
+            ${srcBoxes.map(b => {
+              return `<div class="node-bar" data-entity-id="${b.entity_id}" style="top:${b.y}px;height:${b.h}px;">${makeLabel(b, srcPcts[b.entity_id], 'left')}</div>`;
+            }).join('\n            ')}
+          </div>
+          <div class="label-col right">
+            ${dstBoxes.map(b => {
+              return `<div class="node-bar" data-entity-id="${b.entity_id}" style="top:${b.y}px;height:${b.h}px;">${makeLabel(b, dstPcts[b.entity_id], 'right')}</div>`;
+            }).join('\n            ')}
+          </div>
+        </div>
+      </ha-card>
+    `;
+
+    // Attach hover/click listeners for interactive highlighting
+    const allBoxes = this.shadowRoot.querySelectorAll('.node-bar');
+    allBoxes.forEach(box => {
+      const eid = box.dataset.entityId;
+      box.addEventListener('mouseenter', () => {
+        this.shadowRoot.querySelectorAll('.flow-path').forEach(p => {
+          p.style.fillOpacity = (p.dataset.src === eid || p.dataset.dst === eid) ? '0.8' : '0.12';
+        });
+      });
+      box.addEventListener('mouseleave', () => {
+        this.shadowRoot.querySelectorAll('.flow-path').forEach(p => { p.style.fillOpacity = ''; });
+      });
+    });
+  }
+
+  _hexToRgba(hex, alpha) {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  _escHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // Sankey Info Panel — Interactive detail panel for Sankey chart
 // ═══════════════════════════════════════════════════════════
 
@@ -5071,10 +6100,12 @@ class SigenergySankeyPanel extends HTMLElement {
     this._hass = null;
     this._selectedNode = null;
     this._expanded = false;
+    this._lastStatsKey = '';
   }
 
   set hass(hass) {
     this._hass = hass;
+    this._updateStatsPanel();
     this._updatePanel();
   }
 
@@ -5145,23 +6176,19 @@ class SigenergySankeyPanel extends HTMLElement {
     const sankeyBase = this._findSankeyBase();
     if (!sankeyBase || !sankeyBase.shadowRoot) return false;
 
-    const boxes = sankeyBase.shadowRoot.querySelectorAll('.box');
+    const boxes = sankeyBase.shadowRoot.querySelectorAll('.node-bar');
     if (boxes.length === 0) return false;
 
-    // Build entity_id list from Sankey's internal __sections data (matches DOM box order)
-    const sections = sankeyBase.__sections;
-    if (!sections) return false;
-    const internalBoxes = [];
-    for (let i = 0; i < sections.length; i++) {
-      if (sections[i].boxes) {
-        sections[i].boxes.forEach(b => internalBoxes.push(b));
-      }
-    }
-    if (internalBoxes.length !== boxes.length) return false;
+    // Match DOM boxes to config nodes by data-entity-id attribute.
+    // The internal __sections may include synthetic nodes (e.g. _sankey_losses)
+    // that have no DOM box, so we cannot rely on index-based matching.
+
+    // Track these boxes so we can detect when the flow card re-renders
+    this._attachedBoxes = new Set(boxes);
 
     let attached = 0;
-    boxes.forEach((box, idx) => {
-      const entityId = internalBoxes[idx]?.entity_id;
+    boxes.forEach((box) => {
+      const entityId = box.dataset.entityId;
       if (!entityId) return;
       const node = meta.find(n => n.entity_id === entityId);
       if (!node) return;
@@ -5175,17 +6202,17 @@ class SigenergySankeyPanel extends HTMLElement {
           this._expanded = false;
         } else {
           this._selectedNode = node.id;
-          this._expanded = false;
+          this._expanded = true;
         }
         this._updatePanel();
       };
       box.addEventListener('click', handler, true);
       this._boxClickCleanup.push(() => box.removeEventListener('click', handler, true));
 
-      // Attach hover highlighting to the full .box element (not just the narrow colored strip)
-      const internalBox = internalBoxes[idx];
-      if (internalBox && sankeyBase._handleMouseEnter && sankeyBase._handleMouseLeave) {
-        const enterHandler = () => sankeyBase._handleMouseEnter(internalBox);
+      // Attach hover highlighting to the full .box element
+      if (sankeyBase._handleMouseEnter && sankeyBase._handleMouseLeave) {
+        const hoverBox = { entity_id: entityId };
+        const enterHandler = () => sankeyBase._handleMouseEnter(hoverBox);
         const leaveHandler = () => sankeyBase._handleMouseLeave();
         box.addEventListener('mouseenter', enterHandler);
         box.addEventListener('mouseleave', leaveHandler);
@@ -5324,6 +6351,18 @@ class SigenergySankeyPanel extends HTMLElement {
   }
 
   _checkDateNavigation() {
+    // Re-attach box listeners if the flow card re-rendered (DOM replaced)
+    if (this._attachedBoxes) {
+      const sample = this._attachedBoxes.values().next().value;
+      if (sample && !sample.isConnected) {
+        this._cleanupBoxListeners();
+        this._boxClickCleanup = [];
+        this._tryAttachBoxes();
+      }
+    } else if (!this._attachedBoxes) {
+      this._tryAttachBoxes();
+    }
+
     const selectedStr = this._getSelectedDateStr();
     if (!selectedStr) return;
 
@@ -5338,6 +6377,9 @@ class SigenergySankeyPanel extends HTMLElement {
         // Clear quantization cache so next _stabilizeLiveValues picks up fresh data
         this._quantStatesCache = null;
         this._lastQuantValues = {};
+        // Refresh stats panel to show live data again
+        this._updateStatsPanel();
+        this._updatePanel();
       }
       if (this._dateNavLastStr !== selectedStr) this._dateNavLastStr = selectedStr;
       // Stabilize live values: quantize entity state values to 1 decimal place
@@ -5398,11 +6440,16 @@ class SigenergySankeyPanel extends HTMLElement {
 
       // Build overridden states
       const newStates = { ...this._hass.states };
+      const startMs = startDate.getTime();
+      const endMs = endDate.getTime();
       for (const entityId of entityIds) {
         const entityStats = stats[entityId];
         let totalChange = 0;
         if (entityStats) {
           for (const period of entityStats) {
+            // Only include periods whose start falls strictly within [startDate, endDate)
+            // The API can return an extra boundary period at endDate — skip it
+            if (period.start >= endMs) continue;
             if (period.change !== null && period.change !== undefined) {
               totalChange += period.change;
             }
@@ -5414,6 +6461,81 @@ class SigenergySankeyPanel extends HTMLElement {
         }
       }
 
+      // For entities with zero/no recorder data, try daily summary fallbacks.
+      // Some utility meters (e.g. genergy_*_daily) may lack recorder statistics
+      // while the inverter's own day counters have full history.
+      const _fallbackMap = {
+        'solar': 'deyeinvertermaster_summary_day_pv',
+        'battery_charge': 'deyeinvertermaster_summary_day_battery_charge',
+        'battery_discharge': 'deyeinvertermaster_summary_day_battery_discharge',
+        'grid_import': 'deyeinvertermaster_summary_day_grid_import_buy',
+        'grid_export': 'deyeinvertermaster_summary_day_grid_export_sell',
+        'load': 'deyeinvertermaster_summary_day_load',
+        'hp_energy': 'deyeinvertermaster_summary_day_aux_energy'
+      };
+      const needsFallback = entityIds.filter(eid => {
+        const s = newStates[eid];
+        return s && parseFloat(s.state) === 0 && !stats[eid]?.some(p => p.change);
+      });
+      if (needsFallback.length > 0) {
+        // Build fallback entity IDs
+        const fallbackIds = [];
+        const fallbackMapping = {}; // fallbackEid → originalEid
+        for (const eid of needsFallback) {
+          for (const [keyword, fallbackSuffix] of Object.entries(_fallbackMap)) {
+            if (eid.includes(keyword)) {
+              const fbEid = 'sensor.' + fallbackSuffix;
+              if (!entityIds.includes(fbEid) && !fallbackIds.includes(fbEid)) {
+                fallbackIds.push(fbEid);
+                fallbackMapping[fbEid] = eid;
+              }
+              break;
+            }
+          }
+        }
+        if (fallbackIds.length > 0) {
+          try {
+            const fbStats = await this._hass.connection.sendMessagePromise({
+              type: 'recorder/statistics_during_period',
+              start_time: startDate.toISOString(),
+              end_time: endDate.toISOString(),
+              statistic_ids: fallbackIds,
+              period: 'day',
+              types: ['change']
+            });
+            for (const fbEid of fallbackIds) {
+              const fbData = fbStats[fbEid];
+              if (!fbData) continue;
+              let fbChange = 0;
+              for (const p of fbData) {
+                if (p.start >= endMs) continue;
+                if (p.change !== null && p.change !== undefined) fbChange += p.change;
+              }
+              if (fbChange > 0) {
+                const origEid = fallbackMapping[fbEid];
+                const origState = newStates[origEid];
+                if (origState) {
+                  // Convert fallback kWh to original entity's unit if needed
+                  const origUnit = origState.attributes?.unit_of_measurement || 'kWh';
+                  const fbUnit = this._hass.states[fbEid]?.attributes?.unit_of_measurement || 'kWh';
+                  let converted = fbChange;
+                  // Normalize both to kWh then convert to orig unit
+                  if (fbUnit === 'MWh') converted *= 1000;
+                  else if (fbUnit === 'Wh') converted /= 1000;
+                  // Now converted is in kWh, convert to orig unit
+                  if (origUnit === 'MWh') converted /= 1000;
+                  else if (origUnit === 'Wh') converted *= 1000;
+                  newStates[origEid] = { ...origState, state: String(converted) };
+                  console.log(`Genergy: Fallback ${fbEid} → ${origEid}: ${fbChange} ${fbUnit} = ${converted} ${origUnit}`);
+                }
+              }
+            }
+          } catch (fbErr) {
+            console.warn('Genergy: Fallback stats fetch failed:', fbErr);
+          }
+        }
+      }
+
       // Only apply if we still want historical data
       if (this._dateNavActive) {
         // Cache the historical states for re-application every tick
@@ -5421,6 +6543,10 @@ class SigenergySankeyPanel extends HTMLElement {
 
         // Apply via SANKEY-CHART.states (parent, Lit reactive) so it flows through the render template
         this._setSankeyChartStates(newStates);
+
+        // Refresh the stats panel and detail panel with historical values
+        this._updateStatsPanel();
+        this._updatePanel();
       }
     } catch (err) {
       console.warn('Genergy: Failed to fetch historical statistics for Sankey:', err);
@@ -5428,28 +6554,15 @@ class SigenergySankeyPanel extends HTMLElement {
   }
 
   _setSankeyChartStates(states) {
-    // Set states on the SANKEY-CHART parent element (Lit reactive property).
-    // The chart's render template uses:
-    //   Object.keys(this.states).length ? this.states : this.hass.states
-    // so setting non-empty states overrides hass.states for the render cycle.
+    // Set states on the energy flow card via its `states` setter.
+    // The card re-renders with overridden values (historical or quantized).
     const sankeyBase = this._findSankeyBase();
     if (!sankeyBase) return;
-    let sankeyChart = null;
-    let node = sankeyBase;
-    while (node) {
-      if (node.localName === 'sankey-chart') { sankeyChart = node; break; }
-      node = node.parentElement || (node.getRootNode && node.getRootNode().host);
-    }
-    if (sankeyChart) {
-      sankeyChart.states = states;
-    } else {
-      // Fallback: set directly on base
-      sankeyBase.states = states;
-    }
+    sankeyBase.states = states;
   }
 
   _findSankeyBase() {
-    // Walk up to find the enclosing vertical-stack card, then search down for sankey-chart-base
+    // Walk up to find the enclosing vertical-stack card, then search down for sigenergy-energy-flow-card
     function deepFind(root, sel, depth) {
       if (depth > 20) return null;
       const el = root.querySelector(sel);
@@ -5465,17 +6578,21 @@ class SigenergySankeyPanel extends HTMLElement {
     // Try from our parent chain first (most efficient)
     let el = this.parentElement || this.getRootNode()?.host;
     while (el) {
-      const base = deepFind(el, 'sankey-chart-base', 0);
+      // Search for our custom energy flow card first, fall back to old sankey-chart-base
+      const base = deepFind(el, 'sigenergy-energy-flow-card', 0) || deepFind(el, 'sankey-chart-base', 0);
       if (base) return base;
       el = el.parentElement || el.getRootNode()?.host;
     }
     // Fallback: search from document
-    return deepFind(document, 'sankey-chart-base', 0);
+    return deepFind(document, 'sigenergy-energy-flow-card', 0) || deepFind(document, 'sankey-chart-base', 0);
   }
 
   _getKwh(entityId) {
     if (!entityId || !this._hass) return 0;
-    const stateObj = this._hass.states[entityId];
+    // When viewing a historical date, read from the overridden states
+    // so stats panel and detail panel show historical values, not live.
+    const states = (this._dateNavActive && this._historicalStates) ? this._historicalStates : this._hass.states;
+    const stateObj = states[entityId];
     if (!stateObj) return 0;
     const raw = parseFloat(stateObj.state) || 0;
     const unit = (stateObj.attributes?.unit_of_measurement || 'kWh').toString();
@@ -5485,15 +6602,34 @@ class SigenergySankeyPanel extends HTMLElement {
   }
 
   _toggleExpand() {
-    this._expanded = !this._expanded;
+    if (this._expanded) {
+      // First click: collapse the breakdown section
+      this._expanded = false;
+    } else {
+      // Second click when already collapsed: deselect the node entirely
+      this._selectedNode = null;
+      this._expanded = false;
+    }
     this._updatePanel();
   }
 
   _render() {
     if (!this.shadowRoot) return;
+    try {
+    const _dk = (window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark') === 'dark';
+    const _panelBg = _dk ? 'rgba(15,20,30,0.92)' : 'rgba(255,255,255,0.95)';
+    const _panelBgLight = _dk ? 'rgba(15,20,30,0.85)' : 'rgba(255,255,255,0.9)';
+    const _subtleBorder = _dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
+    const _hoverBg = _dk ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
+    const _featGrad = _dk
+      ? 'linear-gradient(135deg, rgba(240,216,80,0.18) 0%, rgba(15,20,30,0.92) 60%)'
+      : 'linear-gradient(135deg, rgba(240,216,80,0.18) 0%, rgba(255,255,255,0.95) 60%)';
+    const _textPrimary = _dk ? '' : '--primary-text-color: #1a1a2e;';
+    const _textSecondary = _dk ? '' : '--secondary-text-color: #555;';
+    const _divider = _dk ? '' : '--divider-color: rgba(0,0,0,0.12);';
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display: block; margin-top: -8px; }
+        :host { display: block; margin-top: -8px; ${_textPrimary} ${_textSecondary} ${_divider} }
         .sankey-info-panel {
           border-radius: 16px;
           overflow: hidden;
@@ -5508,22 +6644,76 @@ class SigenergySankeyPanel extends HTMLElement {
           max-height: 600px;
           opacity: 1;
         }
+        /* ── Stats grid (3×2 mySigen-style) ── */
+        .stat-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 0;
+          background: ${_panelBgLight};
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          border: 1px solid var(--divider-color, #2d3451);
+          border-radius: 16px;
+          overflow: hidden;
+        }
+        .stat-chip {
+          display: flex; align-items: center; gap: 10px;
+          padding: 14px 14px;
+          transition: background 0.2s ease;
+          cursor: pointer;
+        }
+        .stat-chip:hover {
+          background: ${_hoverBg};
+        }
+        /* Vertical dividers between columns */
+        .stat-chip:nth-child(3n+1),
+        .stat-chip:nth-child(3n+2) {
+          border-right: 1px solid ${_subtleBorder};
+        }
+        /* Horizontal divider between rows */
+        .stat-chip:nth-child(n+4) {
+          border-top: 1px solid ${_subtleBorder};
+        }
+        .stat-chip .chip-dot {
+          width: 32px; height: 32px; border-radius: 10px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 16px; flex-shrink: 0;
+        }
+        .stat-chip .chip-info { flex: 1; min-width: 0; }
+        .stat-chip .chip-val {
+          font-size: 20px; font-weight: 800;
+          color: var(--primary-text-color, #fff);
+          line-height: 1.1;
+          white-space: nowrap;
+        }
+        .stat-chip .chip-val .chip-unit {
+          font-size: 12px; font-weight: 500;
+          opacity: 0.6;
+          margin-left: 2px;
+        }
+        .stat-chip .chip-label {
+          font-size: 10px; font-weight: 600;
+          color: var(--secondary-text-color, #aaa);
+          margin-top: 2px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        /* ── Expand detail (legacy click panel) ── */
         .info-main {
           padding: 16px 20px 8px;
           text-align: center;
-          background: var(--ha-card-background, rgba(30,35,54,0.94));
+          background: ${_panelBg};
+          backdrop-filter: blur(12px);
           border: 1px solid var(--divider-color, #2d3451);
           border-radius: 16px 16px 0 0;
         }
         .info-main .value {
-          font-size: 28px;
-          font-weight: bold;
+          font-size: 28px; font-weight: bold;
           color: var(--primary-text-color, #fff);
         }
         .info-main .value .unit {
-          font-size: 16px;
-          font-weight: normal;
-          opacity: 0.7;
+          font-size: 16px; font-weight: normal; opacity: 0.7;
         }
         .info-main .label {
           font-size: 14px;
@@ -5531,78 +6721,62 @@ class SigenergySankeyPanel extends HTMLElement {
           margin-top: 2px;
         }
         .expand-btn {
-          text-align: center;
-          padding: 4px 0;
-          cursor: pointer;
-          background: var(--ha-card-background, rgba(30,35,54,0.94));
+          text-align: center; padding: 4px 0; cursor: pointer;
+          background: ${_panelBg};
           border-left: 1px solid var(--divider-color, #2d3451);
           border-right: 1px solid var(--divider-color, #2d3451);
           color: var(--secondary-text-color, #aaa);
-          user-select: none;
-          line-height: 1;
+          user-select: none; line-height: 1;
         }
-        .expand-btn svg {
-          transition: transform 0.3s ease;
-        }
-        .expand-btn.expanded svg {
-          transform: rotate(180deg);
-        }
+        .expand-btn svg { transition: transform 0.3s ease; }
+        .expand-btn.expanded svg { transform: rotate(180deg); }
         .breakdown {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0;
-          background: var(--ha-card-background, rgba(30,35,54,0.94));
+          display: flex; flex-wrap: wrap; gap: 0;
+          background: ${_panelBg};
           border: 1px solid var(--divider-color, #2d3451);
-          border-top: none;
-          border-radius: 0 0 16px 16px;
-          overflow: hidden;
-          transition: max-height 0.3s ease;
+          border-top: none; border-radius: 0 0 16px 16px;
+          overflow: hidden; transition: max-height 0.3s ease;
         }
-        .breakdown.collapsed {
-          max-height: 0;
-        }
-        .breakdown.open {
-          max-height: 400px;
-        }
+        .breakdown.collapsed { max-height: 0; }
+        .breakdown.open { max-height: 400px; }
         .breakdown-item {
-          flex: 1 1 50%;
-          min-width: 140px;
-          padding: 10px 16px;
-          box-sizing: border-box;
-          display: flex;
-          align-items: center;
-          gap: 10px;
+          flex: 1 1 50%; min-width: 140px;
+          padding: 12px 16px; box-sizing: border-box;
+          display: flex; align-items: center; gap: 12px;
           border-top: 1px solid var(--divider-color, #2d3451);
         }
         .breakdown-item .dot {
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          flex-shrink: 0;
+          width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
         }
-        .breakdown-item .details {
-          flex: 1;
-        }
+        .breakdown-item .details { flex: 1; }
         .breakdown-item .pct {
-          font-size: 18px;
-          font-weight: bold;
+          font-size: 20px; font-weight: bold;
           color: var(--primary-text-color, #fff);
         }
         .breakdown-item .desc {
-          font-size: 12px;
-          color: var(--secondary-text-color, #aaa);
+          font-size: 12px; color: var(--secondary-text-color, #aaa);
         }
         .breakdown-item .kwh {
-          font-size: 12px;
-          color: var(--secondary-text-color, #aaa);
+          font-size: 12px; color: var(--secondary-text-color, #aaa);
         }
         .chevron-icon {
-          width: 18px;
-          height: 18px;
-          fill: currentColor;
-          vertical-align: middle;
+          width: 18px; height: 18px; fill: currentColor; vertical-align: middle;
+        }
+        @media (max-width: 500px) {
+          .stat-grid { grid-template-columns: 1fr 1fr; }
+          .stat-chip .chip-val { font-size: 16px; }
+          .stat-chip .chip-label { font-size: 9px; }
+          .stat-chip { padding: 10px 10px; gap: 8px; }
+        }
+        @media (min-width: 1600px) {
+          .stat-chip { padding: 18px 20px; }
+          .stat-chip .chip-val { font-size: 24px; }
+          .stat-chip .chip-label { font-size: 11px; }
+          .info-main .value { font-size: 32px; }
+          .breakdown-item .pct { font-size: 24px; }
         }
       </style>
+      <div id="statsPanel"></div>
       <div class="sankey-info-panel hidden" id="panel">
         <div class="info-main" id="infoMain"></div>
         <div class="expand-btn" id="expandBtn">
@@ -5615,6 +6789,92 @@ class SigenergySankeyPanel extends HTMLElement {
     const btn = this.shadowRoot.getElementById('expandBtn');
     if (btn) {
       btn.addEventListener('click', () => this._toggleExpand());
+    }
+    this._updateStatsPanel();
+    } catch (err) {
+      console.error('Genergy SankeyPanel render error:', err);
+      this.shadowRoot.innerHTML = `<div style="padding:24px;color:#E53935;font-size:13px;">⚠ Energy Flow panel failed to render</div>`;
+    }
+  }
+
+  _updateStatsPanel() {
+    if (!this.shadowRoot || !this._hass || !this._config.nodes) return;
+    const statsEl = this.shadowRoot.getElementById('statsPanel');
+    if (!statsEl) return;
+
+    const meta = this._config.nodes || [];
+    const solar = meta.find(n => n.id === 'solar');
+    const load = meta.find(n => n.id === 'load');
+    const batC = meta.find(n => n.id === 'bat_c');
+    const batD = meta.find(n => n.id === 'bat_d');
+    const gridI = meta.find(n => n.id === 'grid_i');
+    const gridE = meta.find(n => n.id === 'grid_e');
+    const ev = meta.find(n => n.id === 'ev');
+    const hp = meta.find(n => n.id === 'hp');
+
+    const solarVal = solar ? this._getKwh(solar.entity_id) : 0;
+    const loadVal = load ? this._getKwh(load.entity_id) : 0;
+    const batCVal = batC ? this._getKwh(batC.entity_id) : 0;
+    const gridEVal = gridE ? this._getKwh(gridE.entity_id) : 0;
+    const gridIVal = gridI ? this._getKwh(gridI.entity_id) : 0;
+    const evVal = ev ? this._getKwh(ev.entity_id) : 0;
+    const hpVal = hp ? this._getKwh(hp.entity_id) : 0;
+
+    // Build 3×2 stat chips matching Sigenergy layout:
+    // Row 1: Solar Produced, Load Consumed, Battery Discharged
+    // Row 2: Battery Charged, Grid Imported, Grid Exported
+    const batDVal = meta.find(n => n.id === 'bat_d') ? this._getKwh(meta.find(n => n.id === 'bat_d').entity_id) : 0;
+    const chips = [];
+    if (solar) chips.push({ node: solar, val: solarVal, icon: '☀️', label: 'Solar Produced' });
+    if (load) chips.push({ node: load, val: loadVal, icon: '🏠', label: 'Load Consumed' });
+    if (meta.find(n => n.id === 'bat_d')) chips.push({ node: meta.find(n => n.id === 'bat_d'), val: batDVal, icon: '🔋', label: 'Battery Discharged' });
+    if (batC) chips.push({ node: batC, val: batCVal, icon: '🔋', label: 'Battery Charged' });
+    if (gridI) chips.push({ node: gridI, val: gridIVal, icon: '🔌', label: 'Grid Imported' });
+    if (gridE) chips.push({ node: gridE, val: gridEVal, icon: '⚡', label: 'Grid Exported' });
+    // Add EV/HP only if they fit in a clean 3-column grid (max 6 for 3×2)
+    if (chips.length < 6 && ev && evVal > 0.01) chips.push({ node: ev, val: evVal, icon: '🚗', label: 'EV Charged' });
+    if (chips.length < 6 && hp && hpVal > 0.01) chips.push({ node: hp, val: hpVal, icon: '🌡️', label: 'Heat Pump' });
+
+    const fmt = (v) => v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+
+    const newStatsHtml = `
+      <div class="stat-grid">
+        ${chips.map(c => {
+          return `
+            <div class="stat-chip" data-node-id="${c.node.id}">
+              <div class="chip-dot" style="background:${c.node.color}22;">
+                <span>${c.icon}</span>
+              </div>
+              <div class="chip-info">
+                <div class="chip-val">${fmt(c.val)} <span class="chip-unit">kWh</span></div>
+                <div class="chip-label">${c.label}</div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+
+    // Only update DOM if values actually changed (prevents hover flash)
+    const statsKey = chips.map(c => c.node.id + ':' + Math.round(c.val * 100)).join(',');
+    if (statsKey !== this._lastStatsKey) {
+      this._lastStatsKey = statsKey;
+      statsEl.innerHTML = newStatsHtml;
+
+      // Attach click handlers on stat chips to select/deselect nodes
+      statsEl.querySelectorAll('.stat-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const nodeId = chip.dataset.nodeId;
+          if (this._selectedNode === nodeId) {
+            this._selectedNode = null;
+            this._expanded = false;
+          } else {
+            this._selectedNode = nodeId;
+            this._expanded = true;
+          }
+          this._updatePanel();
+        });
+      });
     }
   }
 
@@ -5677,7 +6937,9 @@ class SigenergySankeyPanel extends HTMLElement {
       const srcVal = this._getKwh(src.entity_id);
       let srcRemaining = srcVal;
       flowMatrix[src.entity_id] = {};
-      const children = (src.children || []).filter(eid => remaining[eid] !== undefined);
+      const childSet = new Set((src.children || []).filter(eid => remaining[eid] !== undefined));
+      allDests.forEach(d => { if ((d.parents || []).includes(src.entity_id)) childSet.add(d.entity_id); });
+      const children = [...childSet];
       // Proportional allocation to children based on their remaining capacity
       const totalDstRemaining = children.reduce((s, eid) => s + (remaining[eid] || 0), 0);
       children.forEach(eid => {
@@ -5727,6 +6989,663 @@ class SigenergySankeyPanel extends HTMLElement {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Lottie Insights Card — Animated system health overview
+// Uses lottie-web from CDN for lightweight Lottie JSON rendering
+// ═══════════════════════════════════════════════════════════
+
+const _LOTTIE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js';
+let _lottiePromise = null;
+
+function _loadLottie() {
+  if (window.lottie) return Promise.resolve(window.lottie);
+  if (_lottiePromise) return _lottiePromise;
+  _lottiePromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = _LOTTIE_CDN;
+    s.onload = () => resolve(window.lottie);
+    s.onerror = () => reject(new Error('Failed to load lottie-web'));
+    document.head.appendChild(s);
+  });
+  return _lottiePromise;
+}
+
+class SigenergyInsightsCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._config = {};
+    this._hass = null;
+    this._animations = [];
+    this._rendered = false;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    try {
+      if (this._rendered) this._updateValues();
+      else this._renderSync();
+    } catch(e) { console.warn('Genergy InsightsCard hass setter error:', e); }
+  }
+
+  setConfig(config) { this._config = config; }
+  static getConfigElement() { return document.createElement('div'); }
+  static getStubConfig() { return {}; }
+  getCardSize() { return 4; }
+
+  connectedCallback() { if (!this._rendered) this._renderSync(); }
+  disconnectedCallback() {
+    this._animations.forEach(a => { try { a.destroy(); } catch(e) {} });
+    this._animations = [];
+    this._rendered = false;
+  }
+
+  _getInsightTiles() {
+    const cfg = window.SigenergyConfig ? window.SigenergyConfig.get() : {};
+    const ents = cfg.entities || {};
+    const feat = cfg.features || {};
+    const tiles = [];
+
+    // 1. Battery Health
+    tiles.push({
+      id: 'battery',
+      lottie: 'care_battery.json',
+      title: 'Battery Health',
+      icon: '🔋',
+      getValue: () => {
+        const soc = this._getVal(ents.battery_soc);
+        const temp = this._getVal(ents.battery_temp);
+        const parts = [];
+        if (soc !== null) parts.push(`SoC: ${soc.toFixed(0)}%`);
+        if (temp !== null) parts.push(`${temp.toFixed(1)}°C`);
+        return parts.length ? parts.join(' · ') : 'No data';
+      },
+      getStatus: () => {
+        const soc = this._getVal(ents.battery_soc);
+        if (soc === null) return 'unknown';
+        if (soc >= 60) return 'good';
+        if (soc >= 30) return 'warning';
+        return 'critical';
+      }
+    });
+
+    // 2. Capacity Assessment
+    tiles.push({
+      id: 'capacity',
+      lottie: 'care_capacity.json',
+      title: 'Capacity',
+      icon: '⚡',
+      getValue: () => {
+        const cap = this._getVal(ents.battery_capacity);
+        const maxSoc = this._getVal(ents.battery_max_soc);
+        const minSoc = this._getVal(ents.battery_min_soc);
+        const parts = [];
+        if (cap !== null) parts.push(`${cap.toFixed(1)} kWh`);
+        if (maxSoc !== null && minSoc !== null) parts.push(`Range: ${minSoc.toFixed(0)}–${maxSoc.toFixed(0)}%`);
+        return parts.length ? parts.join(' · ') : 'No data';
+      },
+      getStatus: () => {
+        const cap = this._getVal(ents.battery_capacity);
+        return cap !== null ? 'good' : 'unknown';
+      }
+    });
+
+    // 3. Environmental Impact
+    tiles.push({
+      id: 'environmental',
+      lottie: 'care_environmental.json',
+      title: 'Environment',
+      icon: '🌱',
+      getValue: () => {
+        const solar = this._getValKWh(ents.solar_energy_today);
+        const gridExp = this._getValKWh(ents.grid_export_today);
+        const parts = [];
+        if (solar !== null) parts.push(`Solar: ${solar.toFixed(1)} kWh`);
+        if (gridExp !== null) parts.push(`Exported: ${gridExp.toFixed(1)} kWh`);
+        return parts.length ? parts.join(' · ') : 'No data';
+      },
+      getStatus: () => {
+        const solar = this._getValKWh(ents.solar_energy_today);
+        if (solar === null) return 'unknown';
+        if (solar > 5) return 'good';
+        if (solar > 1) return 'warning';
+        return 'critical';
+      }
+    });
+
+    // 4. Equipment Status
+    tiles.push({
+      id: 'equipment',
+      lottie: 'care_equipment.json',
+      title: 'Equipment',
+      icon: '🔧',
+      getValue: () => {
+        const invTemp = this._getVal(ents.inverter_temp) || this._getVal(ents.inverter_internal_temp);
+        const gridFreq = this._getVal(ents.grid_frequency);
+        const parts = [];
+        if (invTemp !== null) parts.push(`Inv: ${invTemp.toFixed(1)}°C`);
+        if (gridFreq !== null) parts.push(`${gridFreq.toFixed(2)} Hz`);
+        return parts.length ? parts.join(' · ') : 'All systems OK';
+      },
+      getStatus: () => {
+        const invTemp = this._getVal(ents.inverter_temp) || this._getVal(ents.inverter_internal_temp);
+        if (invTemp === null) return 'good';
+        if (invTemp < 45) return 'good';
+        if (invTemp < 55) return 'warning';
+        return 'critical';
+      }
+    });
+
+    // 5. Network / Grid
+    tiles.push({
+      id: 'network',
+      lottie: 'care_network.json',
+      title: 'Grid',
+      icon: '🌐',
+      getValue: () => {
+        const voltage = this._getVal(ents.grid_voltage);
+        const freq = this._getVal(ents.grid_frequency);
+        const parts = [];
+        if (voltage !== null) parts.push(`${voltage.toFixed(1)} V`);
+        if (freq !== null) parts.push(`${freq.toFixed(2)} Hz`);
+        return parts.length ? parts.join(' · ') : 'Connected';
+      },
+      getStatus: () => {
+        const v = this._getVal(ents.grid_voltage);
+        if (v === null) return 'good';
+        if (v >= 207 && v <= 253) return 'good';
+        return 'warning';
+      }
+    });
+
+    // 6. Revenue / Financial
+    tiles.push({
+      id: 'revenue',
+      lottie: 'care_revenue.json',
+      title: 'Revenue',
+      icon: '💰',
+      getValue: () => {
+        const savings = this._getVal(ents.emhass_savings_today);
+        const cost = this._getVal(ents.emhass_net_cost_today);
+        const parts = [];
+        if (savings !== null) parts.push(`Saved: €${savings.toFixed(2)}`);
+        if (cost !== null) parts.push(`Cost: €${cost.toFixed(2)}`);
+        return parts.length ? parts.join(' · ') : 'No data';
+      },
+      getStatus: () => {
+        const savings = this._getVal(ents.emhass_savings_today);
+        if (savings === null) return 'unknown';
+        if (savings > 0) return 'good';
+        return 'warning';
+      }
+    });
+
+    return tiles;
+  }
+
+  _getVal(entityId) {
+    if (!this._hass || !entityId) return null;
+    const s = this._hass.states[entityId];
+    if (!s || s.state === 'unavailable' || s.state === 'unknown') return null;
+    const v = parseFloat(s.state);
+    return isNaN(v) ? null : v;
+  }
+
+  _getValKWh(entityId) {
+    if (!this._hass || !entityId) return null;
+    const s = this._hass.states[entityId];
+    if (!s || s.state === 'unavailable' || s.state === 'unknown') return null;
+    const v = parseFloat(s.state);
+    if (isNaN(v)) return null;
+    const unit = (s.attributes?.unit_of_measurement || 'kWh').toString();
+    if (unit === 'MWh') return v * 1000;
+    if (unit === 'Wh') return v / 1000;
+    return v;
+  }
+
+  _statusColor(status) {
+    const isDark = (window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark') === 'dark';
+    switch (status) {
+      case 'good': return isDark ? '#2ecc71' : '#27ae60';
+      case 'warning': return isDark ? '#f39c12' : '#e67e22';
+      case 'critical': return isDark ? '#e74c3c' : '#c0392b';
+      default: return isDark ? '#8892a4' : '#7f8c8d';
+    }
+  }
+
+  async _render() {
+    this._renderSync();
+  }
+
+  _renderSync() {
+    if (this._rendered) return;
+    try {
+      const isDark = (window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark') === 'dark';
+      const tiles = this._getInsightTiles();
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; }
+        ha-card {
+          border-radius: 16px !important;
+          overflow: hidden !important;
+          border: 1px solid ${isDark ? 'rgba(0,212,184,0.12)' : 'rgba(0,0,0,0.06)'} !important;
+          background: ${isDark ? 'linear-gradient(135deg, rgba(18,24,40,0.95) 0%, rgba(26,31,46,0.98) 50%, rgba(20,28,42,0.95) 100%)' : 'rgba(255,255,255,0.92)'} !important;
+          box-shadow: ${isDark ? '0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)' : '0 2px 12px rgba(0,0,0,0.06)'} !important;
+        }
+        .insights-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 12px;
+          padding: 16px;
+        }
+        @media (max-width: 800px) {
+          .insights-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 480px) {
+          .insights-grid { grid-template-columns: 1fr; }
+        }
+        @media (min-width: 1600px) {
+          .insights-grid { gap: 16px; padding: 20px; }
+          .insight-tile { padding: 20px; border-radius: 20px; }
+          .tile-title { font-size: 15px; }
+          .tile-value { font-size: 13px; }
+          .lottie-container { width: 96px; height: 88px; }
+          .card-header { font-size: 18px; padding: 20px 20px 0; }
+        }
+        .insight-tile {
+          background: ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'};
+          border-radius: 16px;
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          text-align: center;
+          transition: transform 0.2s, box-shadow 0.2s;
+          cursor: pointer;
+          border: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};
+          position: relative;
+          overflow: hidden;
+        }
+        .insight-tile:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 16px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.1)'};
+        }
+        .insight-tile:active {
+          transform: translateY(0);
+        }
+        .lottie-container {
+          width: 80px;
+          height: 73px;
+          margin-bottom: 8px;
+          border-radius: 12px;
+          overflow: hidden;
+        }
+        .fallback-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 80px;
+          height: 73px;
+          font-size: 36px;
+          border-radius: 12px;
+          background: ${isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'};
+        }
+        .tile-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: ${isDark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)'};
+          margin-bottom: 4px;
+        }
+        .tile-value {
+          font-size: 11px;
+          color: ${isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)'};
+          line-height: 1.4;
+        }
+        .status-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          margin-bottom: 6px;
+          transition: background 0.3s;
+        }
+        .status-dot.pulse {
+          animation: dotPulse 2s ease-in-out infinite;
+        }
+        @keyframes dotPulse {
+          0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+          50% { box-shadow: 0 0 6px 3px currentColor; }
+        }
+        .card-header {
+          padding: 16px 16px 0;
+          font-size: 16px;
+          font-weight: 600;
+          color: ${isDark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)'};
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .card-header-icon {
+          font-size: 20px;
+        }
+        .sparkline-container {
+          width: 100%;
+          height: 28px;
+          margin-top: 6px;
+          opacity: 0.7;
+        }
+        .sparkline-container svg {
+          width: 100%;
+          height: 100%;
+        }
+        .expand-chevron {
+          font-size: 10px;
+          color: ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'};
+          transition: transform 0.2s, color 0.2s;
+          margin-top: 4px;
+        }
+        .insight-tile:hover .expand-chevron {
+          color: ${isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)'};
+        }
+        .tile-detail {
+          max-height: 0;
+          overflow: hidden;
+          transition: max-height 0.3s ease, opacity 0.3s ease, margin 0.3s ease;
+          opacity: 0;
+          width: 100%;
+          margin-top: 0;
+        }
+        .tile-detail.open {
+          max-height: 200px;
+          opacity: 1;
+          margin-top: 8px;
+        }
+        .tile-detail-inner {
+          font-size: 11px;
+          color: ${isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)'};
+          line-height: 1.5;
+          padding-top: 8px;
+          border-top: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};
+          text-align: left;
+        }
+        .detail-row {
+          display: flex;
+          justify-content: space-between;
+          padding: 2px 0;
+        }
+        .detail-label { opacity: 0.7; }
+        .detail-value { font-weight: 500; }
+        .insight-tile.expanded .expand-chevron {
+          transform: rotate(180deg);
+        }
+      </style>
+      <ha-card>
+        <div class="card-header">
+          <span class="card-header-icon">📊</span>
+          System Insights
+        </div>
+        <div class="insights-grid">
+          ${tiles.map(t => `
+            <div class="insight-tile" data-tile="${t.id}">
+              <div class="status-dot" data-status="${t.id}"></div>
+              <div class="lottie-container" id="lottie-${t.id}"></div>
+              <div class="tile-title">${t.title}</div>
+              <div class="tile-value" data-value="${t.id}"></div>
+              <div class="sparkline-container" data-sparkline="${t.id}"></div>
+              <div class="expand-chevron">▼</div>
+              <div class="tile-detail" data-detail="${t.id}">
+                <div class="tile-detail-inner" data-detail-inner="${t.id}"></div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </ha-card>
+    `;
+
+    // Add click-to-expand listeners
+    this.shadowRoot.querySelectorAll('.insight-tile').forEach(tile => {
+      tile.addEventListener('click', () => {
+        const id = tile.dataset.tile;
+        const detail = tile.querySelector('.tile-detail');
+        const isOpen = tile.classList.contains('expanded');
+        if (isOpen) {
+          tile.classList.remove('expanded');
+          detail.classList.remove('open');
+        } else {
+          tile.classList.add('expanded');
+          detail.classList.add('open');
+          this._populateDetail(id);
+        }
+      });
+    });
+
+    this._rendered = true;
+    this._updateValues();
+    this._renderSparklines();
+
+    // Load Lottie animations asynchronously (non-blocking)
+    this._loadAnimations(tiles).catch(e => {
+      console.warn('Genergy: Lottie animation loading failed', e);
+    });
+    } catch(e) {
+      console.warn('Genergy: InsightsCard render failed', e);
+    }
+  }
+
+  async _loadAnimations(tiles) {
+    const lottiePath = _SIGENERGY_SCRIPT_DIR + 'images/lottie/';
+
+    // Load lottie-web and initialize animations
+    try {
+      const lottieLib = await _loadLottie();
+      this._animations.forEach(a => { try { a.destroy(); } catch(e) {} });
+      this._animations = [];
+
+      for (const tile of tiles) {
+        const container = this.shadowRoot.getElementById('lottie-' + tile.id);
+        if (!container) continue;
+
+        try {
+          const resp = await fetch(lottiePath + tile.lottie);
+          if (!resp.ok) continue;
+          const animData = await resp.json();
+
+          const anim = lottieLib.loadAnimation({
+            container: container,
+            renderer: 'svg',
+            loop: true,
+            autoplay: true,
+            animationData: animData,
+          });
+          this._animations.push(anim);
+        } catch(e) {
+          container.innerHTML = `<div class="fallback-icon">${tile.icon}</div>`;
+        }
+      }
+    } catch(e) {
+      console.warn('Genergy: lottie-web failed to load, using fallback icons', e);
+      for (const tile of tiles) {
+        const container = this.shadowRoot.getElementById('lottie-' + tile.id);
+        if (container) {
+          container.innerHTML = `<div class="fallback-icon">${tile.icon}</div>`;
+        }
+      }
+    }
+
+    this._updateValues();
+  }
+
+  _renderSparklines() {
+    const cfg = window.SigenergyConfig ? window.SigenergyConfig.get() : {};
+    const ents = cfg.entities || {};
+    const sparkMap = {
+      battery: ents.battery_soc,
+      environmental: ents.solar_energy_today || ents.solar_power,
+      equipment: ents.inverter_temp || ents.inverter_internal_temp,
+      network: ents.grid_voltage,
+      revenue: ents.emhass_savings_today
+    };
+
+    const isDark = (window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark') === 'dark';
+
+    for (const [tileId, entityId] of Object.entries(sparkMap)) {
+      if (!entityId || !this._hass) continue;
+      const container = this.shadowRoot?.querySelector(`[data-sparkline="${tileId}"]`);
+      if (!container) continue;
+
+      const stateObj = this._hass.states[entityId];
+      if (!stateObj) continue;
+
+      // Use a simple approach - generate sparkline from recent attribute history if available
+      // Otherwise just show a flat line at current value
+      const val = parseFloat(stateObj.state);
+      if (isNaN(val)) continue;
+
+      const statusColor = this._statusColor(this._getInsightTiles().find(t => t.id === tileId)?.getStatus() || 'unknown');
+      this._fetchSparklineData(entityId, container, statusColor, isDark);
+    }
+  }
+
+  async _fetchSparklineData(entityId, container, color, isDark) {
+    try {
+      const token = this._hass?.auth?.data?.access_token;
+      if (!token) return;
+
+      const end = new Date().toISOString();
+      const start = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const url = `/api/history/period/${start}?filter_entity_id=${entityId}&end_time=${end}&minimal_response&no_attributes`;
+
+      const resp = await this._hass.callApi('GET', `history/period/${start}?filter_entity_id=${entityId}&end_time=${end}&minimal_response&no_attributes`);
+      if (!resp || !resp[0] || resp[0].length < 2) return;
+
+      const points = resp[0]
+        .map(p => parseFloat(p.s || p.state))
+        .filter(v => !isNaN(v));
+
+      if (points.length < 2) return;
+
+      // Downsample to ~30 points max
+      const step = Math.max(1, Math.floor(points.length / 30));
+      const sampled = [];
+      for (let i = 0; i < points.length; i += step) sampled.push(points[i]);
+      if (sampled.length < 2) return;
+
+      const min = Math.min(...sampled);
+      const max = Math.max(...sampled);
+      const range = max - min || 1;
+      const w = 100;
+      const h = 28;
+      const pad = 2;
+
+      const pathPoints = sampled.map((v, i) => {
+        const x = (i / (sampled.length - 1)) * w;
+        const y = pad + (1 - (v - min) / range) * (h - 2 * pad);
+        return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+
+      // Fill path (area under curve)
+      const lastX = w;
+      const fillPath = pathPoints + ` L${lastX},${h} L0,${h} Z`;
+
+      container.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+        <defs><linearGradient id="sg-${entityId.replace(/\./g, '_')}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
+        </linearGradient></defs>
+        <path d="${fillPath}" fill="url(#sg-${entityId.replace(/\./g, '_')})" />
+        <path d="${pathPoints}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      </svg>`;
+    } catch (e) {
+      // Sparklines are optional — fail silently
+    }
+  }
+
+  _populateDetail(tileId) {
+    const inner = this.shadowRoot?.querySelector(`[data-detail-inner="${tileId}"]`);
+    if (!inner) return;
+
+    const cfg = window.SigenergyConfig ? window.SigenergyConfig.get() : {};
+    const ents = cfg.entities || {};
+    const rows = [];
+
+    const addRow = (label, entityId, unit, decimals) => {
+      const v = this._getVal(entityId);
+      if (v !== null) rows.push({ label, value: v.toFixed(decimals ?? 1) + (unit || '') });
+    };
+
+    switch (tileId) {
+      case 'battery':
+        addRow('State of Charge', ents.battery_soc, '%', 0);
+        addRow('Temperature', ents.battery_temp, '°C', 1);
+        addRow('Voltage', ents.battery_voltage, ' V', 1);
+        addRow('Current', ents.battery_current, ' A', 2);
+        addRow('Power', ents.battery_power, ' W', 0);
+        addRow('Capacity', ents.battery_capacity, ' kWh', 1);
+        addRow('Max SoC', ents.battery_max_soc, '%', 0);
+        addRow('Min SoC', ents.battery_min_soc, '%', 0);
+        addRow('Cycles', ents.battery_cycles, '', 0);
+        break;
+      case 'capacity':
+        addRow('Total Capacity', ents.battery_capacity, ' kWh', 1);
+        addRow('Max SoC Limit', ents.battery_max_soc, '%', 0);
+        addRow('Min SoC Limit', ents.battery_min_soc, '%', 0);
+        addRow('Charge Power', ents.battery_charge_power, ' W', 0);
+        addRow('Discharge Power', ents.battery_discharge_power, ' W', 0);
+        break;
+      case 'environmental':
+        addRow('Solar Today', ents.solar_energy_today, ' kWh', 1);
+        addRow('Grid Export', ents.grid_export_today, ' kWh', 1);
+        addRow('Grid Import', ents.grid_import_today, ' kWh', 1);
+        addRow('Self-Sufficiency', ents.self_sufficiency, '%', 0);
+        addRow('Solar Power Now', ents.solar_power, ' W', 0);
+        break;
+      case 'equipment':
+        addRow('Inverter Temp', ents.inverter_temp || ents.inverter_internal_temp, '°C', 1);
+        addRow('Inverter Power', ents.inverter_active_power, ' W', 0);
+        addRow('Grid Frequency', ents.grid_frequency, ' Hz', 2);
+        break;
+      case 'network':
+        addRow('Voltage', ents.grid_voltage, ' V', 1);
+        addRow('Frequency', ents.grid_frequency, ' Hz', 2);
+        addRow('Grid Power', ents.grid_active_power || ents.grid_power, ' W', 0);
+        addRow('Import Today', ents.grid_import_today, ' kWh', 1);
+        addRow('Export Today', ents.grid_export_today, ' kWh', 1);
+        break;
+      case 'revenue':
+        addRow('Savings Today', ents.emhass_savings_today, ' €', 2);
+        addRow('Net Cost', ents.emhass_net_cost_today, ' €', 2);
+        addRow('Import Cost', ents.grid_import_cost_today, ' €', 2);
+        addRow('Export Revenue', ents.grid_export_revenue_today, ' €', 2);
+        break;
+    }
+
+    if (rows.length === 0) {
+      inner.innerHTML = '<div style="text-align:center;opacity:0.5;">No detailed data available</div>';
+    } else {
+      inner.innerHTML = rows.map(r =>
+        `<div class="detail-row"><span class="detail-label">${r.label}</span><span class="detail-value">${r.value}</span></div>`
+      ).join('');
+    }
+  }
+
+  _updateValues() {
+    if (!this.shadowRoot) return;
+    const tiles = this._getInsightTiles();
+    for (const tile of tiles) {
+      const valEl = this.shadowRoot.querySelector(`[data-value="${tile.id}"]`);
+      if (valEl) valEl.textContent = tile.getValue();
+      const statusEl = this.shadowRoot.querySelector(`[data-status="${tile.id}"]`);
+      if (statusEl) {
+        const status = tile.getStatus();
+        statusEl.style.background = this._statusColor(status);
+        statusEl.style.color = this._statusColor(status);
+        if (status === 'critical') statusEl.classList.add('pulse');
+        else statusEl.classList.remove('pulse');
+      }
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // Device Card — Battery Stack Visualization
 // ═══════════════════════════════════════════════════════════
 
@@ -5739,6 +7658,9 @@ class SigenergyDeviceCard extends HTMLElement {
     this._expanded = {};  // track expanded state per device
     this._cardWidth = 999;
     this._ro = null;
+    this._rafId = null;
+    this._hasRendered = false;
+    this._lastRenderKey = '';
   }
 
   /**
@@ -5783,7 +7705,62 @@ class SigenergyDeviceCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    // Show loading skeleton on first render before hass is ready
+    if (!this._hasRendered && !hass) {
+      this._showSkeleton();
+      return;
+    }
+    // Only re-render if entity values actually changed (prevents hover flash)
+    if (this._rafId) cancelAnimationFrame(this._rafId);
+    this._rafId = requestAnimationFrame(() => {
+      this._rafId = null;
+      if (this._shouldRerender()) this._render();
+    });
+  }
+
+  _shouldRerender() {
+    const store = window.SigenergyConfig;
+    const packs = store ? store.getFeature('battery_packs') : (this._config.battery_packs || 2);
+    const parts = [];
+    // Inverter power
+    const invEnt = this._config.inverter_power || (store ? store.getEntity('inverter_output_power') : '');
+    const invS = invEnt && this._hass.states[invEnt];
+    parts.push(invS ? Math.round(parseFloat(invS.state) * 10) : 0);
+    // Pack SoCs + expanded state
+    for (let p = 1; p <= packs; p++) {
+      const pe = store ? store.getEntity('battery_pack' + p + '_soc') : null;
+      const ps = pe && this._hass.states[pe];
+      parts.push(ps ? Math.round(parseFloat(ps.state) * 10) : 0);
+      parts.push(this._expanded['battery' + p] ? 1 : 0);
+    }
+    parts.push(this._expanded['inverter'] ? 1 : 0);
+    parts.push(this._cardWidth < 380 ? 1 : 0);
+    const key = parts.join(',');
+    if (key === this._lastRenderKey) return false;
+    this._lastRenderKey = key;
+    return true;
+  }
+
+  _showSkeleton() {
+    if (!this.shadowRoot) return;
+    const _t = 'dark'; // default to dark before knowing theme
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; }
+        .skeleton-card { background: var(--ha-card-background, #1a1f2e); border-radius: 16px; padding: 20px; }
+        .skeleton-line { background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 8px; }
+        .skeleton-img { width: 60%; height: 200px; margin: 0 auto 16px; }
+        .skeleton-pill { width: 140px; height: 50px; margin: 8px; display: inline-block; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+      </style>
+      <div class="skeleton-card">
+        <div class="skeleton-line skeleton-img"></div>
+        <div style="text-align:center">
+          <div class="skeleton-line skeleton-pill"></div>
+          <div class="skeleton-line skeleton-pill"></div>
+          <div class="skeleton-line skeleton-pill"></div>
+        </div>
+      </div>`;
   }
 
   setConfig(config) { this._config = config; }
@@ -5850,6 +7827,19 @@ class SigenergyDeviceCard extends HTMLElement {
 
   _render() {
     if (!this._hass) return;
+    this._hasRendered = true;
+    try {
+      this._renderImpl();
+    } catch (err) {
+      console.error('[Genergy DeviceCard] Render error:', err);
+      this.shadowRoot.innerHTML = '<div style="background:var(--ha-card-background,#1a1f2e);border-radius:16px;padding:20px;color:var(--primary-text-color,#fff);text-align:center;">' +
+        '<div style="font-size:24px;margin-bottom:8px;">⚠️</div>' +
+        '<div style="font-size:14px;font-weight:600;margin-bottom:4px;">Battery System Error</div>' +
+        '<div style="font-size:11px;color:#8892a4;">' + (err.message || 'Unknown error').replace(/</g, '&lt;') + '</div></div>';
+    }
+  }
+
+  _renderImpl() {
     const store = window.SigenergyConfig;
     const packs = store ? store.getFeature('battery_packs') : (this._config.battery_packs || 2);
     const battSocEntity = store ? store.getEntity('battery_soc') : '';
@@ -5884,11 +7874,19 @@ class SigenergyDeviceCard extends HTMLElement {
         '</div></div>';
     }
 
+    /* ── Theme resolution (shared by compact + wide) ── */
+    var _t = window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark';
+
     /* ── Compact layout for narrow cards ── */
     if (this._cardWidth < 380) {
       var np = Math.max(1, Math.min(packs, 8));
       var imgSrc = _SIGENERGY_SCRIPT_DIR + 'images/1inverter' + np + 'battery.png';
-      var html = '<style>:host{display:block}.card{background:var(--ha-card-background,#1a1f2e);border-radius:16px;padding:12px;overflow:hidden;text-align:center;color:var(--primary-text-color,#fff)}.img{max-width:100%;height:auto;margin:0 auto 12px;display:block}.labels{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}.pill{background:var(--card-background-color,rgba(30,35,54,0.94));border:1px solid var(--divider-color,#2d3451);border-radius:14px;padding:8px 14px;display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}.pill-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.pill-name{font-size:15px;font-weight:600;color:var(--primary-text-color,#e0e4ec);white-space:nowrap}.pill-val{font-size:16px;font-weight:700;color:var(--primary-text-color,#fff);white-space:nowrap}</style>';
+      var _cBg = _t === 'light' ? '#fff' : '#1a1f2e';
+      var _cText = _t === 'light' ? '#1a1f2e' : '#fff';
+      var _cPillBg = _t === 'light' ? 'rgba(255,255,255,0.94)' : 'rgba(30,35,54,0.94)';
+      var _cBorder = _t === 'light' ? 'rgba(0,0,0,0.1)' : '#2d3451';
+      var _cName = _t === 'light' ? '#333' : '#e0e4ec';
+      var html = '<style>:host{display:block}.card{background:var(--ha-card-background,' + _cBg + ');border-radius:16px;padding:12px;overflow:hidden;text-align:center;color:var(--primary-text-color,' + _cText + ')}.img{max-width:100%;height:auto;margin:0 auto 12px;display:block}.labels{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}.pill{background:var(--card-background-color,' + _cPillBg + ');border:1px solid var(--divider-color,' + _cBorder + ');border-radius:14px;padding:8px 14px;display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer}.pill-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}.pill-name{font-size:15px;font-weight:600;color:var(--primary-text-color,' + _cName + ');white-space:nowrap}.pill-val{font-size:16px;font-weight:700;color:var(--primary-text-color,' + _cText + ');white-space:nowrap}</style>';
       html += '<div class="card">';
       html += prereqBanner;
       html += '<img class="img" src="' + imgSrc + '" alt="Battery System"/>';
@@ -5898,7 +7896,8 @@ class SigenergyDeviceCard extends HTMLElement {
         var soc = packSocs[i-1];
         var col = this._socColor(soc);
         var socTxt = soc !== null ? soc.toFixed(1) + '%' : '?';
-        html += '<div class="pill" style="border-color:' + col + '35"><span class="pill-dot" style="background:' + col + '"></span><span class="pill-name">Batt ' + i + '</span><span class="pill-val">' + socTxt + '</span></div>';
+        var socPct = soc !== null ? Math.min(100, Math.max(0, soc)) : 0;
+        html += '<div class="pill" style="border-color:' + col + '35;position:relative;overflow:hidden"><div class="soc-bar" style="position:absolute;bottom:0;left:0;width:' + socPct + '%;height:3px;background:' + col + ';border-radius:0 0 14px 14px;transition:width 0.8s ease;opacity:0.7"></div><span class="pill-dot" style="background:' + col + '"></span><span class="pill-name">Batt ' + i + '</span><span class="pill-val">' + socTxt + '</span></div>';
       }
       html += '</div></div>';
       this.shadowRoot.innerHTML = html;
@@ -5906,10 +7905,9 @@ class SigenergyDeviceCard extends HTMLElement {
     }
 
     /* ── Layout constants (viewBox user-units) ── */
-    var _t = window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark';
     var _pillBg = _t === 'light' ? 'rgba(255,255,255,0.94)' : 'rgba(30,35,54,0.94)';
-    var _textFill = _t === 'light' ? '#1a1a2e' : '#e0e4ec';
-    var _valFill = _t === 'light' ? '#1a1a2e' : '#fff';
+    var _textFill = _t === 'light' ? '#1a1f2e' : '#e0e4ec';
+    var _valFill = _t === 'light' ? '#1a1f2e' : '#fff';
     var _chevBg = _t === 'light' ? '#e8eaee' : '#2a2e38';
     var _chevBgExp = _t === 'light' ? '#d0e8e3' : '#3a5e58';
     var P = 4, PW = 150, PH = 58, PR = 16, CR = 28, CL = 8, G = 3;
@@ -5936,38 +7934,55 @@ class SigenergyDeviceCard extends HTMLElement {
     b += '<image href="' + imgSrc + '" x="' + IX + '" y="' + TY + '" width="' + IW + '" height="' + IH + '"/>';
 
     /* ── Row: connector dot + line + chevron + label pill ── */
-    var drawRow = function(cy, label, val, col, side, deviceKey) {
+    var drawRow = function(cy, label, val, col, side, deviceKey, socPct, tempVal) {
       var s = '';
       var isExp = self._expanded[deviceKey];
       var chevChar = isExp ? '\u2039' : '\u203A';
+      var hasSocBar = socPct !== undefined && socPct !== null;
+      var fillW = hasSocBar ? PW * Math.min(100, Math.max(0, socPct)) / 100 : 0;
       if (side === 'left') {
         s += '<circle cx="' + sLeft + '" cy="' + cy + '" r="3" fill="' + col + '"/>';
         var le = IX - CL;
-        s += '<line x1="' + sLeft + '" y1="' + cy + '" x2="' + (le + CR) + '" y2="' + cy + '" stroke="' + col + '" stroke-width="1.5" opacity="0.7"/>';
+        s += '<line x1="' + sLeft + '" y1="' + cy + '" x2="' + (le + CR) + '" y2="' + cy + '" stroke="' + col + '" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,2"/>';
         var ccx = le - G - CR;
         s += '<g class="chevron" data-device="' + deviceKey + '" style="cursor:pointer">';
         s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? _chevBgExp : _chevBg) + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
         s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? _valFill : '#8892a4') + '">' + chevChar + '</text>';
         s += '</g>';
         var px = P, py = cy - PH / 2;
+        // Pill background with clip-path for SoC fill
+        s += '<defs><clipPath id="clip-' + deviceKey + '"><rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '"/></clipPath></defs>';
         s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="' + _pillBg + '" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
+        if (hasSocBar) {
+          s += '<rect x="' + px + '" y="' + (py + PH - 4) + '" width="' + fillW + '" height="4" fill="' + col + '" opacity="0.6" clip-path="url(#clip-' + deviceKey + ')"/>';
+        }
         s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="' + _textFill + '">' + label + '</text>';
         s += '<circle cx="' + (px + 16) + '" cy="' + (py + 42) + '" r="5" fill="' + col + '"/>';
         s += '<text x="' + (px + 26) + '" y="' + (py + 47) + '" font-family="sans-serif" font-size="16" font-weight="700" fill="' + _valFill + '">' + val + '</text>';
+        if (tempVal) {
+          s += '<text x="' + (px + PW - 8) + '" y="' + (py + 47) + '" text-anchor="end" font-family="sans-serif" font-size="10" fill="' + (tempVal > 40 ? '#e74c3c' : '#8892a4') + '">' + tempVal.toFixed(1) + '°</text>';
+        }
       } else {
         s += '<circle cx="' + sRight + '" cy="' + cy + '" r="3" fill="' + col + '"/>';
         var re = IX + IW + CL;
-        s += '<line x1="' + sRight + '" y1="' + cy + '" x2="' + (re - CR) + '" y2="' + cy + '" stroke="' + col + '" stroke-width="1.5" opacity="0.7"/>';
+        s += '<line x1="' + sRight + '" y1="' + cy + '" x2="' + (re - CR) + '" y2="' + cy + '" stroke="' + col + '" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,2"/>';
         var ccx = re + G + CR;
         s += '<g class="chevron" data-device="' + deviceKey + '" style="cursor:pointer">';
         s += '<circle cx="' + ccx + '" cy="' + cy + '" r="' + CR + '" fill="' + (isExp ? _chevBgExp : _chevBg) + '" stroke="' + (isExp ? col : '#4a4e58') + '" stroke-width="1"/>';
         s += '<text x="' + ccx + '" y="' + (cy + 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + (isExp ? _valFill : '#8892a4') + '">' + chevChar + '</text>';
         s += '</g>';
         var px = TW - P - PW, py = cy - PH / 2;
+        s += '<defs><clipPath id="clip-' + deviceKey + '"><rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '"/></clipPath></defs>';
         s += '<rect x="' + px + '" y="' + py + '" width="' + PW + '" height="' + PH + '" rx="' + PR + '" fill="' + _pillBg + '" stroke="' + col + '" stroke-opacity="0.35" stroke-width="1"/>';
+        if (hasSocBar) {
+          s += '<rect x="' + px + '" y="' + (py + PH - 4) + '" width="' + fillW + '" height="4" fill="' + col + '" opacity="0.6" clip-path="url(#clip-' + deviceKey + ')"/>';
+        }
         s += '<text x="' + (px + PW / 2) + '" y="' + (py + 22) + '" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="' + _textFill + '">' + label + '</text>';
         s += '<circle cx="' + (px + 16) + '" cy="' + (py + 42) + '" r="5" fill="' + col + '"/>';
-        s += '<text x="' + (px + 26) + '" y="' + (py + 47) + '" font-family="sans-serif" font-size="16" font-weight="700" fill="#fff">' + val + '</text>';
+        s += '<text x="' + (px + 26) + '" y="' + (py + 47) + '" font-family="sans-serif" font-size="16" font-weight="700" fill="' + _valFill + '">' + val + '</text>';
+        if (tempVal) {
+          s += '<text x="' + (px + PW - 8) + '" y="' + (py + 47) + '" text-anchor="end" font-family="sans-serif" font-size="10" fill="' + (tempVal > 40 ? '#e74c3c' : '#8892a4') + '">' + tempVal.toFixed(1) + '°</text>';
+        }
       }
       return s;
     };
@@ -5989,24 +8004,31 @@ class SigenergyDeviceCard extends HTMLElement {
       var soc = packSoc !== null ? packSoc.toFixed(1) : '?';
       var col = this._socColor(packSoc);
       var side = i % 2 === 1 ? 'right' : 'left';
-      b += drawRow(mcy, 'Battery(' + i + ')', soc + '%', col, side, 'battery' + i);
+      // Get temperature for this pack
+      var packTempEntity = '';
+      var packSocEntity = store ? store.getEntity('battery_pack' + i + '_soc') : '';
+      if (packSocEntity && packSocEntity.endsWith('_soc')) {
+        packTempEntity = packSocEntity.slice(0, -3).replace(/_view_$/, '_temperature_01');
+      }
+      var packTemp = packTempEntity ? this._getVal(packTempEntity) : null;
+      b += drawRow(mcy, 'Battery(' + i + ')', soc + '%', col, side, 'battery' + i, packSoc, packTemp);
     }
 
     /* ── Expansion panels ── */
     var panels = '';
     var panelStyle = _t === 'light'
       ? 'background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e0e0e0);border-radius:12px;padding:12px 16px;margin:8px 4px;'
-      : 'background:rgba(30,35,54,0.96);border:1px solid #2d3451;border-radius:12px;padding:12px 16px;margin:8px 4px;';
+      : 'background:var(--card-background-color,rgba(30,35,54,0.96));border:1px solid var(--divider-color,#2d3451);border-radius:12px;padding:12px 16px;margin:8px 4px;';
     var statStyle = 'display:inline-block;text-align:center;padding:6px 10px;min-width:70px;';
     var statVal = _t === 'light'
-      ? 'font-size:16px;font-weight:700;color:var(--primary-text-color,#1a1a2e);display:block;'
-      : 'font-size:16px;font-weight:700;color:#fff;display:block;';
+      ? 'font-size:18px;font-weight:700;color:var(--primary-text-color,#1a1f2e);display:block;'
+      : 'font-size:18px;font-weight:700;color:#fff;display:block;';
     var statLbl = _t === 'light'
-      ? 'font-size:9px;color:var(--secondary-text-color,#666);text-transform:uppercase;letter-spacing:0.5px;'
-      : 'font-size:9px;color:#8892a4;text-transform:uppercase;letter-spacing:0.5px;';
+      ? 'font-size:10px;color:var(--secondary-text-color,#666);text-transform:uppercase;letter-spacing:1px;'
+      : 'font-size:10px;color:#8892a4;text-transform:uppercase;letter-spacing:1px;';
     var headerStyle = _t === 'light'
-      ? 'font-size:13px;font-weight:700;color:var(--primary-text-color,#1a1a2e);margin-bottom:8px;letter-spacing:1px;'
-      : 'font-size:13px;font-weight:700;color:#e0e4ec;margin-bottom:8px;letter-spacing:1px;';
+      ? 'font-size:14px;font-weight:700;color:var(--primary-text-color,#1a1f2e);margin-bottom:8px;letter-spacing:1px;'
+      : 'font-size:14px;font-weight:700;color:#e0e4ec;margin-bottom:8px;letter-spacing:1px;';;
     var dps = store ? (store.getDisplay('decimal_places') ?? 1) : 1; // user-configurable decimal places
 
     var fmtEntity = function(eid, decimals, unit) {
@@ -6116,17 +8138,32 @@ class SigenergyDeviceCard extends HTMLElement {
       panels += '</div></div>';
     }
 
+    var _wBg = _t === 'light' ? '#fff' : '#1a1f2e';
+    var _wText = _t === 'light' ? '#1a1f2e' : '#fff';
+    var _wChevHover = _t === 'light' ? '#d0d4da' : '#3a3e48';
+    // Total SoC bar
+    var totalSoc = battSocFallback;
+    var totalCol = this._socRingColor(totalSoc);
+    var totalPct = totalSoc !== null ? Math.min(100, Math.max(0, totalSoc)) : 0;
+    var totalSocBar = '<div style="margin:4px 8px 2px;padding:6px 12px;display:flex;align-items:center;gap:10px;">' +
+      '<div style="flex:1;height:6px;background:' + (_t === 'light' ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)') + ';border-radius:3px;overflow:hidden;position:relative;">' +
+      '<div style="position:absolute;left:0;top:0;height:100%;width:' + totalPct + '%;background:' + totalCol + ';border-radius:3px;transition:width 0.8s ease;"></div></div>' +
+      '<span style="font-size:13px;font-weight:700;color:' + totalCol + ';white-space:nowrap;">' + (totalSoc !== null ? totalSoc.toFixed(1) + '%' : '—') + '</span></div>';
     this.shadowRoot.innerHTML =
-      '<style>:host{display:block}.card{background:var(--ha-card-background,#1a1f2e);border-radius:16px;padding:12px 4px;overflow:hidden;color:var(--primary-text-color,#fff)} .chevron{cursor:pointer;pointer-events:all;-webkit-tap-highlight-color:transparent;touch-action:manipulation} .chevron *{pointer-events:all} .chevron:hover circle,.chevron:active circle{fill:#3a3e48}</style>' +
+      '<style>:host{display:block}.card{background:var(--ha-card-background,' + _wBg + ');border-radius:16px;padding:12px 4px;overflow:hidden;color:var(--primary-text-color,' + _wText + ')} .chevron{cursor:pointer;pointer-events:all;-webkit-tap-highlight-color:transparent;touch-action:manipulation;outline:none} .chevron *{pointer-events:all} .chevron:hover circle,.chevron:active circle,.chevron:focus circle{fill:' + _wChevHover + '} .chevron:focus{outline:2px solid #00d4b8;outline-offset:2px;border-radius:50%}</style>' +
       '<div class="card">' + prereqBanner +
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + TW + ' ' + TH + '" width="100%" style="display:block">' +
-      b + '</svg>' + panels + '</div>';
+      b + '</svg>' + totalSocBar + panels + '</div>';
 
     // Wire up click handlers for chevron buttons
     var svg = this.shadowRoot.querySelector('svg');
     if (svg) {
       var chevrons = svg.querySelectorAll('.chevron');
       for (var c = 0; c < chevrons.length; c++) {
+        // Add accessibility attributes
+        chevrons[c].setAttribute('tabindex', '0');
+        chevrons[c].setAttribute('role', 'button');
+        chevrons[c].setAttribute('aria-label', 'Toggle ' + (chevrons[c].getAttribute('data-device') || 'details'));
         var handler = (function(el) {
           return function(e) {
             e.preventDefault();
@@ -6140,6 +8177,19 @@ class SigenergyDeviceCard extends HTMLElement {
         })(chevrons[c]);
         chevrons[c].addEventListener('click', handler);
         chevrons[c].addEventListener('touchend', handler);
+        // Keyboard support: Enter and Space
+        chevrons[c].addEventListener('keydown', (function(el) {
+          return function(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              var device = el.getAttribute('data-device');
+              if (device) {
+                self._expanded[device] = !self._expanded[device];
+                self._render();
+              }
+            }
+          };
+        })(chevrons[c]));
         chevrons[c].style.pointerEvents = 'all';
       }
     }
@@ -6165,6 +8215,8 @@ window.__sigCardClasses = window.__sigCardClasses || {};
 window.__sigCardClasses['sigenergy-settings-card'] = SigenergySettingsCard;
 window.__sigCardClasses['sigenergy-device-card'] = SigenergyDeviceCard;
 window.__sigCardClasses['sigenergy-sankey-panel'] = SigenergySankeyPanel;
+window.__sigCardClasses['sigenergy-insights-card'] = SigenergyInsightsCard;
+window.__sigCardClasses['sigenergy-energy-flow-card'] = SigenergyEnergyFlowCard;
 
 // Core registration function — safe to call repeatedly
 function _sigRegisterAll() {
@@ -6269,9 +8321,15 @@ window.customCards.push({
   description: 'Battery stack visualization with inverter and battery modules',
   preview: true,
 });
+window.customCards.push({
+  type: 'sigenergy-insights-card',
+  name: 'Genergy Insights',
+  description: 'Animated system health overview with Lottie animations',
+  preview: true,
+});
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.14.3 ',
+  '%c GENERGY-DASHBOARD %c v2.19.0 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
@@ -6305,6 +8363,14 @@ console.info(
     '@media (min-width: 1201px) {',
     '  #root > *:nth-child(5) { grid-column: span 2 !important; }',
     '  #root > *:nth-child(6) { grid-column: 1 / -1 !important; }',
+    '}',
+    '',
+    '/* Big screen (1920px+): increase grid gap for kiosk */',
+    '@media (min-width: 1800px) {',
+    '  #root { grid-gap: 12px !important; }',
+    '}',
+    '@media (min-width: 2400px) {',
+    '  #root { grid-gap: 16px !important; }',
     '}'
   ].join('\n');
 
@@ -6467,57 +8533,219 @@ console.info(
       } catch(e) { return null; }
     }
 
+    // Find the sankey-chart element (parent of sankey-chart-base)
+    function findSankeyChart() {
+      try {
+        var ha = document.querySelector('home-assistant');
+        if (!ha || !ha.shadowRoot) return null;
+        var main = ha.shadowRoot.querySelector('home-assistant-main');
+        if (!main || !main.shadowRoot) return null;
+        var panel = main.shadowRoot.querySelector('ha-panel-lovelace');
+        if (!panel || !panel.shadowRoot) return null;
+        var huiRoot = panel.shadowRoot.querySelector('hui-root');
+        if (!huiRoot || !huiRoot.shadowRoot) return null;
+        var view = huiRoot.shadowRoot.querySelector('hui-view');
+        if (!view) return null;
+        var panelView = view.querySelector('hui-panel-view');
+        if (!panelView || !panelView.shadowRoot) return null;
+        var huiCard = panelView.shadowRoot.querySelector('hui-card');
+        if (!huiCard) return null;
+        var lc = huiCard.querySelector('layout-card');
+        if (!lc || !lc.shadowRoot) return null;
+        var gl = lc.shadowRoot.querySelector('grid-layout');
+        if (!gl || !gl.shadowRoot) return null;
+        var root = gl.shadowRoot.querySelector('#root');
+        if (!root) return null;
+        var stacks = root.querySelectorAll('hui-vertical-stack-card');
+        for (var i = 0; i < stacks.length; i++) {
+          var sr = stacks[i].shadowRoot;
+          if (!sr) continue;
+          var cards = sr.querySelectorAll('hui-card');
+          for (var j = 0; j < cards.length; j++) {
+            var sankey = cards[j].querySelector('sankey-chart');
+            if (sankey) return sankey;
+          }
+        }
+        return null;
+      } catch(e) { return null; }
+    }
+
     function patchDestBars(baseSr) {
       if (patching) return;
       patching = true;
       try {
-        var sections = baseSr.querySelectorAll('.section');
-        if (sections.length < 2) return;
-        var lastSec = sections[sections.length - 1];
+        // --- 1. Patch SVG gradient stops: make destination-end stops 30% opacity ---
+        // This preserves source colors through the flow path with semi-transparent overlap at destinations.
         var conns = baseSr.querySelectorAll('.connectors');
-        if (!conns.length) return;
-
-        // Parse SVG paths to find flow extents on destination side (x=100)
-        var maxY = 0, minY = Infinity;
         for (var c = 0; c < conns.length; c++) {
           var svg = conns[c].querySelector('svg');
           if (!svg) continue;
+          var grads = svg.querySelectorAll('linearGradient');
+          for (var g = 0; g < grads.length; g++) {
+            var stops = grads[g].querySelectorAll('stop');
+            if (stops.length < 2) continue;
+            var lastStop = stops[stops.length - 1];
+            // Make destination-end gradient stop 30% opacity to preserve source colors
+            lastStop.setAttribute('stop-opacity', '0.3');
+          }
+          // --- 2. Boost flow path opacity for better visibility (closer to Sigenergy reference) ---
           var paths = svg.querySelectorAll('path');
           for (var p = 0; p < paths.length; p++) {
-            var d = paths[p].getAttribute('d');
-            if (!d) continue;
-            var matches = d.match(/100,(\d+\.?\d*)/g);
-            if (!matches) continue;
-            for (var m = 0; m < matches.length; m++) {
-              var y = parseFloat(matches[m].split(',')[1]);
-              if (y > maxY) maxY = y;
-              if (y < minY) minY = y;
+            var fo = paths[p].getAttribute('fill-opacity');
+            if (fo && parseFloat(fo) < 0.5) {
+              paths[p].setAttribute('fill-opacity', '0.55');
             }
           }
         }
-        if (maxY <= 0 || minY >= maxY) return;
 
-        // Map SVG coords to pixel coords
-        var svg0 = conns[0].querySelector('svg');
-        var vb = svg0 ? svg0.getAttribute('viewBox') : '';
-        var parts = vb ? vb.split(/\s+/) : [];
-        var svgH = parseFloat(parts[3]) || 480;
-        var secH = lastSec.offsetHeight;
-        var scale = secH / svgH;
-        var flowTopPx = Math.round(minY * scale);
-        var flowBottomPx = Math.round(maxY * scale);
-        var flowHeightPx = flowBottomPx - flowTopPx;
+        // --- 3. Inject per-flow percentage labels on connectors ---
+        // Each SVG path represents a source→destination flow. We label significant
+        // flows (>2% of destination) with the percentage of that destination's energy
+        // coming from each source. This matches the Sigenergy app's per-flow labels.
+        try {
+          var ha = document.querySelector('home-assistant');
+          var states = ha && ha.hass && ha.hass.states;
+          if (states) {
+            var cfg;
+            try { cfg = JSON.parse(localStorage.getItem('sigenergy-dashboard-config')); } catch(e) { cfg = null; }
+            if (cfg && cfg.entities) {
+              var ents = cfg.entities;
+              var feat = cfg.features || {};
+              function _toKwh(eid) {
+                var s = states[eid];
+                if (!s) return 0;
+                var v = parseFloat(s.state) || 0;
+                var u = (s.attributes && s.attributes.unit_of_measurement) || 'kWh';
+                if (u === 'MWh') return v * 1000;
+                if (u === 'Wh') return v / 1000;
+                return v;
+              }
+              var solar = _toKwh(ents.solar_energy_today);
+              var batD = _toKwh(ents.battery_discharge_today);
+              var gridI = _toKwh(ents.grid_import_today || ents.grid_import_high_tariff || ents.grid_import_low_tariff);
+              var totalSrc = solar + batD + gridI;
 
-        // Destination box height adjustment DISABLED — sankey chart's _calcBoxes()
-        // already handles sizing with min_box_size enforcement. Overriding heights
-        // here caused the last box (Grid Export) to shrink below min_box_size and jump.
+              // Only inject labels if we have meaningful source data
+              if (totalSrc > 0.1) {
+                // Find the connector SVGs and remove any old percentage labels
+                var connSvgs = baseSr.querySelectorAll('.connectors svg');
+                for (var si = 0; si < connSvgs.length; si++) {
+                  var svgEl = connSvgs[si];
+                  // Remove previous percentage labels (flow-pct-label disabled — clutters wide layout)
+                  var oldLabels = svgEl.querySelectorAll('.flow-pct-label');
+                  for (var ol = 0; ol < oldLabels.length; ol++) oldLabels[ol].remove();
+                  // Flow percentage labels disabled — node boxes already show percentages via CSS ::after
+                }
+              }
+            }
+          }
+        } catch(e) { /* flow label injection failed silently */ }
       } finally {
         patching = false;
       }
     }
 
+    // Inject proportional connection entities for multi-source flow distribution.
+    // Calculates how much each source contributes to HP/EV based on source proportions.
+    // Accepts a states object to inject into (defaults to ha.hass.states)
+    function injectConnectionEntities(states) {
+      try {
+        if (!states) {
+          var ha = document.querySelector('home-assistant');
+          if (!ha || !ha.hass || !ha.hass.states) return false;
+          states = ha.hass.states;
+        }
+        // Helper: read entity state converting to kWh
+        function toKwh(eid) {
+          var s = states[eid];
+          if (!s) return 0;
+          var v = parseFloat(s.state) || 0;
+          var u = (s.attributes && s.attributes.unit_of_measurement) || 'kWh';
+          if (u === 'MWh') return v * 1000;
+          if (u === 'Wh') return v / 1000;
+          return v;
+        }
+        // Source entity IDs — read from config stored in localStorage
+        var cfg;
+        try { cfg = JSON.parse(localStorage.getItem('sigenergy-dashboard-config')); } catch(e) { return false; }
+        if (!cfg || !cfg.entities) return false;
+        var ents = cfg.entities;
+        var feat = cfg.features || {};
+        var solar = toKwh(ents.solar_energy_today);
+        var batD = toKwh(ents.battery_discharge_today);
+        var gridI = toKwh(ents.grid_import_today || ents.grid_import_high_tariff || ents.grid_import_low_tariff);
+        var total = solar + batD + gridI;
+        if (total <= 0) return false;
+        var solarPct = solar / total;
+        var batPct = batD / total;
+        var gridPct = gridI / total;
+        // Destination small consumers — mirror the entity selection in the main sankey builder
+        var hpEnt = (feat.hp_energy_is_cumulative && ents.hp_energy_daily_meter) ? ents.hp_energy_daily_meter : ents.heat_pump_energy_today;
+        var hp = hpEnt ? toKwh(hpEnt) : 0;
+        var evEnt = (feat.ev_energy_is_cumulative && ents.ev_energy_daily_meter) ? ents.ev_energy_daily_meter : ents.ev_energy_today;
+        var ev = evEnt ? toKwh(evEnt) : 0;
+        var now = new Date().toISOString();
+        // Inject fake entities for each source→destination connection
+        function inject(id, val) {
+          states[id] = { entity_id: id, state: String(val), attributes: { unit_of_measurement: 'kWh' }, last_changed: now, last_updated: now };
+        }
+        if (hp > 0) {
+          inject('_conn_solar_to_hp', hp * solarPct);
+          inject('_conn_bat_to_hp', hp * batPct);
+          inject('_conn_grid_to_hp', hp * gridPct);
+        }
+        if (ev > 0) {
+          inject('_conn_solar_to_ev', ev * solarPct);
+          inject('_conn_bat_to_ev', ev * batPct);
+          inject('_conn_grid_to_ev', ev * gridPct);
+        }
+        return true; // injected something
+      } catch(e) { return false; }
+    }
+
+    // Install a hass property interceptor on the sankey-chart element.
+    // Every time HA sets `hass` on the sankey chart, we inject connection entities
+    // into the states object BEFORE the chart's original setter processes them.
+    var hassInterceptorInstalled = false;
+    function installHassInterceptor() {
+      if (hassInterceptorInstalled) return;
+      var sankeyEl = findSankeyChart();
+      if (!sankeyEl) return;
+      // Get the original hass setter from the prototype chain
+      var proto = Object.getPrototypeOf(sankeyEl);
+      var desc = null;
+      var p = proto;
+      while (p && !desc) {
+        desc = Object.getOwnPropertyDescriptor(p, 'hass');
+        if (desc) break;
+        p = Object.getPrototypeOf(p);
+      }
+      if (!desc || !desc.set) return;
+      var origSet = desc.set;
+      var origGet = desc.get;
+      // Intercept the hass setter on the INSTANCE (doesn't affect other elements)
+      Object.defineProperty(sankeyEl, 'hass', {
+        configurable: true,
+        get: origGet ? function() { return origGet.call(this); } : undefined,
+        set: function(newHass) {
+          if (newHass && newHass.states) {
+            injectConnectionEntities(newHass.states);
+          }
+          origSet.call(this, newHass);
+        }
+      });
+      hassInterceptorInstalled = true;
+    }
+
     function trySetup() {
       try {
+        // Install hass interceptor on the sankey chart (once) to inject connection
+        // entities into every hass update before the chart renders.
+        installHassInterceptor();
+
+        // Also inject into current hass.states (for the initial render)
+        injectConnectionEntities();
+
         var base = findSankeyBase();
         if (!base || !base.shadowRoot) return;
         var baseSr = base.shadowRoot;

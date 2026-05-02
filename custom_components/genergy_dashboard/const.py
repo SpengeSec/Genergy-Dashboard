@@ -1,7 +1,7 @@
 """Constants for the Genergy Dashboard integration."""
 
 DOMAIN = "genergy_dashboard"
-VERSION = "1.0.0"
+VERSION = "2.21.1"
 DASHBOARD_URL_PATH = "dashboard-sigenergy"
 DASHBOARD_TITLE = "Genergy"
 
@@ -222,8 +222,9 @@ PLACEHOLDER_MAP = {
 # Sigenergy defaults (inverter-specific entities)
 # Authoritative mapping based on Sigenergy Local Modbus integration entities.
 # grid_power is SIGNED: positive = importing, negative = exporting.
-# grid_voltage and grid_frequency are NOT provided by Sigenergy Local Modbus
+# grid_voltage is NOT provided by Sigenergy Local Modbus at plant level
 # (the integration only exposes rated values, not live readings).
+# grid_frequency IS available at inverter level: sensor.sigen_inverter_grid_frequency
 # ---------------------------------------------------------------------------
 SIGENERGY_DEFAULTS = {
     # Core power (plant-level — aggregates across inverters)
@@ -262,7 +263,7 @@ SIGENERGY_DEFAULTS = {
     # Auto-detect in the frontend settings card prefers these over inverter-level
     # sensors. Leave defaults empty since entity naming varies by installation.
     CONF_GRID_VOLTAGE: "",
-    CONF_GRID_FREQUENCY: "",
+    CONF_GRID_FREQUENCY: "sensor.sigen_inverter_grid_frequency",
     CONF_GRID_CT_CLAMP: "",
     # Peripheral devices — no Sigenergy modbus entities exist for these
     CONF_EV_CHARGER_POWER: "",
