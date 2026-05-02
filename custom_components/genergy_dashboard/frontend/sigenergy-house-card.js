@@ -116,7 +116,7 @@ const PATHS = {
   // 6-point polyline tracing house architecture
   home:       "M 535 570 L 535 330 L 640 360 L 840 420 L 990 200 L 750 140",
   // Battery: vertical line below SigenStor
-  battery:    "M 350 760 L 350 870",
+  battery:    "M 490 570 L 492 785",
   // Grid: from wall junction through meter to ground
   grid:       "M 600 645 L 740 695 L 790 695 L 855 680 L 855 830",
   // EV/AC charger: charger wall → across garage → around car → to SigenStor

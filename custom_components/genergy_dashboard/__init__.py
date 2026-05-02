@@ -23,7 +23,6 @@ _LOGGER = logging.getLogger(__name__)
 REQUIRED_HACS_CARDS: list[tuple[str, str, str, str, str]] = [
     ("layout-card", "Layout Card", "layout-card", "thomasloven", "lovelace-layout-card"),
     ("apexcharts-card", "ApexCharts Card", "apexcharts-card", "RomRider", "apexcharts-card"),
-    ("sankey-chart", "Sankey Chart Card", "sankey-chart", "MindFreeze", "ha-sankey-chart"),
     ("mushroom", "Mushroom Cards", "mushroom", "piitaya", "lovelace-mushroom"),
     ("card-mod", "Card Mod", "card-mod", "thomasloven", "lovelace-card-mod"),
     ("html-template-card", "HTML Template Card", "html-template-card", "PiotrMachowski", "Home-Assistant-Lovelace-HTML-Jinja2-Template-card"),
