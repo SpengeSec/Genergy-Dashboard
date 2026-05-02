@@ -592,7 +592,7 @@ The house card composites multiple PNG layers:
 |---|---|
 | **Dashboard not in sidebar** | Go to Settings → Devices & Services, find Genergy Dashboard, check it's loaded. Try a hard refresh (Ctrl+Shift+R) |
 | **Cards not appearing** | Clear browser cache (Ctrl+Shift+Delete), hard-refresh (Ctrl+Shift+R) |
-| **Configuration error (after update on house/battery card sections** | Usually this is can cache issue. Clear browser cache (Ctrl+Shift+Delete), hard-refresh (Ctrl+Shift+R) |
+| **Configuration error (after update on house/battery card sections** | Usually this is a cache issue. Clear browser cache (Ctrl+Shift+Delete), hard-refresh (Ctrl+Shift+R) |
 | **"Custom element doesn't exist: sigenergy-settings-card" (or sigenergy-house-card)** | This is auto-recovered by the built-in watchdog. **1)** Try a hard refresh (Ctrl+Shift+R / Cmd+Shift+R). **2)** If it persists, restart Home Assistant — the integration registers JS resources on startup. **3)** Check Settings → Devices & Services and confirm Genergy Dashboard is loaded without errors. |
 | **"Custom element doesn't exist: layout-card" (or apexcharts/mushroom/etc.)** | The integration will detect and notify you about missing cards automatically. Open the Settings tab to see the prerequisite banner with direct install links. Or install the required HACS dependencies manually (see [Prerequisites](#prerequisites)) and restart HA |
 | **Entity not found (red ✗ badge)** | Check entity ID in Developer Tools → States. Entity IDs are case-sensitive |
