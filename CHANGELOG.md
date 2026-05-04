@@ -2,6 +2,26 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.22.0] - 2026-05-04
+
+### Added — EV, Battery, and Chart Controls
+- **Auto EV Gate / Vehicle + Charger** — New automatic EV visual mode shows the car, charger, cable, labels, and animated EV flow only when the charger/vehicle state or charger power indicates the EV is connected or charging.
+- **EV SoC and Range Display** — The house card can now show EV battery SoC and remaining range when matching entities are configured or auto-detected.
+- **Expanded EV Auto-Detect** — EV detection now recognizes a broader set of charger and vehicle integrations, including Tesla/Teslemetry, Zappi, Easee, Zaptec, Wallbox, ChargePoint, OCPP, BMW, FordPass, Hyundai/Kia, Volkswagen, Polestar, Volvo, Mercedes, BYD, MG, and more.
+- **EV Charger Label Override** — Display settings now include an EV charger label field so users can rename the AC/DC charger label shown on the house card.
+- **Battery Flow Color Swap** — Display settings now include a battery flow color option for installations where charge/discharge colors feel reversed after applying the selected battery sign convention.
+- **Configurable ApexCharts Refresh Interval** — Display settings now include 10s, 30s, 60s, and 5min refresh choices. The default is now 60s to reduce unwanted ApexCharts zoom/pan resets.
+
+### Fixed
+- **Grid Power vs Daily Energy Setup Clarity** — Entity labels and helper text now distinguish live W/kW power sensors from daily kWh energy sensors, and the Settings card warns when an entity appears to be mapped to the wrong type.
+- **Volcast Solar Forecast Overlay** — Forecast overlay generation now accepts forecast rows that expose `power_w` instead of `pv_estimate`.
+- **V2 Event Card Loading Recovery** — HAEO, EMHASS, and Energy Manager event cards now recover from interrupted initial history loads instead of remaining stuck in a loading state.
+- **Sankey Prerequisite Cleanup** — The third-party `ha-sankey-chart` card is no longer listed as a required prerequisite because the dashboard uses the built-in `sigenergy-energy-flow-card`.
+
+### Changed
+- **Sigenergy2mqtt Auto-Discovery** — Sigenergy auto-detection now includes patterns used by sigenergy2mqtt-style `sensor.sigen_*` entity families.
+- **Energy Manager Notes** — Documentation now reflects the Energy Manager provider and V2 event-card path alongside EMHASS and HAEO.
+
 ## [2.21.1] - 2026-04-12
 
 ### Fixed — Dual Tariff Sankey Grid Totals

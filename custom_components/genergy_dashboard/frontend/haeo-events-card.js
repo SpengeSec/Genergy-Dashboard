@@ -409,6 +409,7 @@ class HaeoEventsCard extends HTMLElement {
     this._lastCostTs   = null;
     this._lastRenderTs = 0;
     this._pastState    = 'idle';
+    this._pastLoadTs   = 0;
   }
 
   // Resolve a sensor entity ID: config override → default
@@ -420,6 +421,9 @@ class HaeoEventsCard extends HTMLElement {
     this._config = config || {};
     _HAEO_CUR = this._config.currency_symbol || '$';
     if (!this.shadowRoot.getElementById('tb-future')) {
+      this._lastCostTs = null;
+      this._pastState = 'idle';
+      this._pastLoadTs = 0;
       this.shadowRoot.innerHTML = _haeo_buildHTML();
       this._wireEvents();
       requestAnimationFrame(() => this._setWrapHeight());
@@ -523,6 +527,9 @@ class HaeoEventsCard extends HTMLElement {
     if (costTs !== this._lastCostTs) {
       this._lastCostTs = costTs;
       this._renderFuture();
+    }
+    if (this._pastState === 'loading' && this._pastLoadTs && Date.now() - this._pastLoadTs > 30000) {
+      this._pastState = 'idle';
     }
     if (this._pastState === 'idle') {
       this._pastState = 'loading';
@@ -865,7 +872,11 @@ class HaeoEventsCard extends HTMLElement {
   async _loadPast() {
     const st = this.shadowRoot.getElementById('st-past');
     const tb = this.shadowRoot.getElementById('tb-past');
-    if (!st || !tb) return;
+    if (!st || !tb) {
+      this._pastState = 'idle';
+      return;
+    }
+    this._pastLoadTs = Date.now();
 
     try {
       const { start, end } = this._getRangeP();
@@ -951,6 +962,7 @@ class HaeoEventsCard extends HTMLElement {
         tb.innerHTML = '<tr><td colspan="14" class="msg">⚠️ No sensor data for this period.</td></tr>';
         st.textContent = 'No data';
         this._pastState = 'ready';
+        this._pastLoadTs = 0;
         return;
       }
 
@@ -1110,6 +1122,7 @@ class HaeoEventsCard extends HTMLElement {
       const sel2 = this.shadowRoot.getElementById('range-past');
       st.textContent = entries.length + ' readings — ' + (sel2 ? sel2.options[sel2.selectedIndex].text : '');
       this._pastState = 'ready';
+      this._pastLoadTs = 0;
 
     } catch (e) {
       const tb2 = this.shadowRoot.getElementById('tb-past');
@@ -1117,6 +1130,7 @@ class HaeoEventsCard extends HTMLElement {
       const st2 = this.shadowRoot.getElementById('st-past');
       if (st2) st2.textContent = 'Error — ' + e.message.slice(0, 60);
       this._pastState = 'ready';
+      this._pastLoadTs = 0;
     }
   }
 

@@ -38,7 +38,7 @@
       },
       "extras": {
         "title": "Additional Entities & Features",
-        "description": "Configure optional sensors, device details, and feature toggles. Enable EMHASS/HAEO/Solcast to auto-populate their standard entity names.",
+        "description": "Configure optional sensors, device details, and feature toggles. Enable EMHASS/HAEO/Energy Manager/Solcast to auto-populate their standard entity names.",
         "data": {
           "weather": "Weather Entity",
           "inverter_temp": "Inverter Temperature",

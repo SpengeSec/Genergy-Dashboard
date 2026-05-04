@@ -12,7 +12,7 @@
 >
 > Feedback and bug reports are welcome!
 
-A fully configurable Home Assistant Lovelace dashboard for monitoring solar, battery, and grid energy systems. Features animated power flow visualization, real-time energy charts with EMHASS/HAEO forecast overlays, battery pack monitoring, and a 4-tab settings UI for complete customization — no YAML editing required.
+A fully configurable Home Assistant Lovelace dashboard for monitoring solar, battery, and grid energy systems. Features animated power flow visualization, real-time energy charts with EMHASS, HAEO, and Energy Manager forecast overlays, battery pack monitoring, and a 4-tab settings UI for complete customization — no YAML editing required.
 
 > **Inverter-agnostic**: Works with **any** solar/battery inverter (Deye, SunSynk, Sigenergy, Huawei, Fronius, SolarEdge, Enphase, etc.) — just map your entity IDs in the Settings tab.
 
@@ -73,7 +73,7 @@ Built-in visual cable path editor for customizing the animated power flow routes
 ## Features
 
 ### Overview Dashboard
-- **Animated House Card** — Isometric 3D house with real-time animated power flow "comets" showing solar generation, battery charge/discharge, grid import/export, EV charging, and heat pump usage
+- **Animated House Card** — Isometric 3D house with real-time animated power flow "comets" showing solar generation, battery charge/discharge, grid import/export, EV charging, and heat pump usage. Optional EV SoC/range labels and automatic EV visibility keep the vehicle, charger, cable, and flow hidden until the EV is connected or charging
 - **Battery Runtime Estimate** — Shows estimated time-to-full (charging) or time-to-empty (discharging) below the battery status on the house card. Uses configurable SoC targets from your inverter's charge cutoff and discharge reserve settings, with auto-detection for all major brands
 - **Responsive House Design** — Toggle EV charger/heat pump in settings and the house card updates dynamically: garage gate opens to show EV charging, heat pump unit appears on the house exterior
 - **Cable Path Editor** — Built-in visual editor for customizing animated power flow cable routes with drag-to-reposition control points and snap-to-grid
@@ -85,8 +85,8 @@ Built-in visual cable path editor for customizing the animated power flow routes
 ### Energy Charts
 - **ApexCharts Integration** — 24h or 48h time-series chart with Solar, Battery, Grid, and Consumption traces
 - **Solar Forecast Chart Overlay** — Overlays Solcast PV forecast as a dashed gold area series on the energy chart, using the `detailedForecast` attribute from your Solcast sensor. Chart automatically extends to 48h when enabled
-- **EMS Forecast Overlays** — Supports both **EMHASS** (MPC forecast) and **HAEO** (optimization schedule via `forecast` attribute) as energy management system providers. Dashed forecast lines for planned PV, battery, grid, load, SOC, and price targets
-- **Forecast Timeline Table** — Collapsible markdown table showing upcoming EMS forecast data in 15-minute intervals. Displays Time, Buy/Sell prices, PV, Load, Grid, Battery power (kW), and SoC (%). Features day dividers (📅), current time indicator (▶), colored buy/sell prices, dimmed zero-PV values, and per-timeslot price forecasts. Supports both EMHASS and HAEO providers. Collapsed by default — tap the header to expand
+- **EMS Forecast Overlays** — Supports **EMHASS** (MPC forecast), **HAEO** (optimization schedule via `forecast` attribute), and **Energy Manager** as energy management system providers. Dashed forecast lines for planned PV, battery, grid, load, SOC, and price targets
+- **Forecast Timeline Table** — V2 event-card timeline for upcoming EMS decisions and historical events. Displays Time, Buy/Sell prices, PV, Load, Grid, Battery power (kW), and SoC (%), with day dividers, current-time indicators, colored prices, and per-timeslot cost/profit data. Supports EMHASS, HAEO, and Energy Manager providers
 - **Price Overlay** — Import/export electricity price curves on secondary Y-axis
 - **Deferrable Load Tracking** — Heat pump, boiler, and other deferrable load schedules
 
@@ -94,10 +94,10 @@ Built-in visual cable path editor for customizing the animated power flow routes
 - **4-tab configuration card** with live entity validation
 - **Kiosk Mode** — Dedicated display mode that hides the HA sidebar, header, and toolbar for tablets/wall displays. Resolution-aware spacing (1080p, 1440p, 4K) with a floating exit button. Enable in Display → Kiosk Mode
 - **Entity Configuration** — Map your HA entities to ~70 dashboard slots with real-time state badges
-- **Auto-Detect from HA Energy Dashboard** — One-click detection of grid sources, solar, battery, Solcast, EV chargers, and heat pumps from your HA Energy Dashboard configuration. Supports broadened keyword matching for 30+ EV charger brands (Tesla, Zappi, Easee, Wallbox, ChargePoint, etc.) and 20+ heat pump brands (Daikin, Nibe, Vaillant, Viessmann, etc.)
+- **Auto-Detect from HA Energy Dashboard** — One-click detection of grid sources, solar, battery, Solcast, EV chargers, and heat pumps from your HA Energy Dashboard configuration. Supports broadened keyword matching for EV charger and vehicle integrations (Tesla/Teslemetry, Zappi, Easee, Zaptec, Wallbox, ChargePoint, OCPP, BMW, FordPass, Hyundai/Kia, Volkswagen, Polestar, Volvo, BYD, MG, etc.) and 20+ heat pump brands (Daikin, Nibe, Vaillant, Viessmann, etc.)
 - **Cumulative Sensor Support** — Automatically detects cumulative (lifetime total) energy sensors and creates HA utility_meter helpers for daily tracking. Works with both daily-resetting and always-increasing sensor types
 - **EV & Heat Pump in Sankey** — Add EV and/or heat pump energy as destination nodes in the Sankey flow chart, with auto-detect and daily meter auto-creation for cumulative sensors
-- **Feature Toggles** — Enable/disable EV charger, heat pump, EMS provider (None/EMHASS/HAEO), solar forecast, financial tracking
+- **Feature Toggles** — Enable/disable EV charger, automatic EV visibility, heat pump, EMS provider (None/EMHASS/HAEO/Energy Manager), solar forecast, financial tracking
 - **Pricing Setup** — Configure price entities, thresholds, currency
 - **Display Preferences** — Decimal places, chart range, SoC ring thresholds, power auto-scaling
 - **Responsive Toggle UI** — Optimized event handling prevents missed clicks and lag; hass state updates no longer trigger full DOM rebuilds
@@ -180,7 +180,7 @@ The integration will **automatically detect** missing HACS frontend plugins and 
 3. A guided config flow walks you through entity mapping:
    - **Step 1 — Core Sensors**: Map your solar, battery, grid, and load power entities
    - **Step 2 — Energy Totals**: Map daily energy sensors (solar, consumption, grid import/export, battery charge/discharge)
-   - **Step 3 — Features**: Enable optional features (EMS: EMHASS or HAEO, Solcast, EV charger, heat pump) and map their entities
+   - **Step 3 — Features**: Enable optional features (EMS: EMHASS, HAEO, or Energy Manager; Solcast; EV charger; heat pump) and map their entities
 4. Click **Submit** — the integration automatically:
    - Registers the dashboard in Lovelace with **Show in Sidebar** enabled
    - Generates the full dashboard configuration from the template + your entity mappings
@@ -230,7 +230,7 @@ After adding the integration, the dashboard is pre-configured with your entity m
 2. Verify your data is showing correctly in the overview
 3. Open the **Settings** tab (⚙️ gear icon) to fine-tune:
    - **⚡ Entities** — Adjust or add entity mappings (each field shows a live state badge)
-   - **🔧 Features** — Toggle EV charger, heat pump, EMS provider (EMHASS/HAEO), solar forecast, etc.
+   - **🔧 Features** — Toggle EV charger, automatic EV visibility, heat pump, EMS provider (EMHASS/HAEO/Energy Manager), solar forecast, etc.
    - **💰 Pricing** — Configure price entities, thresholds, currency
    - **🎨 Display** — Theme, decimal places, chart range
 4. **🟡 Click "🔄 Apply Settings to Dashboard" at the bottom** of any tab to rebuild the dashboard with your settings
@@ -317,7 +317,7 @@ To use: check the "**I have a Sigenergy inverter**" toggle on the first step of 
 | `load_power` | Real-time home consumption (W) | `sensor.inverter_load_power` |
 | `battery_power` | Battery charge/discharge power (W) | `sensor.inverter_battery_power` |
 | `battery_soc` | Battery state of charge (%) | `sensor.inverter_battery_soc` |
-| `grid_power` | Grid import/export power (W) | `sensor.inverter_grid_power` |
+| `grid_power` | Live grid import/export power (W/kW), not a daily kWh energy counter | `sensor.inverter_grid_power` |
 
 ### Battery Runtime Entities (Optional — Enable Battery Runtime in Display)
 
@@ -353,14 +353,16 @@ To use: check the "**I have a Sigenergy inverter**" toggle on the first step of 
 | `grid_import_today` | Grid import today (kWh) |
 | `grid_export_today` | Grid export today (kWh) |
 
+> The Settings card warns if a live power entity is used in a daily energy slot, if a kWh energy entity is used in a live power slot, or if a likely lifetime counter is used where a daily reset sensor is expected.
+
 ### EV Charger Entities (Optional — Enable in Features)
 
 | Settings Field | Description |
 |---|---|
 | `ev_charger_power` | EV charger power draw (W) |
-| `ev_charger_status` | Charger status (charging/idle/etc.) |
+| `ev_charger_state` | Charger or vehicle connection state (charging/connected/plugged/idle/etc.) |
 | `ev_soc` | Electric vehicle battery state of charge (%) |
-| `ev_charger_energy_today` | EV energy charged today (kWh) |
+| `ev_range` | Electric vehicle remaining range (km/mi) |
 | `ev_energy_today` | Daily EV energy sensor for Sankey graph (kWh) — auto-detected from HA Energy Dashboard |
 | `ev_energy_daily_meter` | Auto-created utility_meter entity for cumulative EV sensors (read-only) |
 
@@ -374,14 +376,7 @@ To use: check the "**I have a Sigenergy inverter**" toggle on the first step of 
 
 ### EMHASS MPC Entities (Optional — Enable EMHASS in EMS section)
 
-> **Forecast Table Prerequisite**: The collapsible forecast table requires an `input_boolean.genergy_forecast_table` helper in your HA configuration. Add to your `configuration.yaml`:
-> ```yaml
-> input_boolean:
->   genergy_forecast_table:
->     name: Genergy Forecast Table
->     initial: false
-> ```
-> Then restart HA. The table is collapsed by default; tap the header to expand.
+> **Forecast Timeline**: Current releases use the native V2 event cards and modal overlay for forecast timelines. No `input_boolean.genergy_forecast_table` helper is required.
 
 | Settings Field | Description |
 |---|---|
@@ -476,6 +471,7 @@ Configure in Settings → **🔧 Features** tab:
 |---|---|---|
 | **EV Charger** | Off | Shows EV charger power flow on house card, adds EV comet animation path |
 | **EV Vehicle** | Off | Shows car in garage illustration on house card |
+| **Auto EV Gate / Vehicle + Charger** | Off | Dynamically shows the EV vehicle, charger, cable, labels, and flow only when the EV is connected or charging |
 | **Heat Pump** | Off | Shows heat pump power flow on house card |
 | **EV in Sankey** | Off | Adds EV consumption as a destination node in the Sankey energy flow chart (configure in ⚡ Entities tab) |
 | **HP in Sankey** | Off | Adds heat pump/HVAC energy as a destination node in the Sankey chart (configure in ⚡ Entities tab) |
@@ -485,7 +481,7 @@ Configure in Settings → **🔧 Features** tab:
 | **PV Strings** | 2 | Number of PV strings (1–6) — controls individual PV string entity slots in Settings |
 | **Battery Runtime** | On | Shows estimated time-to-full/empty on the house card. Configurable SoC targets |
 | **Positive = Charging** | On | Battery sign convention. On: positive = charging (Sigenergy, Huawei). Off: positive = discharging (Deye, Goodwe) |
-| **EMS Provider** | EMHASS | Energy Management System: None / EMHASS / HAEO. Controls status card, forecast overlays, and entity slots |
+| **EMS Provider** | EMHASS | Energy Management System: None / EMHASS / HAEO / Energy Manager. Controls status card, forecast overlays, timeline cards, and entity slots |
 | **EMHASS Forecasts** | On | Adds MPC forecast dashed lines to energy chart (when EMS = EMHASS) |
 | **EMHASS Forecast Table** | On | Shows collapsible forecast timeline table below the energy chart (when EMS = EMHASS) |
 | **HAEO Forecasts** | On | Adds HAEO forecast dashed lines to energy chart (when EMS = HAEO) |
@@ -528,7 +524,11 @@ Configure in Settings → **🎨 Display** tab:
 | **Power Threshold** | 1000 W | Below: show Watts. Above: auto-scale to kW |
 | **Decimal Places** | 1 | Number formatting precision (0, 1, or 2) |
 | **Battery Label** | BATTERY | Name displayed on house card battery (e.g. "SigenStor", "LUNA 2000", "PowerWall") |
+| **Heat Pump Label** | HEAT PUMP | Name displayed on the house card heat pump tile |
+| **EV Charger Label** | AC CHARGER | Optional label override for the EV charger tile |
+| **Battery Flow Colors** | Default | Swap charge/discharge flow colors when your installation's battery color convention feels reversed |
 | **Chart Range** | Today | Default chart time span: Today, 24h, or 7 days |
+| **Refresh Interval** | 60 seconds | ApexCharts refresh interval. Longer intervals preserve zoom/pan interactions better |
 | **SoC Ring Low** | 40% | Below this: SoC ring pulses red on house card |
 | **SoC Ring High** | 60% | Above this: green ring. Between low and high: orange |
 
@@ -600,8 +600,8 @@ The house card composites multiple PNG layers:
 | **Charts show no data** | Ensure core entities (`solar_power`, `load_power`, etc.) are correctly set and have history data |
 | **EMHASS forecast lines not showing** | Set EMS Provider to EMHASS in Features tab, enable EMHASS Forecasts, then set MPC entity fields in Entities tab |
 | **HAEO forecast lines not showing** | Set EMS Provider to HAEO in Features tab, enable HAEO Forecasts, then set HAEO entity fields in Entities tab. Ensure HAEO sensors have a `forecast` attribute |
-| **Forecast table not showing** | Enable "Forecast Table" in Features → EMS section. Add `input_boolean.genergy_forecast_table` to your `configuration.yaml` (see [EMHASS MPC Entities](#emhass-mpc-entities-optional--enable-emhass-in-ems-section)) and restart HA |
-| **Forecast table shows raw pipe text** | Clear browser cache and hard-refresh (Ctrl+Shift+R). Do not wrap the table in `<details>` HTML tags — this breaks HA's markdown parser |
+| **Forecast timeline not showing** | Enable "Forecast Table" in Features → EMS section, choose an EMS provider, and configure the matching EMHASS, HAEO, or Energy Manager entities. Current releases use native V2 event cards; no `input_boolean.genergy_forecast_table` helper is required |
+| **Forecast timeline looks stale after updating** | Clear browser cache and hard-refresh (Ctrl+Shift+R / Cmd+Shift+R), then restart Home Assistant if the old card is still cached |
 | **Settings don't persist across browsers** | Make sure dashboard URL is exactly `dashboard-sigenergy` (case-sensitive) |
 | **Battery detail panel empty** | Set `battery_pack_prefix` (e.g., `sensor.battery_monitor_pack_`) in Entities tab |
 | **Cards overlap or misaligned** | Ensure `layout-card` is installed. Try: Settings → Dashboards → Resources → check JS resources are listed |

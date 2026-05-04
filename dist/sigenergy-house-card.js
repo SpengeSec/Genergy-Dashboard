@@ -51,6 +51,8 @@ const DEFAULT_CONFIG = {
   features: {
     ev_charger: false,
     ev_vehicle: false,
+    ev_vehicle_auto: false,
+    ev_vehicle_power_threshold: 100,
     heat_pump: false,
     grid: true,
     hide_cables: false,
@@ -76,7 +78,7 @@ const DEFAULT_CONFIG = {
     battery_min_soc: "",
   },
   colors: {
-    solar: "#f5c542",
+    solar: "#F0D850",
     battery_charge: "#e74c3c",
     battery_discharge: "#2ecc71",
     grid_import: "#e74c3c",
@@ -86,6 +88,8 @@ const DEFAULT_CONFIG = {
     heat_pump: "#e67e22",
     cable_static: "#888888",
   },
+  swap_battery_colors: false,
+  ev_charger_label: "",
 };
 
 // ─── SVG ViewBox matches home_has_solar_has_car.png native dimensions ────────
@@ -392,6 +396,30 @@ class SigenergyHouseCard extends LitElement {
   get _isExporting() { return this._gridPower < -1; }
   get _isSolarActive() { return this._solarPower > 5; }
   get _isEvCharging() { return this._evPower > 5; }
+  get _isEvConsumingAboveThreshold() {
+    const threshold = parseFloat(this._config.features.ev_vehicle_power_threshold);
+    return this._evPower > (Number.isFinite(threshold) ? threshold : 100);
+  }
+  get _evConnectionState() {
+    return this._stateStr(this._config.entities.ev_charger_state).toLowerCase().trim()
+      .replace(/[\s-]+/g, '_');
+  }
+  get _isEvConnectedByState() {
+    const state = this._evConnectionState;
+    const compactState = state.replace(/_/g, '');
+    const disconnectedStates = new Set([
+      '', '0', 'false', 'off', 'idle', 'available', 'unknown', 'unavailable',
+      'disconnected', 'not_connected', 'unplugged', 'not_plugged', 'no_vehicle',
+      'vehicle_not_connected', 'car_not_connected',
+    ]);
+    if (disconnectedStates.has(state) || state.includes('disconnected') || state.includes('unplugged')) {
+      return false;
+    }
+    if (state.includes('not_charging') || state.includes('not_ready') || compactState.includes('notcharging') || compactState.includes('notready')) return false;
+    if (['1', 'true', 'on'].includes(state)) return true;
+    return /(connected|plugged|plugged_in|charging|charge_complete|ready|ready_to_charge|waiting|awaiting|preparing|paused|suspended|complete|completed|finished|finishing|stopped|no_power)/.test(state) ||
+      /(pluggedin|chargecomplete|readytocharge|nopower)/.test(compactState);
+  }
   get _heatPumpPower() { return this._toWatts(this._config.entities.heat_pump_power); }
   get _isHeatPumpActive() { return this._heatPumpPower > 5; }
 
@@ -481,14 +509,28 @@ class SigenergyHouseCard extends LitElement {
   }
 
   // ── Feature helpers ──────────────────────────────────────────────────────
+  get _isEvAutoActive() {
+    return this._isEvConsumingAboveThreshold || this._isEvConnectedByState;
+  }
+
   get _hasEv() {
-    return this._config.features.ev_charger || this._config.features.ev_vehicle;
+    return this._showEvCharger || this._showEvVehicle;
+  }
+
+  get _showEvVehicle() {
+    if (!this._config.features.ev_vehicle_auto) return !!this._config.features.ev_vehicle;
+    return this._isEvAutoActive;
+  }
+
+  get _showEvCharger() {
+    if (!this._config.features.ev_vehicle_auto) return !!this._config.features.ev_charger;
+    return this._isEvAutoActive;
   }
 
   // ── Image URLs ───────────────────────────────────────────────────────────
   get _baseImage() {
     const base = this._config.image_path;
-    if (this._hasEv) {
+    if (this._showEvVehicle) {
       return this._isNight ? `${base}/dark_home_has_solar_has_car.png` : `${base}/home_has_solar_has_car.png`;
     }
     // Gate closed, no car/charger (no dark variant available)
@@ -507,7 +549,7 @@ class SigenergyHouseCard extends LitElement {
     if (this._config.features.grid) {
       pathNames.push('grid');
     }
-    if (this._config.features.ev_charger) {
+    if (this._showEvCharger) {
       pathNames.push('ev');
     }
     if (this._config.features.heat_pump) {
@@ -573,14 +615,14 @@ class SigenergyHouseCard extends LitElement {
       ${this._renderComet(this._getEditSolarAnim(), c.solar, this._isSolarActive, false, 2.5)}
       ${this._renderComet(this._getEditPath('home'), c.home, this._loadPower > 5, false, 2.0)}
       ${this._renderComet(this._getEditPath('battery'),
-          this._isCharging ? c.battery_charge : c.battery_discharge,
+          (this._config.swap_battery_colors ? (this._isCharging ? c.battery_discharge : c.battery_charge) : (this._isCharging ? c.battery_charge : c.battery_discharge)),
           Math.abs(this._batteryPower) > 5,
           this._isDischarging, 1.5)}
       ${this._config.features.grid ? this._renderComet(this._getEditPath('grid'),
           this._isImporting ? c.grid_import : c.grid_export,
           this._isImporting || this._isExporting,
           this._isImporting, 2.5) : ""}
-      ${this._config.features.ev_charger ? this._renderComet(this._getEditPath('ev'), c.ev, this._isEvCharging, true, 2.5) : ""}
+      ${this._showEvCharger ? this._renderComet(this._getEditPath('ev'), c.ev, this._isEvCharging, true, 2.5) : ""}
       ${this._config.features.heat_pump ? this._renderComet(this._getEditPath('heat_pump'), c.heat_pump, this._isHeatPumpActive, false, 2.5) : ""}
     `;
   }
@@ -634,7 +676,7 @@ class SigenergyHouseCard extends LitElement {
   _renderEditor() {
     if (!this._isEditMode) return svg``;
     const pathColors = {
-      solar: '#f5c542',
+      solar: '#F0D850',
       home: '#3498db',
       battery: '#2ecc71',
       grid: '#e74c3c',
@@ -673,7 +715,7 @@ class SigenergyHouseCard extends LitElement {
 
     // ── SoC Ring editor handle ──────────────────────────────────────────────
     const ring = this._editRing || { cx: 498, cy: 585, r: 32, skewX: 0, skewY: 0 };
-    const ringColor = '#00d4aa';
+    const ringColor = '#00d4b8';
     const skX = ring.skewX || 0;
     const skY = ring.skewY || 0;
     const ringTransform = (skX || skY)
@@ -832,7 +874,7 @@ class SigenergyHouseCard extends LitElement {
     for (const [name, points] of Object.entries(this._editPaths)) {
       result[name] = this._pointsToPath(points);
     }
-    console.info('%c CABLE EDITOR — Current Paths:', 'color: #00d4aa; font-weight: bold;');
+    console.info('%c CABLE EDITOR — Current Paths:', 'color: #00d4b8; font-weight: bold;');
     console.info(JSON.stringify(result, null, 2));
     // Also build the YAML config snippet
     let yaml = 'paths:\n';
@@ -842,9 +884,9 @@ class SigenergyHouseCard extends LitElement {
     // Include ring position
     const ring = this._editRing;
     yaml += `soc_ring_cx: ${Math.round(ring.cx)}\nsoc_ring_cy: ${Math.round(ring.cy)}\nsoc_ring_r: ${Math.round(ring.r)}\nsoc_ring_skew_x: ${(ring.skewX || 0).toFixed(1)}\nsoc_ring_skew_y: ${(ring.skewY || 0).toFixed(1)}\n`;
-    console.info('%c YAML Config:', 'color: #f5c542; font-weight: bold;');
+    console.info('%c YAML Config:', 'color: #F0D850; font-weight: bold;');
     console.info(yaml);
-    console.info('%c SoC Ring Position:', 'color: #00d4aa; font-weight: bold;');
+    console.info('%c SoC Ring Position:', 'color: #00d4b8; font-weight: bold;');
     console.info(JSON.stringify(ring));
   }
 
@@ -943,7 +985,7 @@ class SigenergyHouseCard extends LitElement {
           url_path: 'dashboard-sigenergy',
           config: dashConfig,
         });
-        console.info('%c PATHS APPLIED & SAVED', 'color: #00d4aa; font-weight: bold;');
+        console.info('%c PATHS APPLIED & SAVED', 'color: #00d4b8; font-weight: bold;');
         return; // HA will rebuild the card with new config
       }
     } catch (err) {
@@ -978,12 +1020,17 @@ class SigenergyHouseCard extends LitElement {
   _renderLabel(key) {
     const def = LABELS[key];
     if (!def) return "";
-    if ((key === "ev" || key === "ac") && !this._config.features.ev_charger) return "";
+    if (key === "ev" && !this._showEvVehicle) return "";
+    if (key === "ac" && !this._showEvCharger) return "";
     if (key === "heatpump" && !this._config.features.heat_pump) return "";
 
     let primary = "";
-    let secondary = key === "battery" && this._config.battery_label
+    let secondary = key === "ac" && this._config.ev_charger_label
+      ? this._config.ev_charger_label
+      : key === "battery" && this._config.battery_label
       ? this._config.battery_label
+      : key === "heatpump" && this._config.heat_pump_label
+      ? this._config.heat_pump_label
       : def.label;
     let statusLine = "";
     let runtimeLine = "";
@@ -1008,11 +1055,11 @@ class SigenergyHouseCard extends LitElement {
         if (this._isDischarging) {
           statusLine = "Discharging";
           if (rt) runtimeLine = `${rt.timeStr} to ${rt.targetSoc}%${rt.targetLabel || ''}`;
-          color = this._config.colors.battery_discharge;
+          color = this._config.swap_battery_colors ? this._config.colors.battery_charge : this._config.colors.battery_discharge;
         } else if (this._isCharging) {
           statusLine = "Charging";
           if (rt) runtimeLine = `${rt.timeStr} to ${rt.targetSoc}%${rt.targetLabel || ''}`;
-          color = this._config.colors.battery_charge;
+          color = this._config.swap_battery_colors ? this._config.colors.battery_discharge : this._config.colors.battery_charge;
         }
         break;
       }
@@ -1028,7 +1075,19 @@ class SigenergyHouseCard extends LitElement {
         }
         break;
       }
-      case "ev":
+      case "ev": {
+        const evSocVal = this._config.entities.ev_soc ? this._stateNum(this._config.entities.ev_soc) : null;
+        const evRangeVal = this._config.entities.ev_range ? this._stateNum(this._config.entities.ev_range) : null;
+        if (evSocVal != null && !Number.isNaN(evSocVal)) {
+          primary = `${Math.round(evSocVal)}%`;
+        } else {
+          primary = this._formatPower(this._evPower, this._config.entities.ev_charger_power);
+        }
+        if (evRangeVal != null && !Number.isNaN(evRangeVal)) runtimeLine = `${Math.round(evRangeVal)} km`;
+        if (this._isEvCharging) statusLine = "Charging";
+        else if (this._isEvConnectedByState) statusLine = "Connected";
+        break;
+      }
       case "ac":
         primary = this._formatPower(this._evPower, this._config.entities.ev_charger_power);
         if (this._isEvCharging) statusLine = "Charging";
@@ -1080,7 +1139,7 @@ class SigenergyHouseCard extends LitElement {
           <img class="layer-img" src="${this._baseImage}" />
           <img class="layer-img" src="${this._sigenstorImage}" />
           <img class="layer-img" src="${this._ammeterImage}" />
-          ${this._hasEv ? html`<img class="layer-img" src="${this._acChargerImage}" />` : ''}
+          ${this._showEvCharger ? html`<img class="layer-img" src="${this._acChargerImage}" />` : ''}
 
           <svg class="flow-svg ${this._isEditMode ? 'edit-active' : ''}"
                viewBox="0 0 ${VB_W} ${VB_H}"
@@ -1120,7 +1179,7 @@ class SigenergyHouseCard extends LitElement {
               <button class="copy-btn" @click="${this._onCopyPaths}">Copy Paths</button>
               ${Object.keys(this._editPaths).map(name => html`
                 <span class="path-controls">
-                  <span class="path-name" style="color: ${{solar:'#f5c542',home:'#3498db',battery:'#2ecc71',grid:'#e74c3c',ev:'#ff69b4'}[name]||'#fff'}">${name}</span>
+                  <span class="path-name" style="color: ${{solar:'#F0D850',home:'#3498db',battery:'#2ecc71',grid:'#e74c3c',ev:'#ff69b4'}[name]||'#fff'}">${name}</span>
                   <button class="sm-btn" data-path="${name}" @click="${this._onAddPoint}">+pt</button>
                   <button class="sm-btn" data-path="${name}" @click="${this._onRemovePoint}">-pt</button>
                 </span>
@@ -1222,7 +1281,7 @@ class SigenergyHouseCard extends LitElement {
       .editor-title {
         font-size: 14px;
         font-weight: 700;
-        color: #00d4aa;
+        color: #00d4b8;
         margin-bottom: 4px;
       }
 
@@ -1240,7 +1299,7 @@ class SigenergyHouseCard extends LitElement {
       }
 
       .copy-btn {
-        background: #00d4aa;
+        background: #00d4b8;
         color: #1a1f2e;
         border: none;
         padding: 6px 14px;
@@ -1248,10 +1307,11 @@ class SigenergyHouseCard extends LitElement {
         font-weight: 700;
         font-size: 12px;
         cursor: pointer;
+        transition: background 0.2s;
       }
 
       .copy-btn:hover {
-        background: #00f0c0;
+        background: #00d4b8;
       }
 
       .apply-btn {
@@ -1263,6 +1323,7 @@ class SigenergyHouseCard extends LitElement {
         font-weight: 700;
         font-size: 12px;
         cursor: pointer;
+        transition: background 0.2s;
       }
 
       .apply-btn:hover {
@@ -1288,6 +1349,7 @@ class SigenergyHouseCard extends LitElement {
         border-radius: 3px;
         font-size: 10px;
         cursor: pointer;
+        transition: background 0.2s;
       }
 
       .sm-btn:hover {
@@ -1420,7 +1482,7 @@ window.customCards.push({
 });
 
 console.info(
-  "%c SIGENERGY-HOUSE-CARD %c v3.16.2 ",
-  "color: white; background: #00d4aa; font-weight: bold; padding: 2px 6px; border-radius: 3px 0 0 3px;",
-  "color: #00d4aa; background: #1a1f2e; font-weight: bold; padding: 2px 6px; border-radius: 0 3px 3px 0;"
+  "%c SIGENERGY-HOUSE-CARD %c v3.17.0 ",
+  "color: white; background: #00d4b8; font-weight: bold; padding: 2px 6px; border-radius: 3px 0 0 3px;",
+  "color: #00d4b8; background: #1a1f2e; font-weight: bold; padding: 2px 6px; border-radius: 0 3px 3px 0;"
 );
