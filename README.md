@@ -5,14 +5,15 @@
 
 <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=SpengeSec&repository=Genergy-Dashboard&category=integration" target="_blank" rel="noopener"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store." /></a>
 
-> **⚠️ Active Development**
+> **⚠️ Pre-release work in progress**
 >
-> This project is under active development. The **Overview** and **Settings** views are fully functional.
-> Other views (History, Devices, etc.) may be incomplete or under construction.
+> The `v2.23.0-pre.1` release is a **pre-release** for testing the new interactive dashboard functions. For now, please do **not** open bug reports about the pre-release-only functions listed below; they are still being refined and may change before the stable release.
 >
-> Feedback and bug reports are welcome!
+> Stable-release feedback and reproducible issues outside these pre-release functions remain welcome.
 
 A fully configurable Home Assistant Lovelace dashboard for monitoring solar, battery, and grid energy systems. Features animated power flow visualization, real-time energy charts with EMHASS, HAEO, and Energy Manager forecast overlays, battery pack monitoring, and a 4-tab settings UI for complete customization — no YAML editing required.
+
+> **Pre-release highlights (`v2.23.0-pre.1`)**: interactive house-card detail modals, smart-load modal controls, forecast modal actions, draggable house-card label positions, visual click-zone editing, a smaller heat-pump house-card image, battery-stack details inside the battery modal, and safer ApexCharts generation that skips unavailable/missing entities.
 
 > **Inverter-agnostic**: Works with **any** solar/battery inverter (Deye, SunSynk, Sigenergy, Huawei, Fronius, SolarEdge, Enphase, etc.) — just map your entity IDs in the Settings tab.
 

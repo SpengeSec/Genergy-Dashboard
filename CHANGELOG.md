@@ -2,6 +2,24 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.23.0-pre.1] - 2026-05-08
+
+> **Pre-release / work in progress:** Please do **not** open bug reports for the new pre-release functions in this section yet. They are intentionally being published early for validation and may change before the stable release.
+
+### Added — Interactive Dashboard Pre-release
+- **Interactive House Card Modals** — Clicking Solar, Home, Battery, Grid, EV, or Heat Pump labels can now open a detailed modal with device-specific wording and live entity context.
+- **Battery Modal Stack Details** — The battery modal now embeds the existing battery-stack/device card when available, bringing pack-level detail into the contextual battery view.
+- **Forecast Modal Actions** — Added a Lovelace-compatible forecast modal trigger with actions for opening forecast details and focusing the energy chart area.
+- **Smart Load Modals and Controls** — Smart-load cards can open detail modals and optionally expose an `entity_switch`/control entity for toggle actions from the modal.
+- **Visual Click-Zone Editor** — Developer settings now include a click-zone editor for customizing the interactive regions on the house card.
+- **Draggable Label Position Editor** — Developer settings now include a label-position editor for moving house-card labels/values without hand-editing YAML.
+- **Heat Pump House Visual Update** — The house card now uses the smaller smart-load heat-pump asset and positions it as a side-mounted exterior device instead of the oversized generic image.
+
+### Fixed
+- **ApexCharts Missing Entity Errors** — Generated chart series now skip missing, `unknown`, or `unavailable` entities to avoid blocking the chart with stale EMHASS placeholder sensors.
+- **Forecast Trigger Configuration Error** — The forecast modal button now implements the required Lovelace custom-card API methods.
+- **Source Map Noise** — Added release notes for third-party source-map 404 mitigation used during validation.
+
 ## [2.22.0] - 2026-05-04
 
 ### Added — EV, Battery, and Chart Controls

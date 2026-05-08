@@ -57,6 +57,7 @@ const DEFAULT_CONFIG = {
     grid: true,
     hide_cables: false,
     battery_runtime: true,
+    interactive_house: true,
   },
   entities: {
     solar_power: "sensor.deyeinvertermaster_pv_power",
@@ -88,6 +89,15 @@ const DEFAULT_CONFIG = {
     heat_pump: "#e67e22",
     cable_static: "#888888",
   },
+  click_zones: {
+    solar:    { x: 300, y: 0,   w: 350, h: 200, color: '#F0D850', label: 'SOLAR' },
+    home:     { x: 500, y: 0,   w: 300, h: 200, color: '#3498db', label: 'HOME' },
+    battery:  { x: 200, y: 650, w: 300, h: 280, color: '#2ecc71', label: 'BATTERY' },
+    grid:     { x: 700, y: 550, w: 300, h: 280, color: '#e74c3c', label: 'GRID' },
+    ev:       { x: 0,   y: 450, w: 200, h: 250, color: '#ff69b4', label: 'EV' },
+    heatpump: { x: 850, y: 350, w: 250, h: 250, color: '#e67e22', label: 'HEAT PUMP' },
+  },
+  label_positions: {},
   swap_battery_colors: false,
   ev_charger_label: "",
 };
@@ -152,6 +162,7 @@ class SigenergyHouseCard extends LitElement {
       _editPaths: { type: Object, state: true },
       _dragging: { type: Object, state: true },
       _editRing: { type: Object, state: true },
+      _hpDragging: { type: Object, state: true },
     };
   }
 
@@ -174,6 +185,8 @@ class SigenergyHouseCard extends LitElement {
       features: { ...DEFAULT_CONFIG.features, ...(config.features || {}) },
       entities: { ...DEFAULT_CONFIG.entities, ...(config.entities || {}) },
       colors: { ...DEFAULT_CONFIG.colors, ...(config.colors || {}) },
+      click_zones: { ...DEFAULT_CONFIG.click_zones, ...(config.click_zones || {}) },
+      label_positions: { ...DEFAULT_CONFIG.label_positions, ...(config.label_positions || {}) },
     };
     // Initialize editable paths from config overrides or defaults
     this._initEditPaths();
@@ -218,6 +231,29 @@ class SigenergyHouseCard extends LitElement {
     return points.map((p, i) =>
       `${i === 0 ? 'M' : 'L'} ${Math.round(p.x)} ${Math.round(p.y)}`
     ).join(' ');
+  }
+
+  _defaultClickZones() {
+    return {
+      solar:    { x: 300, y: 0,   w: 350, h: 200, color: '#F0D850', label: 'SOLAR' },
+      home:     { x: 500, y: 0,   w: 300, h: 200, color: '#3498db', label: 'HOME' },
+      battery:  { x: 200, y: 650, w: 300, h: 280, color: '#2ecc71', label: 'BATTERY' },
+      grid:     { x: 700, y: 550, w: 300, h: 280, color: '#e74c3c', label: 'GRID' },
+      ev:       { x: 0,   y: 450, w: 200, h: 250, color: '#ff69b4', label: 'EV' },
+      heatpump: { x: 850, y: 350, w: 250, h: 250, color: '#e67e22', label: 'HEAT PUMP' },
+    };
+  }
+
+  get _isZoneEditMode() {
+    return this._config.edit_zones === true;
+  }
+
+  get _isLabelEditMode() {
+    return this._config.edit_labels === true;
+  }
+
+  get _isAssetEditMode() {
+    return this._config.edit_assets === true;
   }
 
   _getEditPath(name) {
@@ -539,7 +575,7 @@ class SigenergyHouseCard extends LitElement {
   get _sigenstorImage() { return `${this._config.image_path}/sigenstor_home.png`; }
   get _ammeterImage() { return `${this._config.image_path}/ammeter_home.png`; }
   get _acChargerImage() { return `${this._config.image_path}/ac_charger_bg.png`; }
-  get _heatPumpImage() { return `${this._config.image_path}/device_heat_pump.png`; }
+  get _heatPumpImage() { return `${this._config.image_path}/smart_load/heat_pump_big.png`; }
 
   // ── Render: SVG static cable backbones ───────────────────────────────────
   _renderStaticPaths() {
@@ -1017,6 +1053,233 @@ class SigenergyHouseCard extends LitElement {
   }
 
   // ── Render: labels ───────────────────────────────────────────────────────
+  _renderClickZones() {
+    if (!this._config.features?.interactive_house) return svg``;
+    const zones = Object.entries({ ...this._defaultClickZones(), ...(this._config.click_zones || {}) })
+      .map(([key, z]) => ({ key, ...z }));
+
+    return svg`
+      <g class="click-zones">
+        ${zones.filter(z => {
+          if (z.key === 'ev' && !this._showEvVehicle && !this._showEvCharger) return false;
+          if (z.key === 'heatpump' && !this._config.features.heat_pump) return false;
+          if (z.key === 'grid' && !this._config.features.grid) return false;
+          return true;
+        }).map(z => svg`
+          <rect
+            x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}"
+            fill="${this._isZoneEditMode ? z.color : 'transparent'}"
+            fill-opacity="${this._isZoneEditMode ? '0.12' : '0'}"
+            stroke="${this._isZoneEditMode ? z.color : 'none'}"
+            stroke-width="${this._isZoneEditMode ? '3' : '0'}"
+            stroke-dasharray="${this._isZoneEditMode ? '10 8' : '0'}"
+            style="cursor: ${this._isZoneEditMode ? 'move' : 'pointer'}; pointer-events: all;"
+            @pointerdown="${(e) => this._isZoneEditMode && this._onZoneDragStart(e, z.key, 'move')}"
+            @click="${(e) => {
+              if (this._isZoneEditMode) return;
+              e.stopPropagation();
+              const def = this._defaultClickZones()[z.key] || {};
+              this.dispatchEvent(new CustomEvent('genergy-modal', {
+                bubbles: true,
+                composed: true,
+                detail: {
+                  type: z.key,
+                  label: def.label,
+                  color: def.color,
+                  config: this._config,
+                  hass: this.hass,
+                }
+              }));
+            }}"
+          />
+          ${this._isZoneEditMode ? svg`
+            <circle cx="${z.x + z.w}" cy="${z.y + z.h}" r="16"
+                    fill="${z.color}" fill-opacity="0.35" stroke="${z.color}" stroke-width="3"
+                    style="cursor: nwse-resize; pointer-events: all;"
+                    @pointerdown="${(e) => this._onZoneDragStart(e, z.key, 'resize')}" />
+            <text x="${z.x + 10}" y="${z.y + 28}" fill="${z.color}" font-size="24" font-weight="700"
+                  style="pointer-events:none;text-shadow:0 2px 4px rgba(0,0,0,.8);">${z.label || z.key}</text>
+          ` : svg``}
+        `)}
+      </g>
+    `;
+  }
+
+  _onZoneDragStart(e, key, mode) {
+    e.preventDefault();
+    e.stopPropagation();
+    const start = this._svgPoint(e);
+    const zones = { ...this._defaultClickZones(), ...(this._config.click_zones || {}) };
+    const z = { ...(zones[key] || {}) };
+    this._zoneDragging = { key, mode, start, original: z };
+    const move = (ev) => this._onZoneDragMove(ev);
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      this._zoneDragging = null;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  _onZoneDragMove(e) {
+    if (!this._zoneDragging) return;
+    const now = this._svgPoint(e);
+    const { key, mode, start, original } = this._zoneDragging;
+    const dx = now.x - start.x;
+    const dy = now.y - start.y;
+    const next = { ...original };
+    if (mode === 'resize') {
+      next.w = Math.max(40, Math.round(original.w + dx));
+      next.h = Math.max(40, Math.round(original.h + dy));
+    } else {
+      next.x = Math.max(0, Math.min(VB_W - next.w, Math.round(original.x + dx)));
+      next.y = Math.max(0, Math.min(VB_H - next.h, Math.round(original.y + dy)));
+    }
+    this._config = {
+      ...this._config,
+      click_zones: { ...(this._config.click_zones || {}), [key]: next },
+    };
+    this.requestUpdate();
+  }
+
+  _onApplyZones() {
+    this.dispatchEvent(new CustomEvent('genergy-zone-editor-save', {
+      bubbles: true,
+      composed: true,
+      detail: { click_zones: this._config.click_zones || {}, hass: this.hass },
+    }));
+  }
+
+  _onCopyZones() {
+    const text = JSON.stringify(this._config.click_zones || {}, null, 2);
+    navigator.clipboard?.writeText(text);
+  }
+
+  _onLabelDragStart(e, key) {
+    if (!this._isLabelEditMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const container = this.shadowRoot.querySelector('.house-container');
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const current = this._config.label_positions?.[key] || LABELS[key] || {};
+    const startLeft = parseFloat(current.left) || 0;
+    const startTop = parseFloat(current.top) || 0;
+    this._labelDragging = { key, rect, startX: e.clientX, startY: e.clientY, startLeft, startTop };
+    const move = (ev) => this._onLabelDragMove(ev);
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      this._labelDragging = null;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  _onLabelDragMove(e) {
+    if (!this._labelDragging) return;
+    const d = this._labelDragging;
+    const dxPct = ((e.clientX - d.startX) / d.rect.width) * 100;
+    const dyPct = ((e.clientY - d.startY) / d.rect.height) * 100;
+    const left = Math.max(0, Math.min(94, d.startLeft + dxPct));
+    const top = Math.max(0, Math.min(94, d.startTop + dyPct));
+    this._config = {
+      ...this._config,
+      label_positions: {
+        ...(this._config.label_positions || {}),
+        [d.key]: { top: `${top.toFixed(1)}%`, left: `${left.toFixed(1)}%` },
+      },
+    };
+    this.requestUpdate();
+  }
+
+  _onApplyLabels() {
+    this.dispatchEvent(new CustomEvent('genergy-label-editor-save', {
+      bubbles: true,
+      composed: true,
+      detail: { label_positions: this._config.label_positions || {}, hass: this.hass },
+    }));
+  }
+
+  _onCopyLabels() {
+    const text = JSON.stringify(this._config.label_positions || {}, null, 2);
+    navigator.clipboard?.writeText(text);
+  }
+
+  // ── Heat pump asset position editor ──────────────────────────────────────
+
+  _getHpInlineStyle() {
+    const pos = this._config.heat_pump_position;
+    if (!pos) return '';
+    const top = pos.top ?? '53%';
+    const right = pos.right ?? '9%';
+    const width = pos.width ?? '10%';
+    const p = pos.perspective ?? 600;
+    const ry = pos.rotateY ?? -30;
+    const rx = pos.rotateX ?? 5;
+    const rz = pos.rotateZ ?? -1;
+    return `top:${top};right:${right};width:${width};transform:perspective(${p}px) rotateY(${ry}deg) rotateX(${rx}deg) rotateZ(${rz}deg);transform-origin:bottom left;`;
+  }
+
+  _onHpDragStart(e) {
+    if (!this._isAssetEditMode) return;
+    e.preventDefault(); e.stopPropagation();
+    const container = this.shadowRoot.querySelector('.house-container');
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const pos = this._config.heat_pump_position || {};
+    const startRight = parseFloat(pos.right ?? 9);
+    const startTop = parseFloat(pos.top ?? 53);
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      const right = Math.max(0, Math.min(90, startRight - (dx / rect.width * 100)));
+      const top = Math.max(0, Math.min(90, startTop + (dy / rect.height * 100)));
+      this._config = { ...this._config, heat_pump_position: {
+        ...(this._config.heat_pump_position || {}),
+        right: right.toFixed(1) + '%',
+        top: top.toFixed(1) + '%',
+      }};
+      this.requestUpdate();
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  _onHpSlider(prop, value, unit) {
+    const strVal = unit ? value + unit : parseFloat(value);
+    this._config = { ...this._config, heat_pump_position: {
+      ...(this._config.heat_pump_position || {}),
+      [prop]: strVal,
+    }};
+    this.requestUpdate();
+  }
+
+  _onApplyAssets() {
+    this.dispatchEvent(new CustomEvent('genergy-asset-position-save', {
+      bubbles: true, composed: true,
+      detail: { heat_pump_position: this._config.heat_pump_position || {}, hass: this.hass },
+    }));
+    const btn = this.shadowRoot.querySelector('.apply-asset-btn');
+    if (btn) { btn.textContent = '✓ Saved!'; setTimeout(() => { btn.textContent = '✓ Save Position'; }, 1500); }
+  }
+
+  _onCopyAssets() {
+    const pos = this._config.heat_pump_position || {};
+    const text = JSON.stringify(pos, null, 2);
+    const copyFallback = (s) => { const ta = document.createElement('textarea'); ta.value = s; ta.style.position='fixed'; ta.style.left='-9999px'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); };
+    try { navigator.clipboard?.writeText(text).catch(() => copyFallback(text)); } catch(e) { copyFallback(text); }
+    const btn = this.shadowRoot.querySelector('.copy-asset-btn');
+    if (btn) { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy Config'; }, 1500); }
+  }
+
   _renderLabel(key) {
     const def = LABELS[key];
     if (!def) return "";
@@ -1098,8 +1361,30 @@ class SigenergyHouseCard extends LitElement {
         break;
     }
 
+    const labelPos = this._config.label_positions?.[key] || def;
+    const _isInteractive = this._config.features?.interactive_house && !this._isLabelEditMode;
+    const _clickHandler = _isInteractive ? (e) => {
+      e.stopPropagation();
+      this.dispatchEvent(new CustomEvent('genergy-modal', {
+        bubbles: true,
+        composed: true,
+        detail: {
+          type: key === 'ac' ? 'ev' : key,
+          label: secondary,
+          primary,
+          statusLine,
+          color,
+          config: this._config,
+          hass: this.hass,
+        }
+      }));
+    } : null;
+
     return html`
-      <div class="label" style="top: ${def.top}; left: ${def.left};">
+      <div class="label ${_isInteractive ? 'interactive' : ''} ${this._isLabelEditMode ? 'label-editing' : ''}"
+           style="top: ${labelPos.top || def.top}; left: ${labelPos.left || def.left};"
+           @pointerdown="${(e) => this._onLabelDragStart(e, key)}"
+           @click="${_clickHandler}">
         <div class="label-primary" style="color: ${color}">${primary}</div>
         <div class="label-secondary">${secondary}</div>
         ${statusLine ? html`<div class="label-status" style="color: ${color}">${statusLine}</div>` : ""}
@@ -1140,8 +1425,14 @@ class SigenergyHouseCard extends LitElement {
           <img class="layer-img" src="${this._sigenstorImage}" />
           <img class="layer-img" src="${this._ammeterImage}" />
           ${this._showEvCharger ? html`<img class="layer-img" src="${this._acChargerImage}" />` : ''}
+          ${this._config.features.heat_pump ? html`<img
+            class="heat-pump-img${this._isAssetEditMode ? ' asset-editing' : ''}"
+            src="${this._heatPumpImage}"
+            style="${this._getHpInlineStyle()}"
+            @error="${(e) => e.target.style.display = 'none'}"
+            @pointerdown="${this._isAssetEditMode ? (e) => this._onHpDragStart(e) : null}" />` : ''}
 
-          <svg class="flow-svg ${this._isEditMode ? 'edit-active' : ''}"
+          <svg class="flow-svg ${this._isEditMode || this._isZoneEditMode ? 'edit-active' : ''}"
                viewBox="0 0 ${VB_W} ${VB_H}"
                preserveAspectRatio="xMidYMid meet">
             <defs>
@@ -1155,10 +1446,11 @@ class SigenergyHouseCard extends LitElement {
             </defs>
             ${this._renderStaticPaths()}
             <g>
-              ${this._isEditMode ? svg`` : this._renderComets()}
+            ${this._isEditMode || this._isZoneEditMode ? svg`` : this._renderComets()}
             </g>
             ${this._isEditMode ? svg`` : this._renderSocRing()}
             ${this._renderEditor()}
+            ${this._renderClickZones()}
           </svg>
 
           ${this._renderLabel("solar")}
@@ -1170,7 +1462,25 @@ class SigenergyHouseCard extends LitElement {
           ${this._renderLabel("heatpump")}
           ${this._renderWeather()}
         </div>
-        ${this._isEditMode ? html`
+          ${this._isLabelEditMode ? html`
+          <div class="editor-panel">
+            <div class="editor-title">Label Position Editor</div>
+            <div class="editor-hint">Drag the Solar/Home/Battery/Grid/EV/Heat Pump text blocks to reposition labels and live values.</div>
+            <div class="editor-actions">
+              <button class="apply-btn" @click="${this._onApplyLabels}">✓ Save Labels</button>
+              <button class="copy-btn" @click="${this._onCopyLabels}">Copy Labels</button>
+            </div>
+          </div>
+        ` : this._isZoneEditMode ? html`
+          <div class="editor-panel">
+            <div class="editor-title">Clickable Zone Editor</div>
+            <div class="editor-hint">Drag translucent rectangles to move click regions. Drag the round lower-right handle to resize.</div>
+            <div class="editor-actions">
+              <button class="apply-btn" @click="${this._onApplyZones}">✓ Save Zones</button>
+              <button class="copy-btn" @click="${this._onCopyZones}">Copy Zones</button>
+            </div>
+          </div>
+        ` : this._isEditMode ? html`
           <div class="editor-panel">
             <div class="editor-title">Cable Path Editor</div>
             <div class="editor-hint">Drag circles to reposition cable points. Coordinates snap to grid of 5.</div>
@@ -1184,6 +1494,47 @@ class SigenergyHouseCard extends LitElement {
                   <button class="sm-btn" data-path="${name}" @click="${this._onRemovePoint}">-pt</button>
                 </span>
               `)}
+            </div>
+          </div>
+        ` : this._isAssetEditMode && this._config.features.heat_pump ? html`
+          <div class="editor-panel">
+            <div class="editor-title">Heat Pump Asset Editor</div>
+            <div class="editor-hint">Drag the heat pump image to reposition. Sliders adjust size and perspective.</div>
+            <div style="display:grid;gap:8px;margin:10px 0;">
+              <label style="font-size:11px;color:#8892a4;display:flex;flex-direction:column;gap:2px;">
+                Width: ${parseFloat(this._config.heat_pump_position?.width ?? 10).toFixed(1)}%
+                <input type="range" min="3" max="25" step="0.5"
+                  value="${parseFloat(this._config.heat_pump_position?.width ?? 10)}"
+                  @input="${(e) => this._onHpSlider('width', e.target.value, '%')}" style="width:100%" />
+              </label>
+              <label style="font-size:11px;color:#8892a4;display:flex;flex-direction:column;gap:2px;">
+                Perspective: ${this._config.heat_pump_position?.perspective ?? 600}px
+                <input type="range" min="100" max="2000" step="50"
+                  value="${this._config.heat_pump_position?.perspective ?? 600}"
+                  @input="${(e) => this._onHpSlider('perspective', parseInt(e.target.value))}" style="width:100%" />
+              </label>
+              <label style="font-size:11px;color:#8892a4;display:flex;flex-direction:column;gap:2px;">
+                RotateY (side angle): ${this._config.heat_pump_position?.rotateY ?? -30}°
+                <input type="range" min="-90" max="90" step="1"
+                  value="${this._config.heat_pump_position?.rotateY ?? -30}"
+                  @input="${(e) => this._onHpSlider('rotateY', parseInt(e.target.value))}" style="width:100%" />
+              </label>
+              <label style="font-size:11px;color:#8892a4;display:flex;flex-direction:column;gap:2px;">
+                RotateX (tilt): ${this._config.heat_pump_position?.rotateX ?? 5}°
+                <input type="range" min="-45" max="45" step="1"
+                  value="${this._config.heat_pump_position?.rotateX ?? 5}"
+                  @input="${(e) => this._onHpSlider('rotateX', parseInt(e.target.value))}" style="width:100%" />
+              </label>
+              <label style="font-size:11px;color:#8892a4;display:flex;flex-direction:column;gap:2px;">
+                RotateZ (rotation): ${this._config.heat_pump_position?.rotateZ ?? -1}°
+                <input type="range" min="-30" max="30" step="1"
+                  value="${this._config.heat_pump_position?.rotateZ ?? -1}"
+                  @input="${(e) => this._onHpSlider('rotateZ', parseInt(e.target.value))}" style="width:100%" />
+              </label>
+            </div>
+            <div class="editor-actions">
+              <button class="apply-btn apply-asset-btn" @click="${this._onApplyAssets}">✓ Save Position</button>
+              <button class="copy-btn copy-asset-btn" @click="${this._onCopyAssets}">Copy Config</button>
             </div>
           </div>
         ` : html``}
@@ -1244,16 +1595,23 @@ class SigenergyHouseCard extends LitElement {
 
       .heat-pump-img {
         position: absolute;
-        right: 16%;
-        top: 30%;
-        width: 6%;
+        right: 9%;
+        top: 53%;
+        width: 10%;
         height: auto;
         pointer-events: none;
-        z-index: 5;
-        transform: perspective(800px) rotateY(-15deg) skewY(-12deg);
-        transform-origin: bottom center;
-        filter: drop-shadow(2px 4px 6px rgba(0,0,0,0.5));
-        opacity: 0.92;
+        z-index: 6;
+        transform: perspective(600px) rotateY(-30deg) rotateX(5deg) rotateZ(-1deg);
+        transform-origin: bottom left;
+        filter: drop-shadow(3px 6px 8px rgba(0,0,0,0.6));
+        opacity: 0.95;
+      }
+
+      .heat-pump-img.asset-editing {
+        pointer-events: auto !important;
+        cursor: grab !important;
+        outline: 2px dashed #e67e22;
+        outline-offset: 3px;
       }
 
       .flow-svg {
@@ -1382,6 +1740,40 @@ class SigenergyHouseCard extends LitElement {
         z-index: 20;
         pointer-events: none;
         min-width: 80px;
+      }
+
+      .label.interactive {
+        pointer-events: all;
+        cursor: pointer;
+        transition: transform 0.15s ease, filter 0.15s ease;
+        border-radius: 8px;
+        padding: 4px 6px;
+        margin: -4px -6px;
+      }
+
+      .label.interactive:hover {
+        transform: scale(1.08);
+        filter: brightness(1.2);
+        background: rgba(0, 212, 184, 0.08);
+      }
+
+      .label.interactive:active {
+        transform: scale(0.96);
+      }
+
+      .label.label-editing {
+        pointer-events: all;
+        cursor: move;
+        border-radius: 8px;
+        padding: 4px 6px;
+        margin: -4px -6px;
+        outline: 1px dashed rgba(0, 212, 184, 0.65);
+        background: rgba(0, 212, 184, 0.08);
+        user-select: none;
+      }
+
+      .label.label-editing:hover {
+        background: rgba(0, 212, 184, 0.16);
       }
 
       .label-primary {
