@@ -1476,7 +1476,7 @@ class HaeoEventsCard extends HTMLElement {
 
         const importing = gridKw > 0.1;
         const exporting = gridKw < -0.1;
-        const cost = importing ? Math.abs(gridKw) * buyP * stepH : exporting ? -(gridKw * sellP * stepH) : 0;
+        const cost = importing ? Math.abs(gridKw) * buyP * stepH : exporting ? gridKw * sellP * stepH : 0;
 
         if (!pastDailyCosts.hasOwnProperty(dayStr)) {
           pastDailyOrder.push(dayStr);
@@ -1636,7 +1636,7 @@ class HaeoEventsCard extends HTMLElement {
         const stepH    = 5 / 60;
         const importing = gridKw > 0.1;
         const exporting = gridKw < -0.1;
-        const slotCost  = importing ? Math.abs(gridKw) * buyP * stepH : exporting ? -(gridKw * sellP * stepH) : 0;
+        const slotCost  = importing ? Math.abs(gridKw) * buyP * stepH : exporting ? gridKw * sellP * stepH : 0;
         const costFmt   = _haeo_fmtCost(slotCost);
         const costCol   = costFmt.col || (slotCost > 0.0001 ? c.cost : c.txt);
 
