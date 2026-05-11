@@ -6642,26 +6642,32 @@ return forecast.map(function(d) {
       const mainLayout = overviewView.cards[0];
       if (!mainLayout || mainLayout.type !== 'custom:layout-card') throw new Error('Layout card not found');
 
-      // Responsive grid: 3 columns on desktop (house|sankey|battery), 2 on tablet landscape, 1 on mobile/tablet portrait
+      // Responsive grid: keep the two primary overview cards (house + energy flow)
+      // in a balanced two-column row. The battery card follows below instead of
+      // reserving a mostly empty third desktop column.
       // iPad portrait (768-834px) stays single column to avoid cramped layout
       if (mainLayout.layout) {
         mainLayout.layout['grid-template-columns'] = '1fr';
+        mainLayout.layout['grid-gap'] = '16px';
         mainLayout.layout['align-items'] = 'start';
         if (mainLayout.layout.mediaquery) {
           mainLayout.layout.mediaquery['(min-width: 1025px)'] = {
-            'grid-template-columns': '1fr 1fr',
+            'grid-template-columns': 'minmax(420px, 0.95fr) minmax(520px, 1.25fr)',
+            'grid-gap': '16px',
             'align-items': 'start'
           };
           mainLayout.layout.mediaquery['(min-width: 1201px)'] = {
-            'grid-template-columns': '1fr 1fr 1fr',
+            'grid-template-columns': 'minmax(460px, 0.95fr) minmax(620px, 1.35fr)',
             'grid-template-rows': 'auto',
+            'grid-gap': '16px',
             'align-items': 'start'
           };
           mainLayout.layout.mediaquery['(min-width: 1800px)'] = {
-            'grid-template-columns': '1fr 1fr 1fr',
+            'grid-template-columns': 'minmax(560px, 0.95fr) minmax(780px, 1.35fr)',
             'grid-template-rows': 'auto',
             'max-width': '2200px',
             'margin': '0 auto',
+            'grid-gap': '18px',
             'align-items': 'start'
           };
         }
@@ -6840,7 +6846,7 @@ return forecast.map(function(d) {
       if (forecastModalCard) houseStack.push(forecastModalCard);
 
       if (solcastCard) houseStack.push(solcastCard);
-      newCards.push({ type: 'vertical-stack', cards: houseStack });
+      newCards.push({ type: 'vertical-stack', cards: houseStack, view_layout: { 'grid-column': '1' } });
 
       // Card 1: Sankey (rebuild from store entities)
       // Date navigation — HA's built-in energy-date-selection card for historical date picking
@@ -7060,7 +7066,7 @@ return forecast.map(function(d) {
         nodes: _panelNodes
       };
 
-      newCards.push({ type: 'vertical-stack', cards: [sankeyHeader, sankeyChart, sankeyInfoPanel] });
+      newCards.push({ type: 'vertical-stack', cards: [sankeyHeader, sankeyChart, sankeyInfoPanel], view_layout: { 'grid-column': '2' } });
 
       // Section divider helper — creates a styled label between major card groups
       const _sectionDivider = (label, icon) => ({
@@ -7096,7 +7102,7 @@ return forecast.map(function(d) {
       const _defaultBatteryCard = { type: 'vertical-stack', cards: [{ type: 'custom:sigenergy-device-card', battery_packs: f.battery_packs || 2 }] };
       const batteryCard = _findBatteryCard(mainLayout.cards) || _defaultBatteryCard;
       // Push battery card as a separate item — grid handles 3-col layout
-      newCards.push(batteryCard);
+      newCards.push({ ...batteryCard, view_layout: { 'grid-column': '1 / -1' } });
 
       // Card 3: Apex chart + self-sufficiency (full width)
       newCards.push({ ..._sectionDivider('FORECAST', '📈'), view_layout: { 'grid-column': '1 / -1' } });

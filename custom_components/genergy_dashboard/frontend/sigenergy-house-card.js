@@ -575,7 +575,7 @@ class SigenergyHouseCard extends LitElement {
   get _sigenstorImage() { return `${this._config.image_path}/sigenstor_home.png`; }
   get _ammeterImage() { return `${this._config.image_path}/ammeter_home.png`; }
   get _acChargerImage() { return `${this._config.image_path}/ac_charger_bg.png`; }
-  get _heatPumpImage() { return `${this._config.image_path}/smart_load/heat_pump_big.png`; }
+  get _heatPumpImage() { return `${this._config.image_path}/smart_load/heat_pump_mid.png`; }
 
   // ── Render: SVG static cable backbones ───────────────────────────────────
   _renderStaticPaths() {
@@ -1547,10 +1547,11 @@ class SigenergyHouseCard extends LitElement {
     return css`
       :host {
         display: block;
-        max-width: 680px;
+        width: 100%;
+        max-width: none;
         align-self: flex-start;
-        margin-right: auto;
-        padding: 16px 8px 0 32px;
+        margin: 0;
+        padding: 12px 0 0 0;
         box-sizing: border-box;
         overflow: hidden;
       }
@@ -1595,13 +1596,13 @@ class SigenergyHouseCard extends LitElement {
 
       .heat-pump-img {
         position: absolute;
-        right: 9%;
-        top: 53%;
-        width: 10%;
+        right: 11.5%;
+        top: 48%;
+        width: 8.5%;
         height: auto;
         pointer-events: none;
         z-index: 6;
-        transform: perspective(600px) rotateY(-30deg) rotateX(5deg) rotateZ(-1deg);
+        transform: perspective(700px) rotateY(-24deg) rotateX(4deg) rotateZ(-2deg) skewY(-8deg);
         transform-origin: bottom left;
         filter: drop-shadow(3px 6px 8px rgba(0,0,0,0.6));
         opacity: 0.95;
@@ -1841,7 +1842,6 @@ class SigenergyHouseCard extends LitElement {
       @media (max-width: 800px) {
         :host {
           padding: 8px 4px 0 4px;
-          max-width: 100%;
         }
       }
 
