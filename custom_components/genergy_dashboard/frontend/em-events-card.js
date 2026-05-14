@@ -4,7 +4,7 @@
 // Copy to /config/www/em-events-card.js
 // Add resource: /local/em-events-card.js (type: JavaScript module)
 
-const _EMEC_VERSION = 'v2.7.5';
+const _EMEC_VERSION = 'v2.7.5a';
 
 let _EMEC_CUR = '$';
 
@@ -26,7 +26,7 @@ const _EMEC_SENSORS = [
   'sensor.monthly_battery_charge',
   'sensor.monthly_battery_discharge',
   'sensor.daily_consumed_energy',                 // load kWh (resets daily at midnight)
-  'sensor.daily_exported_energy',                 // GloBird super export cap tracking
+  'sensor.daily_exported_energy',                 // Globird super export cap tracking
 ];
 
 const _EMEC_COLOURS = {
@@ -215,11 +215,11 @@ function _emec_inWindow(mins, startMins, endMins) {
 }
 
 // Get provider-aware buy/sell prices for a given timestamp
-// Returns { buyP, sellP, inSuper } — inSuper only meaningful for GloBird
+// Returns { buyP, sellP, inSuper } — inSuper only meaningful for Globird
 function _emec_getPrices(ts, provider, hass, rowBuyP, rowSellP) {
   const mins = _emec_tsToMins(ts);
 
-  if (provider === 'GloBird') {
+  if (provider === 'Globird') {
     // ── Buy price ──
     const peakBuyStart = _emec_timeToMins(hass.states['input_datetime.globird_peak_buy_start']?.state || '16:00:00');
     const peakBuyEnd   = _emec_timeToMins(hass.states['input_datetime.globird_peak_buy_end']?.state   || '23:00:00');
@@ -804,9 +804,9 @@ class EmEventsCard extends HTMLElement {
     const exportLimitDisp = showExportLimit ? fmtKwLimit(exportLimitW / 1000) : null;
     const chargeLimitDisp = showChargeLimit ? fmtKwLimit(chargeLimitKw)       : null;
 
-    // GloBird super export remaining
+    // Globird super export remaining
     let superExportPill = '';
-    if (provider === 'GloBird' && this._hass) {
+    if (provider === 'Globird' && this._hass) {
       const superCapKwh = parseFloat(this._hass.states['input_number.globird_super_max_export']?.state || 10);
       const dailyExported = parseFloat(this._hass.states['sensor.daily_exported_energy']?.state || 0);
       const remaining = Math.max(0, superCapKwh - dailyExported);
@@ -924,7 +924,7 @@ class EmEventsCard extends HTMLElement {
     const pvKw    = row.inputs.pv_kw      || 0;
     const loadKw  = row.inputs.load_kw    || 0;
     const soc     = row.inputs.soc_pct_start || 0;
-    const rowStepH = (row.interval_minutes || meta.step_minutes || 30) / 60;
+    const rowStepH = (row.interval_minutes || meta?.step_minutes || 30) / 60;
     let { buyP, sellP, inSuper, stdSellP, otherSellP, mins, stdStart, stdEnd } = _emec_getPrices(ts, provider, this._hass, row.inputs.buy_price || 0, row.inputs.sell_price || 0);
     const impKw   = row.expected.grid_import_kw      || 0;
     const expKw   = row.expected.grid_export_kw      || 0;
@@ -934,9 +934,9 @@ class EmEventsCard extends HTMLElement {
     const gridKw  = expKw > 0.1 ? -expKw : impKw > 0.1 ? impKw : 0;
     const battKw  = battCKw > 0.1 ? battCKw : battDKw > 0.1 ? -battDKw : 0;
 
-    // GloBird super export cap — track running total
+    // Globird super export cap — track running total
     let capHit = false;
-    if (provider === 'GloBird' && inSuper && expKw > 0.1 && this._hass) {
+    if (provider === 'Globird' && inSuper && expKw > 0.1 && this._hass) {
       const superCapKwh = parseFloat(this._hass.states['input_number.globird_super_max_export']?.state || 10);
       const slotExpKwh = expKw * rowStepH;
       // Read current daily total from sensor
@@ -1012,11 +1012,12 @@ class EmEventsCard extends HTMLElement {
     const summary  = plan?.summary;
     const provider = this._hass?.states['input_select.electricity_provider']?.state || 'Amber Electric';
 
-    const isGloBird = provider === 'GloBird';
+    const isGlobird = provider === 'Globird';
     let timeline, meta, stepH;
 
-    if (isGloBird) {
+    if (isGlobird) {
       const rawBlocks = attr.blocks || [];
+      meta = plan?.meta || { step_minutes: 30 };
       stepH = 0.5;
       timeline = rawBlocks.map(b => {
         const exportKw  = (b.export_w  || 0) / 1000;
@@ -1025,7 +1026,7 @@ class EmEventsCard extends HTMLElement {
         const loadKw    = (b.load_kwh  || 0) * 2;
         return {
           ts:   b.start_local,
-          interval_minutes: meta.step_minutes || 30,  // Include interval in synthetic rows
+          interval_minutes: meta?.step_minutes || 30,  // Include interval in synthetic rows
           mode: b.action === 'charge' ? 'FORCED_CHARGE' :
                 b.action === 'export' ? 'FORCED_EXPORT'  : 'SELF_CONSUMPTION',
           band: b.band,
@@ -1046,7 +1047,6 @@ class EmEventsCard extends HTMLElement {
           },
         };
       });
-      meta = plan?.meta || { step_minutes: 30 };  // Get actual meta from plan, not hardcoded
     } else {
       timeline = plan?.timeline || [];
       meta     = plan?.meta || {};
@@ -1070,7 +1070,7 @@ class EmEventsCard extends HTMLElement {
       const ts      = new Date(row.ts).getTime();
       if (ts < nowTs) continue;
       const day     = new Date(ts).toLocaleDateString('en-CA');
-      const rowStepH = (row.interval_minutes || meta.step_minutes || 30) / 60;
+      const rowStepH = (row.interval_minutes || meta?.step_minutes || 30) / 60;
       const { buyP, sellP } = _emec_getPrices(ts, provider, this._hass, row.inputs.buy_price || 0, row.inputs.sell_price || 0);
       const net = ((row.expected.grid_import_kw || 0) * buyP -
                    (row.expected.grid_export_kw || 0) * sellP) * rowStepH;
@@ -1314,9 +1314,9 @@ class EmEventsCard extends HTMLElement {
         const rawSellP  = parseFloat(_emec_getAt(lookup['sensor.nodered_sellprice'], ts)) || 0;
         let { buyP, sellP, inSuper, stdSellP, otherSellP, mins, stdStart, stdEnd } = _emec_getPrices(ts, provider, this._hass, rawBuyP, rawSellP);
 
-        // GloBird super export cap
+        // Globird super export cap
         let capHit = false;
-        if (provider === 'GloBird' && inSuper) {
+        if (provider === 'Globird' && inSuper) {
           const superCapKwhP = parseFloat(this._hass.states['input_number.globird_super_max_export']?.state || 10);
           const dailyExpP    = parseFloat(_emec_getAt(lookup['sensor.daily_exported_energy'], ts)) || 0;
           if (dailyExpP >= superCapKwhP) {
