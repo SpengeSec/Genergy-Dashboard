@@ -2,6 +2,87 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.23.1] - 2026-07-09
+
+Follow-up release with an optional battery-stack dashboard layout, battery detail-panel improvements, EV-card polish, and a round of fixes on top of `2.23.0`.
+
+### Added
+- **Show Battery Stack on Dashboard** (Settings → Display) — Optional toggle that adds the battery pack stack as a third column beside the energy-flow Sankey on wide screens (≥ 1500 px), aligned with the chart and responsive/mobile-first (it stacks below on smaller screens). Off by default; when off the battery stack stays in the battery detail modal. Layout uses only standard grid media queries, verified in Chromium and WebKit/Safari with no horizontal overflow.
+- **Battery pack detail entity overrides** — Optional per-pack **Voltage / Current / Power / SoH / Temperature** entity fields (Settings → Entities → 🔋 Battery System, up to 8 packs) for BMS whose sensor names don't follow the auto-detected pattern. Auto-detection stays the default; overrides only apply when set.
+
+### Fixed
+- **Sankey node labels over-extending** — Node bars are now sized to the actual connecting-flow throughput, so a label's colored panel ends exactly where its flows end instead of hanging below them.
+- **Battery pack detail rows showing "—"** — The per-pack detail entity derivation now validates candidate names against entities that actually exist, so BMS that keep a `_view_` segment on their sibling sensors (e.g. Gobel) resolve voltage / current / SoH / power / temperature / cell data correctly.
+- **"Number of EV Chargers" reverting to 1** — The selector's change handler was bound in the wrong settings tab and never fired; the setting now persists.
+
+### Changed
+- **EV charger cards are now conditional** — The EV Chargers panel only renders a card for a charger that has entities configured, and hides it when the charger is disconnected/unavailable — no more "Not configured" placeholder cards.
+- **Battery card compact (mobile) layout** — The Inverter / Batt pills are now tap-to-expand for per-pack detail, matching the wide layout.
+
+## [2.23.0] - 2026-07-08
+
+Stable release finalizing the interactive dashboard line (`2.23.0-pre.1`), with new EV, Sankey, event-card, and Energy Manager features plus a round of community-reported fixes.
+
+### Added
+- **Two AC EV chargers** — New **Number of EV Chargers** option (Features → Optional Equipment). Set it to 2 to add a second charger (EV 2) with its own entity config (charger power/state, vehicle SoC, range); both chargers then appear in a new **EV Chargers panel** showing each vehicle's Power · SoC · Range · State. EV 1 keeps its house-card garage node. Fully backward compatible — existing single-EV setups are unchanged.
+- **Interactive Sankey stream modals** — Clicking any node in the energy-flow Sankey (Solar, Home, Battery, Grid, EV, Heat Pump) opens a detailed modal with the daily total, live power, and a **flow breakdown**: where that stream's energy went (sources) or came from (destinations), with per-connection kWh and %. Replaces the old static stat-chip row beneath the Sankey.
+- **HAEO & Energy Manager Event Cards V2** — Native rebuilt event cards (Future Decisions + Past Events tabs, live status bar with SoC / prices / grid timing), replacing the previous Jinja2 `html-template-card` approach.
+- **Energy Manager (Node-RED) EMS provider** — Selectable Energy Manager provider with auto-filled decision and buy/sell price entities.
+- **Configurable Solar / Home / Grid labels** — Rename the house-card node labels from Settings → Display.
+- **Daily cost / revenue without an EMS** — Import-cost / export-revenue entity config that falls back to the Home Assistant Energy Dashboard sensors, so non-EMHASS users still get a daily € figure.
+- **Outdoor heat-pump house image** — New side-mounted exterior heat-pump asset replaces the oversized generic image.
+
+### Fixed
+- **"HTML Template Card" false-positive notification** — Removed the stale `html-template-card` entry from the integration's HACS-prerequisite check. The card is no longer used (the native HAEO/EM event cards replaced it), so the missing-card persistent notification / repair issue no longer appears.
+- **Chart date & range** — "Today" now anchors to local midnight, with correct 24 h-rolling and 7-day options, and the chart-range setting is actually applied.
+- **Chart auto-refresh** — Default changed 60 s → 5 min to preserve chart zoom state longer.
+- **Battery flow colors** — Default is now charge = green / discharge = red (previously reversed), with a toggle to swap.
+- **Grid power vs energy** — Clarified the W-vs-kWh entity expectations in Settings.
+- **EV SoC on the house-card node** — The configured EV SoC entity now surfaces on the EV node.
+- **Profile save** — Fixed the profile name being lost when saving a settings profile.
+- **Sankey false battery export** — Removed spurious battery-charge/export detection when the inverter reports a residual value with the battery disabled.
+
+### Changed
+- Removed the static Sankey stat-chip row in favor of the interactive per-node detail modals.
+
+## [2.23.0-pre.1] - 2026-05-08
+
+> **Pre-release / work in progress:** Please do **not** open bug reports for the new pre-release functions in this section yet. They are intentionally being published early for validation and may change before the stable release.
+
+### Added — Interactive Dashboard Pre-release
+- **Interactive House Card Modals** — Clicking Solar, Home, Battery, Grid, EV, or Heat Pump labels can now open a detailed modal with device-specific wording and live entity context.
+- **Battery Modal Stack Details** — The battery modal now embeds the existing battery-stack/device card when available, bringing pack-level detail into the contextual battery view.
+- **Forecast Modal Actions** — Added a Lovelace-compatible forecast modal trigger with actions for opening forecast details and focusing the energy chart area.
+- **Smart Load Modals and Controls** — Smart-load cards can open detail modals and optionally expose an `entity_switch`/control entity for toggle actions from the modal.
+- **Visual Click-Zone Editor** — Developer settings now include a click-zone editor for customizing the interactive regions on the house card.
+- **Draggable Label Position Editor** — Developer settings now include a label-position editor for moving house-card labels/values without hand-editing YAML.
+- **Heat Pump House Visual Update** — The house card now uses the smaller smart-load heat-pump asset and positions it as a side-mounted exterior device instead of the oversized generic image.
+
+### Fixed
+- **ApexCharts Missing Entity Errors** — Generated chart series now skip missing, `unknown`, or `unavailable` entities to avoid blocking the chart with stale EMHASS placeholder sensors.
+- **Forecast Trigger Configuration Error** — The forecast modal button now implements the required Lovelace custom-card API methods.
+- **Source Map Noise** — Added release notes for third-party source-map 404 mitigation used during validation.
+
+## [2.22.0] - 2026-05-04
+
+### Added — EV, Battery, and Chart Controls
+- **Auto EV Gate / Vehicle + Charger** — New automatic EV visual mode shows the car, charger, cable, labels, and animated EV flow only when the charger/vehicle state or charger power indicates the EV is connected or charging.
+- **EV SoC and Range Display** — The house card can now show EV battery SoC and remaining range when matching entities are configured or auto-detected.
+- **Expanded EV Auto-Detect** — EV detection now recognizes a broader set of charger and vehicle integrations, including Tesla/Teslemetry, Zappi, Easee, Zaptec, Wallbox, ChargePoint, OCPP, BMW, FordPass, Hyundai/Kia, Volkswagen, Polestar, Volvo, Mercedes, BYD, MG, and more.
+- **EV Charger Label Override** — Display settings now include an EV charger label field so users can rename the AC/DC charger label shown on the house card.
+- **Battery Flow Color Swap** — Display settings now include a battery flow color option for installations where charge/discharge colors feel reversed after applying the selected battery sign convention.
+- **Configurable ApexCharts Refresh Interval** — Display settings now include 10s, 30s, 60s, and 5min refresh choices. The default is now 60s to reduce unwanted ApexCharts zoom/pan resets.
+
+### Fixed
+- **Grid Power vs Daily Energy Setup Clarity** — Entity labels and helper text now distinguish live W/kW power sensors from daily kWh energy sensors, and the Settings card warns when an entity appears to be mapped to the wrong type.
+- **Volcast Solar Forecast Overlay** — Forecast overlay generation now accepts forecast rows that expose `power_w` instead of `pv_estimate`.
+- **V2 Event Card Loading Recovery** — HAEO, EMHASS, and Energy Manager event cards now recover from interrupted initial history loads instead of remaining stuck in a loading state.
+- **Sankey Prerequisite Cleanup** — The third-party `ha-sankey-chart` card is no longer listed as a required prerequisite because the dashboard uses the built-in `sigenergy-energy-flow-card`.
+
+### Changed
+- **Sigenergy2mqtt Auto-Discovery** — Sigenergy auto-detection now includes patterns used by sigenergy2mqtt-style `sensor.sigen_*` entity families.
+- **Energy Manager Notes** — Documentation now reflects the Energy Manager provider and V2 event-card path alongside EMHASS and HAEO.
+
 ## [2.21.1] - 2026-04-12
 
 ### Fixed — Dual Tariff Sankey Grid Totals

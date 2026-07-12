@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.19.0 — Bundled Distribution
+ * Genergy Dashboard v2.23.0-pre.1 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -149,6 +149,10 @@ const DEFAULT_ENTITIES = {
   // Utility meter entities (auto-created for cumulative sensors)
   ev_energy_daily_meter: '',
   hp_energy_daily_meter: '',
+  // Energy Manager (Node-RED) entities
+  em_decision: '',
+  em_buy_price: '',
+  em_sell_price: '',
 };
 
 const DEFAULT_CONFIG = {
@@ -156,6 +160,8 @@ const DEFAULT_CONFIG = {
   features: {
     ev_charger: false,
     ev_vehicle: false,
+    ev_vehicle_auto: false,
+    ev_vehicle_power_threshold: 100,
     heat_pump: false,
     grid_connection: true,
     hide_cables: false,
@@ -185,8 +191,15 @@ const DEFAULT_CONFIG = {
     smart_load_sort: 'power',
     smart_load_standby_threshold: 5,
     smart_load_hide_inactive: false,
+    interactive_house: true,
+    smart_load_modals: true,
+    expandable_forecast: true,
   },
   smart_loads: [],
+  click_zones: {},
+  label_positions: {},
+  heat_pump_position: null,
+  smart_load_sections: [],
   pricing: {
     source: 'custom',
     cheap_threshold: 0.10,
@@ -201,10 +214,22 @@ const DEFAULT_CONFIG = {
     power_threshold: 1000,
     decimal_places: 1,
     chart_range: 'today',
+    chart_refresh_interval: '60s',
     soc_ring_low: 40,
     soc_ring_high: 60,
     kiosk_mode: false,
+    heat_pump_label: 'HEAT PUMP',
+    ev_charger_label: '',
+    swap_battery_colors: false,
+    sankey_color_theme: 'modern',
+    modal_animation: 'scale',
+    default_forecast_view: 'combined',
   },
+};
+
+const SANKEY_THEMES = {
+  modern:  { solar: '#D4C850', battery: '#4ECDC4', grid_import: '#6B8FD4', home: '#9B7AB8', grid_export: '#7B8FD4', ev: '#E8705A', hp: '#E8A799', losses: '#444444' },
+  vibrant: { solar: '#c8b84a', battery: '#00d4b8', grid_import: '#6b7fd4', home: '#e8337f', grid_export: '#7c5cbf', ev: '#ff69b4', hp: '#e67e22', losses: '#444444' },
 };
 
 class SigConfigStore {
@@ -225,6 +250,25 @@ class SigConfigStore {
           const localTs = this._config?._ts || 0;
           const haTs = cfg._ts || 0;
           if (haTs >= localTs) {
+            // Defensive: preserve smart_loads array if HA version is empty but local has data
+            // This prevents stale HA config from wiping smart loads configured on this device
+            const localLoads = this._config?.smart_loads;
+            if (Array.isArray(localLoads) && localLoads.length > 0 &&
+                (!cfg.smart_loads || cfg.smart_loads.length === 0)) {
+              cfg.smart_loads = localLoads;
+            }
+            // If BOTH HA and local config have empty smart_loads but backup exists, restore from backup
+            if (!cfg.smart_loads || cfg.smart_loads.length === 0) {
+              try {
+                const backup = localStorage.getItem('genergy_smart_loads_backup');
+                if (backup) {
+                  const parsed = JSON.parse(backup);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    cfg.smart_loads = parsed;
+                  }
+                }
+              } catch(e) {}
+            }
             this._config = cfg;
             // Also update localStorage cache
             try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...cfg, _version: 1, _saved: new Date().toISOString() })); } catch(e) {}
@@ -236,7 +280,21 @@ class SigConfigStore {
   }
 
   get() {
-    if (!this._config) this._config = this._load();
+    if (!this._config) {
+      this._config = this._load();
+      // Recover smart_loads from backup if main config lost them
+      if ((!this._config.smart_loads || this._config.smart_loads.length === 0) && this._config.features?.smart_loads) {
+        try {
+          const backup = localStorage.getItem('genergy_smart_loads_backup');
+          if (backup) {
+            const parsed = JSON.parse(backup);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              this._config.smart_loads = parsed;
+            }
+          }
+        } catch(e) {}
+      }
+    }
     return this._config;
   }
 
@@ -289,9 +347,30 @@ class SigConfigStore {
     if (!this._hass) return null;
     try {
       const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
-      const layout = config?.views?.find(v => v.path === 'overview')?.cards?.[0];
-      const stored = layout?._sigenergy_config;
-      if (stored) return this._merge(DEFAULT_CONFIG, stored);
+      const view = config?.views?.find(v => v.path === 'overview');
+      // Try cards[0] first (primary location), then search all cards for _sigenergy_config
+      let stored = view?.cards?.[0]?._sigenergy_config;
+      if (!stored && view?.cards) {
+        for (const c of view.cards) {
+          if (c?._sigenergy_config) { stored = c._sigenergy_config; break; }
+        }
+      }
+      if (stored) {
+        const merged = this._merge(DEFAULT_CONFIG, stored);
+        // Recover smart_loads from backup if HA config lost them
+        if ((!merged.smart_loads || merged.smart_loads.length === 0) && merged.features?.smart_loads) {
+          try {
+            const backup = localStorage.getItem('genergy_smart_loads_backup');
+            if (backup) {
+              const parsed = JSON.parse(backup);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                merged.smart_loads = parsed;
+              }
+            }
+          } catch(e) {}
+        }
+        return merged;
+      }
     } catch (e) { console.warn('SigConfig: failed to load from HA', e); }
     return null;
   }
@@ -306,11 +385,15 @@ class SigConfigStore {
         ...config, _version: 1, _saved: new Date().toISOString(),
       }));
     } catch (e) { /* ignore */ }
+    // Backup smart_loads independently — survives config overwrites
+    if (config.smart_loads && config.smart_loads.length > 0) {
+      try { localStorage.setItem('genergy_smart_loads_backup', JSON.stringify(config.smart_loads)); } catch(e) {}
+    }
     // Write to HA dashboard config (permanent storage) — awaited to prevent stale reads on refresh
     this._saveToHAPromise = this._saveToHA(config);
   }
 
-  async _saveToHA(config) {
+  async _saveToHA(config, retries = 2) {
     if (!this._hass) return;
     try {
       const dashConfig = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
@@ -318,8 +401,16 @@ class SigConfigStore {
       if (view?.cards?.[0]) {
         view.cards[0]._sigenergy_config = config;
         await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config: dashConfig });
+      } else {
+        console.warn('SigConfig: dashboard-sigenergy overview view or layout card not found — config only saved to browser localStorage');
       }
-    } catch (e) { console.warn('SigConfig: failed to save to HA', e); }
+    } catch (e) {
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, 1500));
+        return this._saveToHA(config, retries - 1);
+      }
+      console.warn('SigConfig: failed to save to HA after retries — config only in localStorage', e);
+    }
   }
 
   _merge(defaults, overrides) {
@@ -331,6 +422,10 @@ class SigConfigStore {
         result[key] = overrides[key] !== undefined ? overrides[key] : defaults[key];
       }
     }
+    // Preserve metadata keys (_ts, _version, _saved) from overrides
+    if (overrides._ts !== undefined) result._ts = overrides._ts;
+    if (overrides._version !== undefined) result._version = overrides._version;
+    if (overrides._saved !== undefined) result._saved = overrides._saved;
     // Backward compat: migrate old boolean emhass flag to ems_provider
     if (result.features && result.features.ems_provider === undefined) {
       result.features.ems_provider = result.features.emhass === true ? 'emhass' : 'none';
@@ -484,6 +579,1041 @@ if (!customElements.get('sigenergy-house-card')) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// GenergyModal — reusable modal system for all Genergy cards
+// Supports sizes, tabs, dark theme, mobile auto-fullscreen
+// ═══════════════════════════════════════════════════════════
+
+class GenergyModal {
+  /**
+   * @param {Object} opts
+   * @param {string}   opts.title    - Modal title text
+   * @param {string}   [opts.size]   - 'small' | 'medium' | 'large' | 'fullscreen' (default: 'medium')
+   * @param {string}   [opts.icon]   - MDI icon string, e.g. 'mdi:chart-line'
+   * @param {Array}    [opts.tabs]   - Array of { label, icon? } for tab bar
+   * @param {Function} [opts.onClose] - Callback when modal is closed
+   */
+  constructor({ title, size, icon, tabs, onClose } = {}) {
+    this.title = title || 'Modal';
+    this.size = size || 'medium';
+    this.icon = icon || '';
+    this.tabs = tabs || [];
+    this.onClose = onClose || null;
+    this._activeTab = 0;
+    this._overlayEl = null;
+    this._bodyEl = null;
+    this._contentRenderer = null;
+    this._boundKeyHandler = this._onKeyDown.bind(this);
+    this._open = false;
+  }
+
+  /** Size map: CSS max-width values */
+  static get SIZES() {
+    return {
+      small:      { maxWidth: '400px',  maxHeight: '80vh' },
+      medium:     { maxWidth: '600px',  maxHeight: '85vh' },
+      large:      { maxWidth: '900px',  maxHeight: '90vh' },
+      fullscreen: { maxWidth: '95vw',   maxHeight: '90vh' },
+    };
+  }
+
+  /**
+   * Open the modal and render content.
+   * @param {Function} contentRenderer - Called with (bodyEl, activeTabIndex).
+   *   The function should populate bodyEl with DOM content.
+   */
+  open(contentRenderer) {
+    if (this._open) return;
+    this._contentRenderer = contentRenderer;
+    this._open = true;
+
+    const sizeConfig = GenergyModal.SIZES[this.size] || GenergyModal.SIZES.medium;
+    const isMobile = window.innerWidth < 768;
+
+    // Build overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'genergy-modal-overlay';
+    Object.assign(overlay.style, {
+      position: 'fixed',
+      top: '0', left: '0', right: '0', bottom: '0',
+      zIndex: '9999',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'rgba(0,0,0,0.7)',
+      backdropFilter: 'blur(4px)',
+      WebkitBackdropFilter: 'blur(4px)',
+      opacity: '0',
+      transition: 'opacity 200ms ease',
+    });
+
+    // Build modal container
+    const modal = document.createElement('div');
+    modal.className = 'genergy-modal-container';
+    Object.assign(modal.style, {
+      background: 'var(--ha-card-background, #22273a)',
+      border: '1px solid rgba(0,212,184,0.3)',
+      borderRadius: isMobile ? '0' : '16px',
+      width: isMobile ? '100vw' : '90vw',
+      maxWidth: isMobile ? '100vw' : sizeConfig.maxWidth,
+      height: isMobile ? '100vh' : 'auto',
+      maxHeight: isMobile ? '100vh' : sizeConfig.maxHeight,
+      display: 'flex',
+      flexDirection: 'column',
+      boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
+      overflow: 'hidden',
+      transform: 'scale(0.95)',
+      transition: 'transform 200ms ease',
+    });
+
+    // -- Header --
+    const header = document.createElement('div');
+    header.className = 'genergy-modal-header';
+    Object.assign(header.style, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      padding: '16px 20px',
+      borderBottom: '1px solid rgba(0,212,184,0.15)',
+      flexShrink: '0',
+    });
+
+    if (this.icon) {
+      const iconEl = document.createElement('ha-icon');
+      iconEl.setAttribute('icon', this.icon);
+      Object.assign(iconEl.style, { color: 'rgb(0,212,184)', '--mdc-icon-size': '24px', flexShrink: '0' });
+      header.appendChild(iconEl);
+    }
+
+    const titleEl = document.createElement('span');
+    titleEl.className = 'genergy-modal-title';
+    titleEl.textContent = this.title;
+    Object.assign(titleEl.style, {
+      flex: '1',
+      fontSize: '18px',
+      fontWeight: '600',
+      color: 'var(--primary-text-color, #e0e4ec)',
+    });
+    header.appendChild(titleEl);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'genergy-modal-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.textContent = '✕';
+    Object.assign(closeBtn.style, {
+      background: 'none',
+      border: '1px solid rgba(0,212,184,0.2)',
+      borderRadius: '8px',
+      color: 'var(--primary-text-color, #e0e4ec)',
+      cursor: 'pointer',
+      width: '36px',
+      height: '36px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '18px',
+      transition: 'background 0.15s',
+      flexShrink: '0',
+    });
+    closeBtn.addEventListener('mouseenter', () => { closeBtn.style.background = 'rgba(255,255,255,0.1)'; });
+    closeBtn.addEventListener('mouseleave', () => { closeBtn.style.background = 'none'; });
+    closeBtn.addEventListener('click', () => this.close());
+    header.appendChild(closeBtn);
+
+    modal.appendChild(header);
+
+    // -- Tab bar (optional) --
+    if (this.tabs.length > 0) {
+      const tabBar = document.createElement('div');
+      tabBar.className = 'genergy-modal-tabs';
+      Object.assign(tabBar.style, {
+        display: 'flex',
+        gap: '0',
+        borderBottom: '1px solid rgba(0,212,184,0.15)',
+        flexShrink: '0',
+        overflowX: 'auto',
+      });
+
+      this.tabs.forEach((tab, idx) => {
+        const tabBtn = document.createElement('button');
+        tabBtn.className = 'genergy-modal-tab';
+        tabBtn.dataset.tabIndex = idx;
+        Object.assign(tabBtn.style, {
+          background: 'none',
+          border: 'none',
+          borderBottom: idx === this._activeTab ? '2px solid rgb(0,212,184)' : '2px solid transparent',
+          color: idx === this._activeTab ? 'rgb(0,212,184)' : 'var(--secondary-text-color, #9ea4b4)',
+          padding: '10px 18px',
+          fontSize: '13px',
+          fontWeight: idx === this._activeTab ? '600' : '400',
+          cursor: 'pointer',
+          transition: 'color 0.15s, border-color 0.15s',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          whiteSpace: 'nowrap',
+          flexShrink: '0',
+        });
+        if (tab.icon) {
+          const tabIcon = document.createElement('ha-icon');
+          tabIcon.setAttribute('icon', tab.icon);
+          tabIcon.style.cssText = '--mdc-icon-size:16px;';
+          tabBtn.appendChild(tabIcon);
+        }
+        const tabLabel = document.createElement('span');
+        tabLabel.textContent = tab.label || ('Tab ' + (idx + 1));
+        tabBtn.appendChild(tabLabel);
+
+        tabBtn.addEventListener('click', () => this.setTab(idx));
+        tabBar.appendChild(tabBtn);
+      });
+      modal.appendChild(tabBar);
+      this._tabBarEl = tabBar;
+    }
+
+    // -- Body --
+    const body = document.createElement('div');
+    body.className = 'genergy-modal-body';
+    Object.assign(body.style, {
+      flex: '1',
+      overflowY: 'auto',
+      padding: '0',
+      WebkitOverflowScrolling: 'touch',
+    });
+    modal.appendChild(body);
+    this._bodyEl = body;
+
+    // Prevent modal clicks from closing overlay
+    modal.addEventListener('click', (e) => e.stopPropagation());
+
+    overlay.appendChild(modal);
+
+    // Click-outside to close
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this.close();
+    });
+
+    document.body.appendChild(overlay);
+    this._overlayEl = overlay;
+    this._modalEl = modal;
+
+    // Trigger entrance animation on next frame
+    requestAnimationFrame(() => {
+      overlay.style.opacity = '1';
+      modal.style.transform = 'scale(1)';
+    });
+
+    // Keyboard handler
+    document.addEventListener('keydown', this._boundKeyHandler);
+
+    // Render content
+    if (this._contentRenderer) {
+      this._contentRenderer(this._bodyEl, this._activeTab);
+    }
+  }
+
+  /**
+   * Close the modal with fade-out animation.
+   */
+  close() {
+    if (!this._open || !this._overlayEl) return;
+    this._open = false;
+    document.removeEventListener('keydown', this._boundKeyHandler);
+
+    // Animate out
+    this._overlayEl.style.opacity = '0';
+    if (this._modalEl) this._modalEl.style.transform = 'scale(0.95)';
+
+    setTimeout(() => {
+      if (this._overlayEl && this._overlayEl.parentNode) {
+        this._overlayEl.parentNode.removeChild(this._overlayEl);
+      }
+      this._overlayEl = null;
+      this._modalEl = null;
+      this._bodyEl = null;
+      this._tabBarEl = null;
+      if (this.onClose) this.onClose();
+    }, 200);
+  }
+
+  /**
+   * Switch to a different tab and re-render the body.
+   * @param {number} index - Tab index to activate
+   */
+  setTab(index) {
+    if (index < 0 || index >= this.tabs.length) return;
+    this._activeTab = index;
+
+    // Update tab bar visual state
+    if (this._tabBarEl) {
+      const btns = this._tabBarEl.querySelectorAll('.genergy-modal-tab');
+      btns.forEach((btn, i) => {
+        const isActive = i === index;
+        btn.style.borderBottom = isActive ? '2px solid rgb(0,212,184)' : '2px solid transparent';
+        btn.style.color = isActive ? 'rgb(0,212,184)' : 'var(--secondary-text-color, #9ea4b4)';
+        btn.style.fontWeight = isActive ? '600' : '400';
+      });
+    }
+
+    // Re-render body
+    if (this._bodyEl && this._contentRenderer) {
+      this._bodyEl.innerHTML = '';
+      this._contentRenderer(this._bodyEl, this._activeTab);
+    }
+  }
+
+  /** @returns {number} Currently active tab index */
+  get activeTab() { return this._activeTab; }
+
+  /** @returns {boolean} Whether the modal is currently open */
+  get isOpen() { return this._open; }
+
+  _onKeyDown(e) {
+    if (e.key === 'Escape' && this._open) {
+      e.preventDefault();
+      this.close();
+    }
+  }
+}
+
+// Export GenergyModal globally for cross-card access
+window.GenergyModal = GenergyModal;
+
+const _GENERGY_MODAL_TYPES = {
+  solar: { title: 'Solar', icon: 'mdi:solar-panel', color: '#F0D850' },
+  home: { title: 'Home Consumption', icon: 'mdi:home-lightning-bolt', color: '#3498db' },
+  battery: { title: 'Battery', icon: 'mdi:battery-charging-60', color: '#2ecc71' },
+  grid: { title: 'Grid', icon: 'mdi:transmission-tower', color: '#e74c3c' },
+  ev: { title: 'EV / Charger', icon: 'mdi:car-electric', color: '#ff69b4' },
+  heatpump: { title: 'Heat Pump', icon: 'mdi:heat-pump', color: '#e67e22' },
+  forecast: { title: 'Energy Forecast', icon: 'mdi:chart-timeline-variant', color: '#00d4b8' },
+  smart_load: { title: 'Smart Load', icon: 'mdi:lightning-bolt', color: '#00d4b8' },
+};
+
+function _genergyEsc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function _genergyState(hass, entityId) {
+  if (!hass || !entityId) return null;
+  return hass.states?.[entityId] || null;
+}
+
+function _genergyNum(hass, entityId) {
+  const st = _genergyState(hass, entityId);
+  if (!st) return null;
+  const n = parseFloat(st.state);
+  return Number.isFinite(n) ? n : null;
+}
+
+function _genergyEntity(cfg, keys) {
+  const entities = cfg?.entities || {};
+  for (const key of keys) {
+    if (entities[key]) return entities[key];
+  }
+  return '';
+}
+
+function _genergyFormat(value, unit = '') {
+  if (value == null || value === '' || Number.isNaN(value)) return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return _genergyEsc(value);
+  if (unit === 'W') return Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(1)} kW` : `${Math.round(n)} W`;
+  if (unit === 'kWh') return `${n.toFixed(n >= 10 ? 1 : 2)} kWh`;
+  if (unit === '%') return `${Math.round(n)}%`;
+  if (unit === '€') return `€${n.toFixed(2)}`;
+  if (unit === '€/kWh') return `€${n.toFixed(3)}/kWh`;
+  return `${n.toFixed(Math.abs(n) >= 10 ? 1 : 2)}${unit ? ' ' + unit : ''}`;
+}
+
+function _genergyStateDisplay(hass, entityId, fallbackUnit = '') {
+  const st = _genergyState(hass, entityId);
+  if (!st) return '—';
+  const unit = st.attributes?.unit_of_measurement || fallbackUnit;
+  const n = parseFloat(st.state);
+  if (Number.isFinite(n)) return _genergyFormat(n, unit);
+  return _genergyEsc(st.state);
+}
+
+function _genergyMetric(label, value, color = '#00d4b8') {
+  return `<div style="padding:14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;min-width:0;">
+    <div style="font-size:11px;color:#8892a4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">${_genergyEsc(label)}</div>
+    <div style="font-size:22px;font-weight:700;color:${color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${value}</div>
+  </div>`;
+}
+
+function _genergyEntityRows(hass, rows) {
+  const html = rows.filter(r => r?.entityId).map(r => {
+    const st = _genergyState(hass, r.entityId);
+    const stateText = st ? _genergyStateDisplay(hass, r.entityId, r.unit) : 'not configured';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+      <div style="min-width:0;">
+        <div style="font-size:13px;color:var(--primary-text-color,#e0e4ec);">${_genergyEsc(r.label)}</div>
+        <div style="font-size:10px;color:#667085;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_genergyEsc(r.entityId)}</div>
+      </div>
+      <div style="font-size:13px;font-weight:600;color:${st ? 'var(--primary-text-color,#e0e4ec)' : '#667085'};white-space:nowrap;">${stateText}</div>
+    </div>`;
+  }).join('');
+  return html || '<div style="padding:12px;color:#8892a4;text-align:center;">No matching entities are configured yet.</div>';
+}
+
+function _genergySection(title, body) {
+  return `<section style="margin-top:16px;">
+    <div style="font-size:12px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">${_genergyEsc(title)}</div>
+    <div style="background:rgba(45,52,81,0.45);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;">${body}</div>
+  </section>`;
+}
+
+function _genergyPrimaryLabel(type) {
+  return ({
+    solar: 'Live production',
+    home: 'Live consumption',
+    battery: 'Battery power / SoC',
+    grid: 'Live grid flow',
+    ev: 'Charging status',
+    heatpump: 'Live heat-pump load',
+    forecast: 'Forecast snapshot',
+  })[type] || 'Live value';
+}
+
+function _genergyStatusLabel(type) {
+  return ({
+    solar: 'Solar state',
+    home: 'Load state',
+    battery: 'Charge state',
+    grid: 'Grid direction',
+    ev: 'Connection state',
+    heatpump: 'Operating state',
+  })[type] || 'Status';
+}
+
+function _genergyElementRows(type, cfg) {
+  const e = cfg?.entities || {};
+  if (type === 'solar') {
+    return [
+      { label: 'Solar power', entityId: e.solar_power, unit: 'W' },
+      { label: 'Solar yield today', entityId: e.solar_energy_today, unit: 'kWh' },
+      { label: 'Forecast remaining', entityId: e.solcast_remaining, unit: 'kWh' },
+      { label: 'Forecast today', entityId: e.solcast_today || e.forecast_solar_today, unit: 'kWh' },
+      { label: 'Forecast tomorrow', entityId: e.solcast_tomorrow, unit: 'kWh' },
+      { label: 'PV string 1', entityId: e.pv1_power, unit: 'W' },
+      { label: 'PV string 2', entityId: e.pv2_power, unit: 'W' },
+      { label: 'PV string 3', entityId: e.pv3_power, unit: 'W' },
+      { label: 'PV string 4', entityId: e.pv4_power, unit: 'W' },
+    ];
+  }
+  if (type === 'battery') {
+    return [
+      { label: 'State of charge', entityId: e.battery_soc || e.mpc_soc, unit: '%' },
+      { label: 'Charge/discharge power', entityId: e.battery_power || e.mpc_battery, unit: 'W' },
+      { label: 'Charge today', entityId: e.battery_charge_today, unit: 'kWh' },
+      { label: 'Discharge today', entityId: e.battery_discharge_today, unit: 'kWh' },
+      { label: 'Voltage', entityId: e.battery_voltage, unit: 'V' },
+      { label: 'Current', entityId: e.battery_current, unit: 'A' },
+      { label: 'Temperature', entityId: e.battery_temp, unit: '°C' },
+      { label: 'Pack 1 SoC', entityId: e.battery_pack1_soc, unit: '%' },
+      { label: 'Pack 2 SoC', entityId: e.battery_pack2_soc, unit: '%' },
+      { label: 'Pack 3 SoC', entityId: e.battery_pack3_soc, unit: '%' },
+      { label: 'Pack 4 SoC', entityId: e.battery_pack4_soc, unit: '%' },
+    ];
+  }
+  if (type === 'grid') {
+    return [
+      { label: 'Grid power', entityId: e.grid_active || e.grid_power || e.grid_active_power || e.haeo_grid_power, unit: 'W' },
+      { label: 'Import today', entityId: e.grid_import_today, unit: 'kWh' },
+      { label: 'Export today', entityId: e.grid_export_today, unit: 'kWh' },
+      { label: 'Import price', entityId: e.current_import_price || e.buy_price, unit: '€/kWh' },
+      { label: 'Export price', entityId: e.current_export_price || e.sell_price, unit: '€/kWh' },
+      { label: 'Import cost today', entityId: e.emhass_import_cost_daily || e.emhass_net_cost_today, unit: '€' },
+      { label: 'Export earnings today', entityId: e.emhass_export_earnings_daily, unit: '€' },
+      { label: 'Voltage L1', entityId: e.grid_voltage, unit: 'V' },
+      { label: 'Voltage L2', entityId: e.grid_voltage_l2, unit: 'V' },
+      { label: 'Voltage L3', entityId: e.grid_voltage_l3, unit: 'V' },
+      { label: 'Frequency', entityId: e.grid_frequency, unit: 'Hz' },
+    ];
+  }
+  if (type === 'home') {
+    return [
+      { label: 'Home load', entityId: e.load_power || e.mpc_load || e.haeo_load_power, unit: 'W' },
+      { label: 'Consumption today', entityId: e.load_energy_today, unit: 'kWh' },
+      { label: 'Solar production', entityId: e.solar_power || e.haeo_solar_power, unit: 'W' },
+      { label: 'Battery power', entityId: e.battery_power || e.haeo_battery_discharge || e.haeo_battery_charge, unit: 'W' },
+      { label: 'Grid power', entityId: e.grid_active || e.grid_power || e.haeo_grid_power, unit: 'W' },
+    ];
+  }
+  if (type === 'ev') {
+    return [
+      { label: 'Charging power', entityId: e.ev_charger_power, unit: 'W' },
+      { label: 'Charger state', entityId: e.ev_charger_state },
+      { label: 'Vehicle SoC', entityId: e.ev_soc, unit: '%' },
+      { label: 'Vehicle range', entityId: e.ev_range, unit: 'km' },
+      { label: 'EV energy today', entityId: e.ev_energy_daily_meter, unit: 'kWh' },
+    ];
+  }
+  if (type === 'heatpump') {
+    return [
+      { label: 'Heat pump power', entityId: e.heat_pump_power || e.deferrable0_power, unit: 'W' },
+      { label: 'Heat pump energy today', entityId: e.hp_energy_daily_meter, unit: 'kWh' },
+      { label: e.deferrable0_label || 'Deferrable load 0', entityId: e.mpc_deferrable0 },
+      { label: e.deferrable1_label || 'Deferrable load 1', entityId: e.mpc_deferrable1 },
+    ];
+  }
+  return [];
+}
+
+function _genergyOpenElementModal(type, detail, cfg, hass) {
+  const meta = _GENERGY_MODAL_TYPES[type];
+  if (!meta) return false;
+  const title = detail.label || meta.title;
+  const color = detail.color || meta.color;
+  const rows = _genergyElementRows(type, cfg);
+  const modal = new GenergyModal({
+    title,
+    icon: meta.icon,
+    size: type === 'forecast' ? 'large' : 'medium',
+    tabs: type === 'forecast'
+      ? [{ label: 'Combined', icon: 'mdi:chart-line' }, { label: 'Power', icon: 'mdi:solar-power' }, { label: 'SoC', icon: 'mdi:battery' }, { label: 'Price', icon: 'mdi:currency-eur' }, { label: 'Loads', icon: 'mdi:home-lightning-bolt' }]
+      : [{ label: 'Overview', icon: 'mdi:view-dashboard' }, { label: 'Entities', icon: 'mdi:database' }],
+  });
+  modal.open((body, tab) => {
+    if (type === 'forecast') {
+      const groups = [
+        { title: 'Power forecast', rows: _genergyElementRows('solar', cfg).slice(0, 5) },
+        { title: 'Battery / SoC forecast', rows: _genergyElementRows('battery', cfg).slice(0, 2).concat([{ label: 'MPC SoC', entityId: cfg.entities?.mpc_soc, unit: '%' }, { label: 'MPC battery', entityId: cfg.entities?.mpc_battery, unit: 'W' }]) },
+        { title: 'Pricing', rows: _genergyElementRows('grid', cfg).slice(3, 7) },
+        { title: 'Loads', rows: _genergyElementRows('home', cfg).concat([{ label: 'MPC load', entityId: cfg.entities?.mpc_load, unit: 'W' }]) },
+      ];
+      const visibleGroups = tab === 0 ? groups : [groups[Math.max(0, tab - 1)]];
+      body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
+          ${_genergyMetric('Solar now', _genergyStateDisplay(hass, _genergyEntity(cfg, ['solar_power', 'haeo_solar_power']), 'W'), '#F0D850')}
+          ${_genergyMetric('Load now', _genergyStateDisplay(hass, _genergyEntity(cfg, ['load_power', 'mpc_load', 'haeo_load_power']), 'W'), '#3498db')}
+          ${_genergyMetric('Battery SoC', _genergyStateDisplay(hass, _genergyEntity(cfg, ['battery_soc', 'mpc_soc', 'haeo_battery_soc']), '%'), '#2ecc71')}
+          ${_genergyMetric('Import price', _genergyStateDisplay(hass, _genergyEntity(cfg, ['current_import_price', 'buy_price']), '€/kWh'), '#e74c3c')}
+        </div>
+        ${visibleGroups.map(g => _genergySection(g.title, _genergyEntityRows(hass, g.rows))).join('')}
+      </div>`;
+      return;
+    }
+    if (tab === 1) {
+      body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">${_genergySection('Configured entities', _genergyEntityRows(hass, rows))}</div>`;
+      return;
+    }
+    const mainEntity = rows.find(r => r.entityId)?.entityId;
+    body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
+        ${_genergyMetric(_genergyPrimaryLabel(type), detail.primary || _genergyStateDisplay(hass, mainEntity), color)}
+        ${detail.statusLine ? _genergyMetric(_genergyStatusLabel(type), _genergyEsc(detail.statusLine), color) : _genergyMetric('Data source', mainEntity ? _genergyEsc(mainEntity.split('.')[0]) : '—', color)}
+      </div>
+      <div class="genergy-battery-stack-slot"></div>
+      ${_genergySection('Live detail', _genergyEntityRows(hass, rows.slice(0, type === 'battery' ? 7 : 6)))}
+      ${type === 'battery' ? _genergySection('Limits', _genergyEntityRows(hass, [
+        { label: 'Capacity', entityId: cfg.entities?.battery_capacity, unit: 'kWh' },
+        { label: 'Maximum SoC', entityId: cfg.entities?.battery_max_soc, unit: '%' },
+        { label: 'Minimum SoC', entityId: cfg.entities?.battery_min_soc, unit: '%' },
+        { label: 'Reserved SoC', entityId: cfg.entities?.battery_reserved_soc, unit: '%' },
+      ])) : ''}
+      ${type === 'home' && Array.isArray(cfg.smart_loads) && cfg.smart_loads.length ? _genergySection('Configured smart loads', cfg.smart_loads.slice(0, 8).map(load => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);"><span>${_genergyEsc(load.label || load.entity_power)}</span><span style="color:#8892a4;">${_genergyStateDisplay(hass, load.entity_power, 'W')}</span></div>`).join('')) : ''}
+    </div>`;
+    if (type === 'battery' && customElements.get('sigenergy-device-card')) {
+      const slot = body.querySelector('.genergy-battery-stack-slot');
+      const card = document.createElement('sigenergy-device-card');
+      card.setConfig({ battery_packs: cfg.features?.battery_packs || 2 });
+      card.hass = hass;
+      Object.assign(card.style, { display: 'block', marginTop: '16px', marginBottom: '4px' });
+      slot?.appendChild(card);
+    }
+  });
+  return true;
+}
+
+function _genergyOpenSmartLoadModal(detail, cfg, hass) {
+  const entityId = detail.entityId;
+  const loadCfg = (cfg.smart_loads || []).find(load => load.entity_power === entityId || load.label === detail.label) || {};
+  const switchEntity = loadCfg.entity_switch || loadCfg.switch_entity || loadCfg.entity_control || '';
+  const appType = detail.applianceType || loadCfg.type || 'plug_socket';
+  const meta = _GENERGY_MODAL_TYPES.smart_load;
+  const modal = new GenergyModal({
+    title: detail.label || loadCfg.label || 'Smart Load',
+    icon: meta.icon,
+    size: 'small',
+    tabs: [{ label: 'Status', icon: 'mdi:lightning-bolt' }, { label: 'Entities', icon: 'mdi:database' }],
+  });
+  modal.open((body, tab) => {
+    const power = _genergyNum(hass, entityId);
+    const rows = [
+      { label: 'Power', entityId, unit: 'W' },
+      { label: 'Energy', entityId: loadCfg.entity_energy || loadCfg.entity_daily_energy, unit: 'kWh' },
+      { label: 'Control switch', entityId: switchEntity },
+    ];
+    if (tab === 1) {
+      body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">${_genergySection('Configured entities', _genergyEntityRows(hass, rows))}</div>`;
+      return;
+    }
+    const isActive = (power ?? parseFloat(detail.power || '0')) > (cfg.features?.smart_load_standby_threshold || 5);
+    body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);text-align:center;">
+      <div style="font-size:44px;font-weight:800;color:${isActive ? '#00d4b8' : '#8892a4'};">${_genergyStateDisplay(hass, entityId, 'W')}</div>
+      <div style="font-size:13px;color:#8892a4;margin-top:4px;">${_genergyEsc(appType.replace(/_/g, ' '))}</div>
+      <div style="margin:16px auto 0;display:inline-flex;padding:7px 12px;border-radius:999px;border:1px solid ${isActive ? 'rgba(0,212,184,.35)' : 'rgba(136,146,164,.25)'};color:${isActive ? '#00d4b8' : '#8892a4'};background:${isActive ? 'rgba(0,212,184,.1)' : 'rgba(136,146,164,.08)'};">${isActive ? 'Active' : 'Idle / standby'}</div>
+      ${_genergySection('Live detail', _genergyEntityRows(hass, rows))}
+      ${switchEntity ? '<button class="genergy-smart-toggle" style="margin-top:14px;width:100%;padding:12px;border:none;border-radius:10px;background:#00d4b8;color:#071512;font-weight:700;cursor:pointer;">Toggle device</button>' : '<div style="margin-top:14px;font-size:11px;color:#8892a4;">Add entity_switch to this smart load config to enable control from the modal.</div>'}
+    </div>`;
+    const toggle = body.querySelector('.genergy-smart-toggle');
+    if (toggle && hass?.callService) {
+      toggle.addEventListener('click', async () => {
+        toggle.disabled = true;
+        toggle.textContent = 'Toggling...';
+        try {
+          await hass.callService('homeassistant', 'toggle', { entity_id: switchEntity });
+          toggle.textContent = 'Toggled';
+        } catch (err) {
+          console.error('Genergy smart load toggle failed', err);
+          toggle.textContent = 'Toggle failed';
+          toggle.disabled = false;
+        }
+      });
+    }
+  });
+  return true;
+}
+
+function _genergyHandleModalEvent(type, detail, cfg, hass) {
+  if (type === 'smart_load') return _genergyOpenSmartLoadModal(detail, cfg, hass);
+  if (_GENERGY_MODAL_TYPES[type]) return _genergyOpenElementModal(type, detail, cfg, hass);
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Global genergy-modal event listener
+// Catches bubbling CustomEvents from house card labels,
+// smart load tiles, and forecast charts, then opens modals.
+// ═══════════════════════════════════════════════════════════
+document.addEventListener('genergy-modal', (e) => {
+  const detail = e.detail || {};
+  const type = detail.type;
+  if (!type) return;
+
+  const cfg = detail.config || window.SigenergyConfig?.get() || {};
+  const modalAnim = cfg.display?.modal_animation || 'scale';
+  if (_genergyHandleModalEvent(type, detail, cfg, detail.hass)) return;
+
+  switch (type) {
+    case 'solar': {
+      const m = new GenergyModal({
+        title: detail.label || 'Solar',
+        icon: 'mdi:solar-panel',
+        size: 'medium',
+        tabs: [{ label: 'Overview', icon: 'mdi:information-outline' }, { label: 'History', icon: 'mdi:chart-line' }],
+      });
+      m.open((body, tab) => {
+        if (tab === 0) {
+          body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">
+            <div style="font-size:32px;font-weight:700;color:#F0D850;margin-bottom:8px;">${detail.primary || '—'}</div>
+            <div style="font-size:14px;color:#8892a4;">Current solar production</div>
+            ${detail.statusLine ? `<div style="margin-top:12px;font-size:13px;color:#F0D850;">${detail.statusLine}</div>` : ''}
+            <div style="margin-top:20px;padding:16px;background:rgba(240,216,80,0.08);border:1px solid rgba(240,216,80,0.2);border-radius:12px;">
+              <div style="font-size:11px;color:#8892a4;">Detail modals with charts coming in Phase 7</div>
+            </div>
+          </div>`;
+        } else {
+          body.innerHTML = '<div style="padding:20px;color:#8892a4;text-align:center;">History charts coming in Phase 7</div>';
+        }
+      });
+      break;
+    }
+    case 'home': {
+      const m = new GenergyModal({
+        title: detail.label || 'Home',
+        icon: 'mdi:home-lightning-bolt',
+        size: 'medium',
+        tabs: [{ label: 'Overview', icon: 'mdi:information-outline' }, { label: 'Breakdown', icon: 'mdi:chart-pie' }],
+      });
+      m.open((body, tab) => {
+        body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">
+          <div style="font-size:32px;font-weight:700;color:#3498db;margin-bottom:8px;">${detail.primary || '—'}</div>
+          <div style="font-size:14px;color:#8892a4;">Current home consumption</div>
+          ${detail.statusLine ? `<div style="margin-top:12px;font-size:13px;color:#3498db;">${detail.statusLine}</div>` : ''}
+          <div style="margin-top:20px;padding:16px;background:rgba(52,152,219,0.08);border:1px solid rgba(52,152,219,0.2);border-radius:12px;">
+            <div style="font-size:11px;color:#8892a4;">${tab === 0 ? 'Detail modals with charts coming in Phase 7' : 'Load breakdown coming in Phase 7'}</div>
+          </div>
+        </div>`;
+      });
+      break;
+    }
+    case 'battery': {
+      const m = new GenergyModal({
+        title: detail.label || 'Battery',
+        icon: 'mdi:battery-charging-60',
+        size: 'medium',
+        tabs: [{ label: 'Status', icon: 'mdi:information-outline' }, { label: 'History', icon: 'mdi:chart-line' }, { label: 'Settings', icon: 'mdi:cog' }],
+      });
+      m.open((body, tab) => {
+        const color = detail.color || '#2ecc71';
+        body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">
+          <div style="font-size:32px;font-weight:700;color:${color};margin-bottom:8px;">${detail.primary || '—'}</div>
+          <div style="font-size:14px;color:#8892a4;">Battery status</div>
+          ${detail.statusLine ? `<div style="margin-top:12px;font-size:13px;color:${color};">${detail.statusLine}</div>` : ''}
+          <div style="margin-top:20px;padding:16px;background:rgba(46,204,113,0.08);border:1px solid rgba(46,204,113,0.2);border-radius:12px;">
+            <div style="font-size:11px;color:#8892a4;">${tab === 0 ? 'Full battery status coming in Phase 7' : tab === 1 ? 'SoC history chart coming in Phase 7' : 'Battery settings coming in Phase 7'}</div>
+          </div>
+        </div>`;
+      });
+      break;
+    }
+    case 'grid': {
+      const m = new GenergyModal({
+        title: detail.label || 'Grid',
+        icon: 'mdi:transmission-tower',
+        size: 'medium',
+        tabs: [{ label: 'Status', icon: 'mdi:information-outline' }, { label: 'Pricing', icon: 'mdi:currency-eur' }],
+      });
+      m.open((body, tab) => {
+        const color = detail.color || '#e74c3c';
+        body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">
+          <div style="font-size:32px;font-weight:700;color:${color};margin-bottom:8px;">${detail.primary || '—'}</div>
+          <div style="font-size:14px;color:#8892a4;">Grid connection</div>
+          ${detail.statusLine ? `<div style="margin-top:12px;font-size:13px;color:${color};">${detail.statusLine}</div>` : ''}
+          <div style="margin-top:20px;padding:16px;background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.2);border-radius:12px;">
+            <div style="font-size:11px;color:#8892a4;">${tab === 0 ? 'Grid detail coming in Phase 7' : 'Price info coming in Phase 7'}</div>
+          </div>
+        </div>`;
+      });
+      break;
+    }
+    case 'ev': {
+      const m = new GenergyModal({
+        title: detail.label || 'EV',
+        icon: 'mdi:car-electric',
+        size: 'medium',
+        tabs: [{ label: 'Status', icon: 'mdi:information-outline' }, { label: 'Sessions', icon: 'mdi:history' }],
+      });
+      m.open((body, tab) => {
+        body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">
+          <div style="font-size:32px;font-weight:700;color:#ff69b4;margin-bottom:8px;">${detail.primary || '—'}</div>
+          <div style="font-size:14px;color:#8892a4;">EV / Charger</div>
+          ${detail.statusLine ? `<div style="margin-top:12px;font-size:13px;color:#ff69b4;">${detail.statusLine}</div>` : ''}
+          <div style="margin-top:20px;padding:16px;background:rgba(255,105,180,0.08);border:1px solid rgba(255,105,180,0.2);border-radius:12px;">
+            <div style="font-size:11px;color:#8892a4;">${tab === 0 ? 'EV detail coming in Phase 7' : 'Charging sessions coming in Phase 7'}</div>
+          </div>
+        </div>`;
+      });
+      break;
+    }
+    case 'heatpump': {
+      const m = new GenergyModal({
+        title: detail.label || 'Heat Pump',
+        icon: 'mdi:heat-pump',
+        size: 'medium',
+        tabs: [{ label: 'Status', icon: 'mdi:information-outline' }, { label: 'Schedule', icon: 'mdi:calendar-clock' }],
+      });
+      m.open((body, tab) => {
+        body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">
+          <div style="font-size:32px;font-weight:700;color:#e67e22;margin-bottom:8px;">${detail.primary || '—'}</div>
+          <div style="font-size:14px;color:#8892a4;">Heat Pump / HVAC</div>
+          ${detail.statusLine ? `<div style="margin-top:12px;font-size:13px;color:#e67e22;">${detail.statusLine}</div>` : ''}
+          <div style="margin-top:20px;padding:16px;background:rgba(230,126,34,0.08);border:1px solid rgba(230,126,34,0.2);border-radius:12px;">
+            <div style="font-size:11px;color:#8892a4;">${tab === 0 ? 'Heat pump detail coming in Phase 7' : 'Schedule coming in Phase 7'}</div>
+          </div>
+        </div>`;
+      });
+      break;
+    }
+    case 'smart_load': {
+      const appType = detail.applianceType || 'plug_socket';
+      const m = new GenergyModal({
+        title: detail.label || 'Smart Load',
+        icon: 'mdi:lightning-bolt',
+        size: 'small',
+      });
+      m.open((body) => {
+        const w = parseFloat(detail.power) || 0;
+        const pwrStr = Math.abs(w) >= 1000 ? (Math.abs(w)/1000).toFixed(1) + ' kW' : Math.round(Math.abs(w)) + ' W';
+        body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);text-align:center;">
+          <div style="font-size:48px;font-weight:700;color:${w > 5 ? '#00d4b8' : '#8892a4'};margin-bottom:8px;">${pwrStr}</div>
+          <div style="font-size:14px;color:#8892a4;margin-bottom:16px;">${detail.label}</div>
+          <div style="display:flex;gap:8px;justify-content:center;">
+            <div style="padding:8px 16px;background:rgba(0,212,184,0.1);border:1px solid rgba(0,212,184,0.3);border-radius:8px;font-size:12px;color:#00d4b8;">
+              ${w > 5 ? '🟢 Active' : w > 0 ? '🟡 Standby' : '⚫ Off'}
+            </div>
+          </div>
+          <div style="margin-top:20px;padding:16px;background:rgba(45,52,81,0.5);border-radius:12px;">
+            <div style="font-size:11px;color:#8892a4;">Entity: ${detail.entityId || '—'}</div>
+            <div style="font-size:11px;color:#8892a4;margin-top:4px;">Type: ${appType}</div>
+          </div>
+          <div style="margin-top:16px;padding:12px;background:rgba(0,212,184,0.06);border:1px solid rgba(0,212,184,0.15);border-radius:8px;">
+            <div style="font-size:10px;color:#8892a4;">ON/OFF toggle + history coming in Phase 8</div>
+          </div>
+        </div>`;
+      });
+      break;
+    }
+    case 'forecast-chart': {
+      // Find the already-initialized inline apexcharts-card and move it into a fullscreen modal.
+      // This avoids re-fetching 24h history for 21 series — the chart is already live.
+      function _findApexEl() {
+        function walk(root, depth) {
+          if (depth > 25) return null;
+          try { const d = root.querySelector('apexcharts-card'); if (d) return d; } catch(e) {}
+          for (const ch of root.querySelectorAll('*')) {
+            if (ch.shadowRoot) { const f = walk(ch.shadowRoot, depth + 1); if (f) return f; }
+          }
+          return null;
+        }
+        return walk(document, 0);
+      }
+      const apexEl = _findApexEl();
+      if (!apexEl) {
+        console.warn('genergy-modal forecast-chart: no inline apexcharts-card found');
+        return;
+      }
+
+      // Save original parent and next sibling so we can restore on close
+      const origParent = apexEl.parentElement;
+      const origNextSibling = apexEl.nextSibling;
+      const origStyle = apexEl.getAttribute('style') || '';
+
+      // Create a placeholder to hold its place in the layout
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = `height:${apexEl.offsetHeight}px;`;
+      origParent?.insertBefore(placeholder, apexEl);
+
+      const m = new GenergyModal({
+        title: 'Energy Forecast Chart',
+        icon: 'mdi:chart-areaspline',
+        size: 'fullscreen',
+        onClose: () => {
+          // Restore chart to original position
+          apexEl.setAttribute('style', origStyle);
+          origParent?.insertBefore(apexEl, placeholder.nextSibling === origNextSibling ? placeholder : origNextSibling);
+          placeholder.remove();
+          // Reset chart height via its apexChart instance
+          try {
+            const h = apexEl._apexChart;
+            if (h?.updateOptions) h.updateOptions({ chart: { height: apexEl._config?.apex_config?.chart?.height || 500 } }, false, false);
+          } catch(e) {}
+        },
+      });
+
+      m.open((body) => {
+        body.style.cssText = 'overflow:hidden;display:flex;flex-direction:column;padding:0;';
+        apexEl.style.cssText = 'display:block;width:100%;flex:1;';
+        body.appendChild(apexEl);
+
+        // Expand the chart to fill the modal
+        const expandH = Math.round(window.innerHeight * 0.75);
+        requestAnimationFrame(() => {
+          try {
+            const graphDiv = apexEl.shadowRoot?.querySelector('#graph');
+            if (graphDiv) { graphDiv.style.height = expandH + 'px'; graphDiv.style.minHeight = expandH + 'px'; }
+            const chart = apexEl._apexChart;
+            if (chart?.updateOptions) chart.updateOptions({ chart: { height: expandH } }, false, false);
+          } catch(e) {}
+        });
+      });
+      break;
+    }
+    default:
+      console.log('genergy-modal: unhandled type', type, detail);
+  }
+});
+
+document.addEventListener('genergy-zone-editor-save', async (e) => {
+  const zones = e.detail?.click_zones;
+  if (!zones) return;
+  const store = window.SigenergyConfig;
+  const cfg = store?.get?.() || {};
+  cfg.click_zones = zones;
+  store?.save?.(cfg);
+  const hass = e.detail?.hass || store?._hass;
+  if (!hass?.callWS) return;
+  try {
+    const config = await hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+    const patch = (obj) => {
+      if (!obj || typeof obj !== 'object') return false;
+      if (obj.type === 'custom:sigenergy-house-card') {
+        obj.click_zones = zones;
+        obj.edit_zones = false;
+        return true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) {
+          for (const item of v) { if (patch(item)) return true; }
+        } else if (typeof v === 'object' && v !== null) {
+          if (patch(v)) return true;
+        }
+      }
+      return false;
+    };
+    if (patch(config)) {
+      await hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+    }
+  } catch (err) {
+    console.error('Genergy zone save failed', err);
+  }
+});
+
+document.addEventListener('genergy-label-editor-save', async (e) => {
+  const labels = e.detail?.label_positions;
+  if (!labels) return;
+  const store = window.SigenergyConfig;
+  const cfg = store?.get?.() || {};
+  cfg.label_positions = labels;
+  store?.save?.(cfg);
+  const hass = e.detail?.hass || store?._hass;
+  if (!hass?.callWS) return;
+  try {
+    const config = await hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+    const patch = (obj) => {
+      if (!obj || typeof obj !== 'object') return false;
+      if (obj.type === 'custom:sigenergy-house-card') {
+        obj.label_positions = labels;
+        obj.edit_labels = false;
+        return true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) {
+          for (const item of v) { if (patch(item)) return true; }
+        } else if (typeof v === 'object' && v !== null) {
+          if (patch(v)) return true;
+        }
+      }
+      return false;
+    };
+    if (patch(config)) {
+      await hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+    }
+  } catch (err) {
+    console.error('Genergy label save failed', err);
+  }
+});
+
+document.addEventListener('genergy-asset-position-save', async (e) => {
+  const pos = e.detail?.heat_pump_position;
+  if (!pos) return;
+  const store = window.SigenergyConfig;
+  const cfg = store?.get?.() || {};
+  cfg.heat_pump_position = pos;
+  store?.save?.(cfg);
+  const hass = e.detail?.hass || store?._hass;
+  if (!hass?.callWS) return;
+  try {
+    const config = await hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+    const patch = (obj) => {
+      if (!obj || typeof obj !== 'object') return false;
+      if (obj.type === 'custom:sigenergy-house-card') {
+        obj.heat_pump_position = pos;
+        obj.edit_assets = false;
+        return true;
+      }
+      for (const v of Object.values(obj)) {
+        if (Array.isArray(v)) {
+          for (const item of v) { if (patch(item)) return true; }
+        } else if (typeof v === 'object' && v !== null) {
+          if (patch(v)) return true;
+        }
+      }
+      return false;
+    };
+    if (patch(config)) {
+      await hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+    }
+  } catch (err) {
+    console.error('Genergy asset position save failed', err);
+  }
+});
+
+class SigenergyForecastModalButton extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._hass = null;
+    this._config = {};
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._render();
+  }
+
+  getCardSize() { return 1; }
+
+  static getConfigElement() { return document.createElement('div'); }
+
+  static getStubConfig() { return {}; }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  connectedCallback() {
+    this._render();
+  }
+
+  _render() {
+    const cfg = window.SigenergyConfig?.get() || {};
+    if (cfg.features?.expandable_forecast === false) {
+      this.shadowRoot.innerHTML = '';
+      return;
+    }
+    if (this._rendered) return;
+    this._rendered = true;
+    if (this._expanded === undefined) this._expanded = false;
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display:block; }
+        .btn-row { display:flex; gap:8px; }
+        button {
+          flex:1;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:8px;
+          padding:10px 12px;
+          border:1px solid rgba(0,212,184,.25);
+          border-radius:12px;
+          background:rgba(0,212,184,.08);
+          color:var(--primary-text-color,#e0e4ec);
+          font-size:13px;
+          font-weight:700;
+          cursor:pointer;
+        }
+        button:hover { background:rgba(0,212,184,.14); }
+        button.active { background:rgba(0,212,184,.22); border-color:rgba(0,212,184,.5); }
+        ha-icon { color:#00d4b8; --mdc-icon-size:18px; }
+      </style>
+      <div class="btn-row">
+        <button type="button" class="details-btn" aria-label="Open forecast details modal">
+          <ha-icon icon="mdi:table-eye"></ha-icon>
+          Forecast Details
+        </button>
+        <button type="button" class="expand-btn" aria-label="Expand chart view">
+          <ha-icon icon="mdi:arrow-expand"></ha-icon>
+          Expand Chart
+        </button>
+      </div>
+    `;
+    this.shadowRoot.querySelector('.details-btn')?.addEventListener('click', () => {
+      this.dispatchEvent(new CustomEvent('genergy-modal', {
+        bubbles: true,
+        composed: true,
+        detail: { type: 'forecast', label: 'Energy Forecast', config: cfg, hass: this._hass },
+      }));
+    });
+    this.shadowRoot.querySelector('.expand-btn')?.addEventListener('click', () => {
+      const cfg = window.SigenergyConfig?.get() || {};
+      this.dispatchEvent(new CustomEvent('genergy-modal', {
+        bubbles: true, composed: true,
+        detail: { type: 'forecast-chart', config: cfg, hass: this._hass },
+      }));
+    });
+  }
+}
+
+if (!customElements.get('sigenergy-forecast-modal-button')) {
+  customElements.define('sigenergy-forecast-modal-button', SigenergyForecastModalButton);
+}
+
+// ═══════════════════════════════════════════════════════════
 // Settings Card (Lit Element)
 // ═══════════════════════════════════════════════════════════
 
@@ -495,6 +1625,9 @@ class SigenergySettingsCard extends HTMLElement {
     this._config = {};
     this._hass = null;
     this._pathEditorOn = false;
+    this._zoneEditorOn = false;
+    this._labelEditorOn = false;
+    this._assetEditorOn = false;
     this._pathEditorChecked = false;
   }
 
@@ -658,6 +1791,170 @@ class SigenergySettingsCard extends HTMLElement {
     return { isCumulative: true, dailyEntity: sourceEntityId };
   }
 
+  _evDetectKeywords() {
+    return ['ev', 'electric_vehicle', 'electric vehicle', 'charger', 'wallbox', 'laadpaal',
+      'tesla', 'teslemetry', 'charging', 'zaptec', 'easee', 'ocpp', 'juicebox', 'grizzl-e',
+      'grizzl_e', 'chargepoint', 'emporia', 'openevse', 'zappi', 'myenergi', 'go-e', 'go_e',
+      'keba', 'fronius_wattpilot', 'wattpilot', 'pulsar', 'copper', 'evnex', 'podpoint',
+      'rolec', 'ohme', 'hypervolt', 'alfen', 'evbox', 'schneider_evlink',
+      'siemens_versicharge', 'nrgkick', 'warp', 'wall_connector', 'charge_cable',
+      'charge_port', 'bmw_connected', 'fordpass', 'bluelink', 'kia_uvo', 'volkswagen',
+      'we_connect', 'cupra', 'skoda', 'renault', 'nissan_leaf', 'polestar', 'volvo',
+      'hyundai', 'ioniq', 'kona', 'kia', 'ev6', 'niro', 'audi', 'porsche', 'mercedes',
+      'mini', 'fiat', 'peugeot', 'opel', 'vauxhall', 'citroen', 'mg_ev', 'mg4',
+      'byd_car', 'atto', 'dolphin', 'ora', 'smart_ev'];
+  }
+
+  _entityText(entityId) {
+    const st = this._hass?.states?.[entityId];
+    return (entityId + ' ' + (st?.attributes?.friendly_name || '')).toLowerCase();
+  }
+
+  _matchesEvEntity(entityId) {
+    const text = this._entityText(entityId);
+    return this._evDetectKeywords().some(k => text.includes(k));
+  }
+
+  _evEntityPrefix(entityId) {
+    const id = (entityId || '').toLowerCase();
+    const cut = id.search(/_(charger|charging|charge|status|state|power|energy|battery|range|soc|plug|plugged|cable|connector|vehicle|session|added|total|level)/);
+    return cut > 8 ? id.slice(0, cut + 1) : '';
+  }
+
+  _isLikelyNonEvSystemEntity(entityId) {
+    const text = this._entityText(entityId);
+    if (/(tesla|teslemetry|ev|electric_vehicle|wallbox|wall_connector|zappi|myenergi|easee|zaptec|ocpp|go_e|go-e|keba|openevse|wattpilot|chargepoint|alfen|evbox|ohme|hypervolt|podpoint|rolec|juicebox|emporia|grizzl|nrgkick|warp|volkswagen|we_connect|cupra|skoda|renault|nissan_leaf|polestar|volvo|bmw_connected|fordpass|bluelink|kia_uvo|hyundai|ioniq|kona|kia|ev6|niro|audi|porsche|mercedes|mini|fiat|peugeot|opel|vauxhall|citroen|mg_ev|mg4|byd_car|atto|dolphin|ora|smart_ev)/.test(text)) {
+      return false;
+    }
+    return /(inverter|deye|sigen|sunsynk|goodwe|solax|victron|huawei|luna|pylontech|byd|home_battery|house_battery|battery_monitor|bms|grid|solar|pv|load|home_load|heat_pump|boiler|emhass|mpc|haeo)/.test(text);
+  }
+
+  _pickBestEntity(candidates, preferredTerms = []) {
+    if (!candidates.length) return null;
+    const score = (entityId) => {
+      const text = this._entityText(entityId);
+      let total = 0;
+      preferredTerms.forEach((term, idx) => { if (text.includes(term)) total += 100 - idx; });
+      if (text.includes('dummy')) total += 5;
+      return total;
+    };
+    return [...candidates].sort((a, b) => score(b) - score(a) || a.localeCompare(b))[0];
+  }
+
+  async _autoDetectEvEntities(cfg2, found, prefs = null) {
+    if (!this._hass?.states) return 0;
+    const allKeys = Object.keys(this._hass.states);
+    const isSensor = (entityId) => entityId.startsWith('sensor.');
+    const unitOf = (entityId) => this._hass.states[entityId]?.attributes?.unit_of_measurement || '';
+    const deviceClassOf = (entityId) => this._hass.states[entityId]?.attributes?.device_class || '';
+    const prefixes = new Set();
+    for (const key of allKeys) {
+      if (this._matchesEvEntity(key) && !this._isLikelyNonEvSystemEntity(key)) {
+        const prefix = this._evEntityPrefix(key);
+        if (prefix) prefixes.add(prefix);
+      }
+    }
+    const sameEvDevice = (entityId) => {
+      if (this._matchesEvEntity(entityId) && !this._isLikelyNonEvSystemEntity(entityId)) return true;
+      const lower = entityId.toLowerCase();
+      return [...prefixes].some(prefix => prefix && lower.startsWith(prefix));
+    };
+    const rememberPrefix = (entityId) => {
+      const prefix = this._evEntityPrefix(entityId);
+      if (prefix) prefixes.add(prefix);
+    };
+    let detected = 0;
+
+    let energyEntity = null;
+    const devs = prefs?.device_consumption || [];
+    const evDevices = devs.filter(d => {
+      const text = ((d.name || '') + ' ' + (d.stat_consumption || '')).toLowerCase();
+      return this._evDetectKeywords().some(k => text.includes(k));
+    });
+    if (evDevices.length > 0) {
+      energyEntity = evDevices[0].stat_consumption;
+    }
+    if (!energyEntity) {
+      const energyCandidates = allKeys.filter(k => {
+        const unit = unitOf(k);
+        return isSensor(k) && sameEvDevice(k) &&
+          (['kWh', 'MWh', 'Wh'].includes(unit) || deviceClassOf(k) === 'energy');
+      });
+      energyEntity = this._pickBestEntity(energyCandidates, ['today', 'daily', 'energy', 'consumption', 'total']);
+    }
+    if (energyEntity && !cfg2.entities.ev_energy_today) {
+      rememberPrefix(energyEntity);
+      const result = await this._ensureDailyMeter(energyEntity, 'ev_energy');
+      cfg2.entities.ev_energy_today = energyEntity;
+      cfg2.features.ev_energy_is_cumulative = result.isCumulative;
+      if (result.isCumulative && result.dailyEntity !== energyEntity) cfg2.entities.ev_energy_daily_meter = result.dailyEntity;
+      cfg2.features.show_ev_in_sankey = true;
+      found.push('EV energy: ' + energyEntity + (result.isCumulative && result.dailyEntity !== energyEntity ? ' → ' + result.dailyEntity : ''));
+      detected++;
+    }
+
+    const powerEntity = this._pickBestEntity(allKeys.filter(k => {
+      const unit = unitOf(k);
+      const text = this._entityText(k);
+      return isSensor(k) && sameEvDevice(k) && !this._isLikelyNonEvSystemEntity(k) &&
+        (unit === 'W' || unit === 'kW' || deviceClassOf(k) === 'power') &&
+        !/(energy|today|daily|total|voltage|current|soc|range)/.test(text);
+    }), ['charger_power', 'charging_power', 'active_power', 'power']);
+    if (powerEntity && !cfg2.entities.ev_charger_power) {
+      rememberPrefix(powerEntity);
+      cfg2.entities.ev_charger_power = powerEntity;
+      found.push('EV charger power: ' + powerEntity);
+      detected++;
+    }
+
+    const stateEntity = this._pickBestEntity(allKeys.filter(k => {
+      const text = this._entityText(k);
+      return sameEvDevice(k) && !this._isLikelyNonEvSystemEntity(k) &&
+        /(^sensor\.|^binary_sensor\.|^switch\.|^select\.)/.test(k) &&
+        /(state|status|connected|connection|plugged|plug|cable|charge_cable|charging_mode|charging|mode)/.test(text) &&
+        !/(power|energy|voltage|current|soc|range|temperature)/.test(text);
+    }), ['vehicle_connected', 'charger_state', 'charging_status', 'charge_cable', 'plugged', 'connected', 'cable', 'status', 'state']);
+    if (stateEntity && !cfg2.entities.ev_charger_state) {
+      rememberPrefix(stateEntity);
+      cfg2.entities.ev_charger_state = stateEntity;
+      found.push('EV charger state: ' + stateEntity);
+      detected++;
+    }
+
+    const socEntity = this._pickBestEntity(allKeys.filter(k => {
+      const text = this._entityText(k);
+      return isSensor(k) && sameEvDevice(k) && unitOf(k) === '%' &&
+        /(soc|state_of_charge|battery|charge_level)/.test(text) &&
+        !/(charger|limit|max|min|backup|reserve)/.test(text);
+    }), ['soc', 'state_of_charge', 'battery_level', 'charge_level']);
+    if (socEntity && !cfg2.entities.ev_soc) {
+      rememberPrefix(socEntity);
+      cfg2.entities.ev_soc = socEntity;
+      found.push('EV SoC: ' + socEntity);
+      detected++;
+    }
+
+    const rangeEntity = this._pickBestEntity(allKeys.filter(k => {
+      const text = this._entityText(k);
+      return isSensor(k) && sameEvDevice(k) && /(range|remaining_distance|distance_to_empty)/.test(text) &&
+        ['km', 'mi', 'miles'].includes(unitOf(k));
+    }), ['range', 'remaining_distance', 'distance_to_empty']);
+    if (rangeEntity && !cfg2.entities.ev_range) {
+      cfg2.entities.ev_range = rangeEntity;
+      found.push('EV range: ' + rangeEntity);
+      detected++;
+    }
+
+    if (cfg2.entities.ev_charger_power || cfg2.entities.ev_charger_state) {
+      cfg2.features.ev_vehicle_auto = true;
+      cfg2.features.ev_vehicle = false;
+      cfg2.features.ev_charger = false;
+      if (cfg2.features.ev_vehicle_power_threshold == null) cfg2.features.ev_vehicle_power_threshold = 100;
+    }
+    if (detected > 0) this._storeSave(cfg2);
+    return detected;
+  }
+
   /**
    * Check which required HACS frontend cards are missing.
    * Returns an array of { name, tag, hacs, purpose } objects for missing cards.
@@ -666,7 +1963,6 @@ class SigenergySettingsCard extends HTMLElement {
     const REQUIRED_CARDS = [
       { name: 'Layout Card', tag: 'layout-card', hacs: 'layout-card', repo: 'thomasloven/lovelace-layout-card', hacsId: '156434866', owner: 'thomasloven', repository: 'lovelace-layout-card', purpose: 'Responsive grid layout' },
       { name: 'ApexCharts Card', tag: 'apexcharts-card', hacs: 'apexcharts-card', repo: 'RomRider/apexcharts-card', hacsId: '331701152', owner: 'RomRider', repository: 'apexcharts-card', purpose: 'Energy time-series charts' },
-      { name: 'Sankey Chart Card', tag: 'sankey-chart', hacs: 'ha-sankey-chart', repo: 'MindFreeze/ha-sankey-chart', hacsId: '455846088', owner: 'MindFreeze', repository: 'ha-sankey-chart', purpose: 'Energy flow diagram' },
       { name: 'Mushroom Cards', tag: 'mushroom-template-card', hacs: 'mushroom', repo: 'piitaya/lovelace-mushroom', hacsId: '444350375', owner: 'piitaya', repository: 'lovelace-mushroom', purpose: 'Status pills and cards' },
       { name: 'Card Mod', tag: 'mod-card', hacs: 'lovelace-card-mod', repo: 'thomasloven/lovelace-card-mod', hacsId: '190927524', owner: 'thomasloven', repository: 'lovelace-card-mod', purpose: 'CSS styling injection' },
     ];
@@ -1030,6 +2326,10 @@ class SigenergySettingsCard extends HTMLElement {
         helperHTML = `<div style="margin:-2px 0 4px 110px;padding:6px 10px;background:rgba(255,165,0,0.1);border:1px solid rgba(255,165,0,0.3);border-radius:6px;font-size:11px;color:#ffa726;">⚠️ Lifetime entity detected (${this._esc(String(Math.round(valKwh)))} kWh). <button class="create-daily-helper-btn" data-key="${key}" data-source="${this._esc(id)}" style="background:#FF8F00;color:#fff;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px;margin-left:6px;">Create Daily Helper</button><br><span style="font-size:10px;color:#8892a4;margin-top:3px;display:inline-block;">ℹ️ Creates a utility meter helper that resets daily. May show <b>unknown</b> until the source sensor updates (usually within minutes).</span></div>`;
       }
     }
+    const kindWarning = this._entityKindWarning(key, id);
+    const warningHTML = kindWarning
+      ? `<div style="margin:-2px 0 4px 110px;padding:6px 10px;background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.28);border-radius:6px;font-size:11px;color:#ff8a80;">${kindWarning}</div>`
+      : '';
     return `
       <div class="row">
         <span class="row-label">${label}</span>
@@ -1039,10 +2339,49 @@ class SigenergySettingsCard extends HTMLElement {
           ${candidateHTML}
         </div>
         <span class="row-state ${isErr?'err':''}" data-entity="${this._esc(id)}">${state}</span>
-      </div>${helperHTML}`;
+      </div>${warningHTML}${helperHTML}`;
   }
 
   _esc(str) { return (str||'').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+  _entityKindWarning(key, entityId) {
+    if (!entityId || !this._hass?.states?.[entityId]) return '';
+    const st = this._hass.states[entityId];
+    const unit = st?.attributes?.unit_of_measurement || '';
+    const deviceClass = st?.attributes?.device_class || '';
+    const stateClass = st?.attributes?.state_class || '';
+    const powerKeys = new Set([
+      'solar_power', 'load_power', 'battery_power', 'grid_power', 'grid_power_ct',
+      'grid_active_power', 'ev_charger_power', 'heat_pump_power', 'inverter_output_power',
+      'inverter_rated_power', 'rated_power', 'pv1_power', 'pv2_power', 'pv3_power',
+      'pv4_power', 'pv5_power', 'pv6_power', 'haeo_grid_power', 'haeo_solar_power',
+      'haeo_load_power', 'deferrable0_power', 'deferrable1_power'
+    ]);
+    const dailyEnergyKeys = new Set([
+      'solar_energy_today', 'load_energy_today', 'battery_charge_today',
+      'battery_discharge_today', 'grid_import_today', 'grid_export_today',
+      'ev_energy_today', 'heat_pump_energy_today', 'grid_import_high_tariff',
+      'grid_import_low_tariff', 'grid_export_high_tariff', 'grid_export_low_tariff'
+    ]);
+    const isPower = deviceClass === 'power' || unit === 'W' || unit === 'kW' || unit === 'MW';
+    const isEnergy = deviceClass === 'energy' || unit === 'Wh' || unit === 'kWh' || unit === 'MWh';
+    if (powerKeys.has(key) && isEnergy) {
+      return '⚠️ This field expects live power (W/kW). The selected entity looks like energy (' + this._esc(unit || deviceClass) + '), so flows/charts may show incorrect values.';
+    }
+    if (dailyEnergyKeys.has(key) && isPower) {
+      return '⚠️ This field expects daily energy (kWh), not live power (W/kW). Use an HA Energy Dashboard statistic or a daily utility_meter helper.';
+    }
+    if (dailyEnergyKeys.has(key) && isEnergy && (stateClass === 'total' || stateClass === 'total_increasing')) {
+      const lower = entityId.toLowerCase();
+      if (!/(daily|today|day|tariff|genergy_.*_daily)/.test(lower)) {
+        return 'ℹ️ This looks like a lifetime energy counter. For daily Sankey totals, use a daily-reset entity or click Create Daily Helper when offered.';
+      }
+    }
+    if (/(^|_)soc($|_)|state_of_charge|battery_pack\d+_soc/.test(key) && unit && unit !== '%') {
+      return '⚠️ This field expects a percentage SoC sensor (%).';
+    }
+    return '';
+  }
 
   async _togglePathEditor(enable) {
     if (!this._hass) return;
@@ -1071,13 +2410,106 @@ class SigenergySettingsCard extends HTMLElement {
     } catch (e) { console.error('Toggle path editor failed:', e); }
   }
 
+  async _toggleZoneEditor(enable) {
+    if (!this._hass) return;
+    try {
+      const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+      const patch = (obj) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (obj.type === 'custom:sigenergy-house-card') {
+          obj.edit_zones = enable;
+          if (enable) obj.edit_paths = false;
+          return true;
+        }
+        for (const v of Object.values(obj)) {
+          if (Array.isArray(v)) {
+            for (const item of v) { if (patch(item)) return true; }
+          } else if (typeof v === 'object' && v !== null) {
+            if (patch(v)) return true;
+          }
+        }
+        return false;
+      };
+      if (patch(config)) {
+        await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+        this._zoneEditorOn = enable;
+        if (enable) this._pathEditorOn = false;
+        this._render();
+      }
+    } catch (e) { console.error('Toggle zone editor failed:', e); }
+  }
+
+  async _toggleLabelEditor(enable) {
+    if (!this._hass) return;
+    try {
+      const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+      const patch = (obj) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (obj.type === 'custom:sigenergy-house-card') {
+          obj.edit_labels = enable;
+          if (enable) {
+            obj.edit_paths = false;
+            obj.edit_zones = false;
+          }
+          return true;
+        }
+        for (const v of Object.values(obj)) {
+          if (Array.isArray(v)) {
+            for (const item of v) { if (patch(item)) return true; }
+          } else if (typeof v === 'object' && v !== null) {
+            if (patch(v)) return true;
+          }
+        }
+        return false;
+      };
+      if (patch(config)) {
+        await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+        this._labelEditorOn = enable;
+        if (enable) {
+          this._pathEditorOn = false;
+          this._zoneEditorOn = false;
+        }
+        this._render();
+      }
+    } catch (e) { console.error('Toggle label editor failed:', e); }
+  }
+
+  async _toggleAssetEditor(enable) {
+    if (!this._hass) return;
+    try {
+      const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+      const patch = (obj) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (obj.type === 'custom:sigenergy-house-card') {
+          obj.edit_assets = enable;
+          if (enable) { obj.edit_paths = false; obj.edit_zones = false; obj.edit_labels = false; }
+          return true;
+        }
+        for (const v of Object.values(obj)) {
+          if (Array.isArray(v)) {
+            for (const item of v) { if (patch(item)) return true; }
+          } else if (typeof v === 'object' && v !== null) {
+            if (patch(v)) return true;
+          }
+        }
+        return false;
+      };
+      if (patch(config)) {
+        await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+        this._assetEditorOn = enable;
+        if (enable) { this._pathEditorOn = false; this._zoneEditorOn = false; this._labelEditorOn = false; }
+        this._render();
+      }
+    } catch (e) { console.error('Toggle asset editor failed:', e); }
+  }
+
   async _checkPathEditorState() {
     if (!this._hass) return;
     try {
       const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
       const find = (obj) => {
         if (!obj || typeof obj !== 'object') return undefined;
-        if (obj.type === 'custom:sigenergy-house-card') return obj.edit_paths === true;
+        if (obj.type === 'custom:sigenergy-house-card') return { paths: obj.edit_paths === true, zones: obj.edit_zones === true, labels: obj.edit_labels === true, assets: obj.edit_assets === true };
         for (const v of Object.values(obj)) {
           if (Array.isArray(v)) {
             for (const item of v) { const r = find(item); if (r !== undefined) return r; }
@@ -1089,7 +2521,14 @@ class SigenergySettingsCard extends HTMLElement {
       };
       const state = find(config);
       if (state !== undefined) {
-        this._pathEditorOn = state;
+        if (typeof state === 'object') {
+          this._pathEditorOn = state.paths;
+          this._zoneEditorOn = state.zones;
+          this._labelEditorOn = state.labels;
+          this._assetEditorOn = state.assets || false;
+        } else {
+          this._pathEditorOn = state;
+        }
         this._render();
       }
     } catch (e) { /* ignore */ }
@@ -1097,7 +2536,7 @@ class SigenergySettingsCard extends HTMLElement {
 
   // Features that should be synced to the house card's dashboard config
   static get SYNCED_FEATURES() {
-    return { ev_charger: 'ev_charger', ev_vehicle: 'ev_vehicle', heat_pump: 'heat_pump', grid_connection: 'grid', hide_cables: 'hide_cables', emhass: 'emhass', solar_forecast: 'solar_forecast', emhass_forecasts: 'emhass_forecasts', deferrable_loads: 'deferrable_loads', financial_tracking: 'financial_tracking', battery_runtime: 'battery_runtime', ems_provider: 'ems_provider', haeo_forecasts: 'haeo_forecasts' };
+    return { ev_charger: 'ev_charger', ev_vehicle: 'ev_vehicle', ev_vehicle_auto: 'ev_vehicle_auto', heat_pump: 'heat_pump', grid_connection: 'grid', hide_cables: 'hide_cables', emhass: 'emhass', solar_forecast: 'solar_forecast', emhass_forecasts: 'emhass_forecasts', deferrable_loads: 'deferrable_loads', financial_tracking: 'financial_tracking', battery_runtime: 'battery_runtime', ems_provider: 'ems_provider', haeo_forecasts: 'haeo_forecasts', interactive_house: 'interactive_house' };
   }
 
   async _syncFeatureToDashboard(settingsKey, value) {
@@ -1177,6 +2616,7 @@ class SigenergySettingsCard extends HTMLElement {
     const emsProvider = cfg.features?.ems_provider || (cfg.features?.emhass === true ? 'emhass' : 'none');
     const emhassOn = emsProvider === 'emhass';
     const haeoOn = emsProvider === 'haeo';
+    const emOn = emsProvider === 'energy_manager';
     el.innerHTML = `
       <div style="margin-bottom:16px;padding:12px;background:rgba(0,212,184,0.08);border:1px solid rgba(0,212,184,0.25);border-radius:10px;">
         <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -1191,7 +2631,7 @@ class SigenergySettingsCard extends HTMLElement {
       </div>
       <div class="section">
         <div class="section-title" style="display:flex;align-items:center;">☀️ Core Power <button class="section-detect-btn" data-section="core_power" title="Auto-detect core power entities">🔍</button></div>
-        <div style="font-size:10px;color:#666;margin-bottom:6px;">Real-time power sensors in <b>W</b> or <b>kW</b>. Auto-detected by the Detect button above.</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Real-time power sensors in <b>W</b> or <b>kW</b>. Do not use daily/lifetime kWh energy sensors here.</div>
         ${this._entityRow('Solar Power', 'solar_power', e)}
         ${this._entityRow('Home Load', 'load_power', e)}
         ${this._entityRow('Battery Power', 'battery_power', e)}
@@ -1202,15 +2642,15 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Min SoC Entity', 'battery_min_soc', e)}
         ${this._entityRow('Reserved SoC Entity', 'battery_reserved_soc', e)}
         <div style="font-size:10px;color:#666;padding:0 0 4px 4px;">SoC limit entities (typically <b>number.*</b> domain). Max = charge cutoff, Min = discharge cutoff, Reserved = backup reserve for outages. Auto-detected or set manually on the Features → Battery section.</div>
-        ${this._entityRow('Grid Power', 'grid_power', e)}
+        ${this._entityRow('Grid Power (live W/kW)', 'grid_power', e)}
       </div>
       <div class="section">
         <div class="section-title" style="display:flex;align-items:center;">📊 Daily Energy <button class="section-detect-btn" data-section="daily_energy" title="Auto-detect daily energy entities">🔍</button></div>
-        <div style="font-size:10px;color:#666;margin-bottom:6px;">Daily energy counters in <b>kWh</b>. Found in <i>HA → Settings → Devices → [Your Inverter]</i>.</div>
-        ${this._entityRow('Solar Energy Today', 'solar_energy_today', e)}
-        ${this._entityRow('Load Energy Today', 'load_energy_today', e)}
-        ${this._entityRow('Battery Charge Today', 'battery_charge_today', e)}
-        ${this._entityRow('Battery Discharge Today', 'battery_discharge_today', e)}
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Daily energy counters in <b>kWh</b>. These drive the daily Sankey; do not use live W/kW power sensors here.</div>
+        ${this._entityRow('Solar Energy Today (kWh)', 'solar_energy_today', e)}
+        ${this._entityRow('Load Energy Today (kWh)', 'load_energy_today', e)}
+        ${this._entityRow('Battery Charge Today (kWh)', 'battery_charge_today', e)}
+        ${this._entityRow('Battery Discharge Today (kWh)', 'battery_discharge_today', e)}
       </div>
       <div class="section" style="border:1px solid ${cfg.features?.dual_tariff ? '#00d4b8' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${cfg.features?.dual_tariff ? '12' : '0'}px;">
@@ -1232,9 +2672,9 @@ class SigenergySettingsCard extends HTMLElement {
           </div>
         ` : `
           <div style="border-top:1px solid rgba(45,52,81,0.5);padding-top:10px;">
-            <div class="toggle-desc" style="margin-bottom:8px;color:#8892a4;font-size:11px;">Single entity for daily grid import and export totals.</div>
-            ${this._entityRow('Grid Import Today', 'grid_import_today', e)}
-            ${this._entityRow('Grid Export Today', 'grid_export_today', e)}
+            <div class="toggle-desc" style="margin-bottom:8px;color:#8892a4;font-size:11px;">Single daily kWh entities for grid import/export totals. If you only have lifetime counters, use the daily helper prompt.</div>
+            ${this._entityRow('Grid Import Today (kWh)', 'grid_import_today', e)}
+            ${this._entityRow('Grid Export Today (kWh)', 'grid_export_today', e)}
           </div>
         `}
       </div>
@@ -1245,19 +2685,21 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._entityRow('Sell Price', 'sell_price', e)}
         ${this._entityRow('Nordpool', 'nordpool', e)}
       </div>
-      <div class="section" style="border:1px solid ${emhassOn ? '#00d4b8' : haeoOn ? '#7c4dff' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
-        <div style="margin-bottom:${emhassOn || haeoOn ? '12' : '0'}px;">
-          <div style="font-size:14px;font-weight:700;color:${emhassOn ? '#00d4b8' : haeoOn ? '#7c4dff' : '#8892a4'};display:flex;align-items:center;">🤖 Energy Management System (EMS) <button class="section-detect-btn" data-section="ems" title="Auto-detect EMS/HAEO/EMHASS entities" style="margin-left:8px;">🔍</button></div>
+      <div class="section" style="border:1px solid ${emhassOn ? '#00d4b8' : haeoOn ? '#7c4dff' : emOn ? '#ff9800' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
+        <div style="margin-bottom:${emhassOn || haeoOn || emOn ? '12' : '0'}px;">
+          <div style="font-size:14px;font-weight:700;color:${emhassOn ? '#00d4b8' : haeoOn ? '#7c4dff' : emOn ? '#ff9800' : '#8892a4'};display:flex;align-items:center;">🤖 Energy Management System (EMS) <button class="section-detect-btn" data-section="ems" title="Auto-detect EMS/HAEO/EMHASS entities" style="margin-left:8px;">🔍</button></div>
           <div style="font-size:11px;color:#8892a4;margin-top:2px;">Select your energy optimizer. Configure entities below after selecting a provider.</div>
           <div style="display:flex;gap:8px;margin-top:10px;">
             <button class="ems-btn ${emsProvider === 'none' ? 'active' : ''}" data-ems="none" style="flex:1;padding:8px 6px;border:1px solid ${emsProvider === 'none' ? '#8892a4' : '#2d3451'};background:${emsProvider === 'none' ? 'rgba(136,146,164,0.15)' : 'transparent'};color:${emsProvider === 'none' ? '#fff' : '#8892a4'};border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;">None</button>
             <button class="ems-btn ${emhassOn ? 'active' : ''}" data-ems="emhass" style="flex:1;padding:8px 6px;border:1px solid ${emhassOn ? '#00d4b8' : '#2d3451'};background:${emhassOn ? 'rgba(0,212,184,0.15)' : 'transparent'};color:${emhassOn ? '#00d4b8' : '#8892a4'};border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;">EMHASS</button>
             <button class="ems-btn ${haeoOn ? 'active' : ''}" data-ems="haeo" style="flex:1;padding:8px 6px;border:1px solid ${haeoOn ? '#7c4dff' : '#2d3451'};background:${haeoOn ? 'rgba(124,77,255,0.15)' : 'transparent'};color:${haeoOn ? '#7c4dff' : '#8892a4'};border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;">HAEO</button>
+            <button class="ems-btn ${emOn ? 'active' : ''}" data-ems="energy_manager" style="flex:1;padding:8px 6px;border:1px solid ${emOn ? '#ff9800' : '#2d3451'};background:${emOn ? 'rgba(255,152,0,0.15)' : 'transparent'};color:${emOn ? '#ff9800' : '#8892a4'};border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;">Energy Mgr</button>
           </div>
         </div>
         ${emhassOn ? `
           <div style="border-top:1px solid rgba(0,212,184,0.2);padding-top:10px;">
             <div class="section-title" style="font-size:11px;">MPC Forecast Entities</div>
+            <div class="toggle-desc" style="margin-bottom:4px;color:#8892a4;font-size:10px;">Core EMHASS sensors with forecast attributes. The V2 card auto-discovers standard names (sensor.p_batt_forecast, sensor.mpc_batt_power, etc.) — only set these if your entities differ.</div>
             ${this._entityRow('MPC Battery', 'mpc_battery', e)}
             ${this._entityRow('MPC Grid', 'mpc_grid', e)}
             ${this._entityRow('MPC PV', 'mpc_pv', e)}
@@ -1267,12 +2709,14 @@ class SigenergySettingsCard extends HTMLElement {
           </div>
           <div style="margin-top:8px;">
             <div class="section-title" style="font-size:11px;">EMHASS Status</div>
+            <div class="toggle-desc" style="margin-bottom:4px;color:#8892a4;font-size:10px;">Optional — only available if using custom EMHASS integration (sensor.emhass_*). Leave blank for standard EMHASS add-on.</div>
             ${this._entityRow('Mode', 'emhass_mode', e)}
             ${this._entityRow('Reason', 'emhass_reason', e)}
             ${this._entityRow('Battery Action', 'emhass_battery_action', e)}
           </div>
           <div style="margin-top:8px;">
             <div class="section-title" style="font-size:11px;">EMHASS Financial</div>
+            <div class="toggle-desc" style="margin-bottom:4px;color:#8892a4;font-size:10px;">Optional — only available with custom EMHASS cost tracking sensors. Standard EMHASS users can leave these blank.</div>
             ${this._entityRow('Savings Today', 'emhass_savings_today', e)}
             ${this._entityRow('Net Cost Today', 'emhass_net_cost_today', e)}
             ${this._entityRow('Net Cost Month', 'emhass_net_cost_month', e)}
@@ -1295,6 +2739,7 @@ class SigenergySettingsCard extends HTMLElement {
           </div>
           <div style="margin-top:8px;">
             <div class="section-title" style="font-size:11px;">Additional Financial</div>
+            <div class="toggle-desc" style="margin-bottom:4px;color:#8892a4;font-size:10px;">Optional — advanced cost tracking entities. Only available if using custom EMHASS templates (e.g. for detailed bill projections).</div>
             ${this._entityRow('Export Earn Daily', 'emhass_export_earnings_daily', e)}
             ${this._entityRow('Import Cost Daily', 'emhass_import_cost_daily', e)}
             ${this._entityRow('Grid-Only Cost', 'emhass_grid_only_cost_daily', e)}
@@ -1347,9 +2792,30 @@ class SigenergySettingsCard extends HTMLElement {
             <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">number.grid_export_price — includes forecast attribute with future export prices</div>
           </div>
         ` : ''}
+        ${emOn ? `
+          <div style="border-top:1px solid rgba(255,152,0,0.2);padding-top:10px;">
+            <div style="font-size:10px;color:#666;margin-bottom:8px;">Requires the <a href="https://github.com/Roving-Ronin/myHomeAssistant" target="_blank" style="color:#ff9800;">Energy Manager</a> Node-RED flow. Uses <b>sensor.energy_manager_plan</b> and Sigenergy inverter sensors.</div>
+            <div class="section-title" style="font-size:11px;">Core Entities</div>
+            <div class="toggle-desc" style="margin-bottom:4px;color:#8892a4;font-size:10px;">The EM card uses hardcoded Sigenergy sensor names. Override if your entity IDs differ.</div>
+            ${this._entityRow('EM Decision', 'em_decision', e)}
+            <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">sensor.energy_manager_decision — current operating mode</div>
+          </div>
+          <div style="margin-top:8px;">
+            <div class="section-title" style="font-size:11px;">Price Entities</div>
+            <div class="toggle-desc" style="margin-bottom:4px;color:#8892a4;font-size:10px;">Node-RED buy/sell price sensors for cost tracking</div>
+            ${this._entityRow('Buy Price', 'em_buy_price', e)}
+            <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">sensor.nodered_buyprice — current buy price from your provider</div>
+            ${this._entityRow('Sell Price', 'em_sell_price', e)}
+            <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">sensor.nodered_sellprice — current sell/feed-in price</div>
+          </div>
+        ` : ''}
       </div>
       <div class="section" style="border:1px solid ${cfg.features?.show_ev_in_sankey ? '#E8705A' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
-        <div class="section-title">🔌 EV / Charger</div>
+        <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <span>🔌 EV / Charger</span>
+          <button class="auto-detect-btn" data-key="auto_detect_ev" style="flex-shrink:0;padding:6px 12px;background:#E8705A;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;" title="Auto-detect EV charger power/state, vehicle SoC/range, and EV energy">🔍 Detect EV</button>
+        </div>
+        <div class="ev-detect-status" style="font-size:10px;color:#8892a4;display:none;margin-bottom:6px;"></div>
         ${this._entityRow('Charger Power', 'ev_charger_power', e)}
         ${this._entityRow('Charger State', 'ev_charger_state', e)}
         ${this._entityRow('EV SoC', 'ev_soc', e)}
@@ -1709,61 +3175,28 @@ class SigenergySettingsCard extends HTMLElement {
     }
 
     // EV Energy auto-detect button
-    const evDetectBtn = el.querySelector('[data-key="auto_detect_ev"]');
-    if (evDetectBtn) {
+    const evDetectButtons = el.querySelectorAll('[data-key="auto_detect_ev"]');
+    evDetectButtons.forEach(evDetectBtn => {
       evDetectBtn.addEventListener('click', async () => {
         const statusEl = el.querySelector('.ev-detect-status');
-        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '⏳ Scanning HA Energy Dashboard for EV devices...'; }
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '⏳ Scanning HA Energy Dashboard and state registry for EV/charger entities...'; }
         try {
           const prefs = await this._hass.callWS({ type: 'energy/get_prefs' });
-          const devs = prefs?.device_consumption || [];
-          const evPatterns = ['ev', 'charger', 'wallbox', 'laadpaal', 'tesla', 'charging', 'zaptec', 'easee', 'ocpp', 'juicebox', 'grizzl-e', 'chargepoint', 'emporia', 'openevse', 'zappi', 'myenergi', 'go-e', 'keba', 'fronius_wattpilot', 'pulsar', 'copper', 'evnex', 'podpoint', 'rolec', 'ohme', 'hypervolt', 'alfen', 'evbox', 'schneider_evlink', 'siemens_versicharge', 'nrgkick', 'warp'];
-          let foundEntity = null;
-          const evDevices = devs.filter(d => {
-            const name = (d.name || '').toLowerCase();
-            const entity = (d.stat_consumption || '').toLowerCase();
-            return evPatterns.some(p => name.includes(p) || entity.includes(p));
-          });
-          if (evDevices.length > 0) {
-            foundEntity = evDevices[0].stat_consumption;
-            const list = evDevices.map(d => '• ' + d.name + ' → ' + d.stat_consumption).join('<br>');
-            if (statusEl) statusEl.innerHTML = '✅ Found ' + evDevices.length + ' EV device(s):<br>' + list;
-          } else {
-            // Fallback: scan all HA states for EV-related energy sensors
-            const evStates = Object.keys(this._hass.states).filter(k =>
-              k.includes('sensor.') && (k.includes('ev_') || k.includes('charger_energy') || k.includes('wallbox') || k.includes('charging_energy') || k.includes('zappi') || k.includes('easee') || k.includes('ocpp') || k.includes('tesla_') || k.includes('juicebox'))
-              && (['kWh','MWh','Wh'].includes(this._hass.states[k].attributes?.unit_of_measurement) || this._hass.states[k].attributes?.device_class === 'energy')
-            );
-            if (evStates.length > 0) {
-              foundEntity = evStates[0];
-              if (statusEl) statusEl.innerHTML = '✅ Found EV energy sensor: ' + evStates[0];
-            }
-          }
-          if (foundEntity) {
-            // Check if cumulative and create utility meter if needed
-            if (statusEl) statusEl.innerHTML += '<br>⏳ Checking if sensor is cumulative...';
-            const result = await this._ensureDailyMeter(foundEntity, 'ev_energy');
-            const cfg2 = this._storeGet();
-            cfg2.entities.ev_energy_today = foundEntity;
-            cfg2.features.ev_energy_is_cumulative = result.isCumulative;
-            if (result.isCumulative && result.dailyEntity !== foundEntity) {
-              cfg2.entities.ev_energy_daily_meter = result.dailyEntity;
-              if (statusEl) statusEl.innerHTML += '<br>📊 Entity is cumulative (total: ' + this._hass.states[foundEntity]?.state + ' kWh). Created daily utility meter: <b>' + result.dailyEntity + '</b>';
-            } else if (result.isCumulative) {
-              if (statusEl) statusEl.innerHTML += '<br>⚠️ Entity is cumulative but utility meter creation failed. You can create one manually in HA Settings → Helpers.';
-            } else {
-              if (statusEl) statusEl.innerHTML += '<br>✅ Entity reports daily values — using directly.';
-            }
-            this._storeSave(cfg2);
+          const cfg2 = this._storeGet();
+          const found = [];
+          const count = await this._autoDetectEvEntities(cfg2, found, prefs);
+          if (count > 0) {
+            if (statusEl) statusEl.innerHTML = '✅ Found EV/charger entities:<br>• ' + found.join('<br>• ');
+            if (this._hass) await this._buildDashboard();
             setTimeout(() => this._render(), 500);
           } else {
-            if (statusEl) statusEl.textContent = '⚠️ No EV-related device found in HA Energy Dashboard or state registry. Configure manually.';
+            if (statusEl) statusEl.textContent = '⚠️ No EV/charger entities found in HA Energy Dashboard or state registry. Configure manually.';
           }
         } catch (err) {
           if (statusEl) statusEl.textContent = '❌ Detection failed: ' + (err.message || 'unknown error');
         }
       });
-    }
+    });
 
     // HP Energy auto-detect button
     const hpDetectBtn = el.querySelector('[data-key="auto_detect_hp"]');
@@ -2078,21 +3511,14 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
-          // Auto-detect device consumption entities for EV and Heat Pump
+          await this._autoDetectEvEntities(cfg2, found, prefs);
+
+          // Auto-detect device consumption entities for Heat Pump
           if (prefs.device_consumption && prefs.device_consumption.length > 0) {
-            const evKw = ['ev', 'charger', 'wallbox', 'laadpaal', 'tesla', 'charging', 'zaptec', 'easee', 'ocpp', 'juicebox', 'chargepoint', 'zappi', 'myenergi', 'go-e', 'keba', 'openevse', 'emporia', 'pulsar', 'ohme', 'hypervolt', 'alfen', 'evbox'];
             const hpKw = ['heat pump', 'heat_pump', 'heatpump', 'warmtepomp', 'wärmepumpe', 'hvac', 'wp ', 'wp_', 'airco', 'klimaat', 'climate', 'daikin', 'mitsubishi', 'nibe', 'vaillant', 'viessmann', 'panasonic_aquarea', 'stiebel', 'bosch', 'toshiba', 'fujitsu', 'lg_therma', 'samsung_ehs', 'compressor'];
             for (const dev of prefs.device_consumption) {
               const name = (dev.name || '').toLowerCase();
               const entity = (dev.stat_consumption || '').toLowerCase();
-              // EV / charger detection
-              if (evKw.some(p => name.includes(p) || entity.includes(p))) {
-                if (!cfg2.entities.ev_energy_today) {
-                  cfg2.entities.ev_energy_today = dev.stat_consumption;
-                  cfg2.features.show_ev_in_sankey = true;
-                  found.push('EV energy (from devices): ' + dev.stat_consumption + ' (' + dev.name + ')');
-                }
-              }
               // Heat pump / HVAC detection
               if (hpKw.some(p => name.includes(p) || entity.includes(p)) || entity.includes('wp_kot')) {
                 if (!cfg2.entities.heat_pump_energy_today) {
@@ -2229,12 +3655,226 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
+          // ── Marstek auto-detect (Venus Modbus & Local API) ────────────
+          // Detects Marstek Venus batteries — both marstek_modbus (Modbus TCP) and
+          // marstek_local_api (Local UDP) integrations create sensor.marstek_* entities
+          if (this._hass && this._hass.states) {
+            const allKeys = Object.keys(this._hass.states);
+            const marstekKeys = allKeys.filter(k => k.startsWith('sensor.marstek'));
+            if (marstekKeys.length > 0) {
+              const has = (suffix) => marstekKeys.find(k => k.endsWith(suffix));
+
+              // Prefer system-level aggregate entities (marstek_local_api multi-device) over single-device
+              const sysAvgSoc = has('_system_average_soc');
+              const sysTotalPower = has('_system_total_power');
+              const sysTotalGrid = has('_system_total_grid_power');
+              const sysTotalSolar = has('_system_total_solar_power');
+
+              const map = {
+                battery_soc:             sysAvgSoc || has('_battery_soc'),
+                battery_power:           sysTotalPower || has('_battery_power'),
+                grid_power:              sysTotalGrid || has('_grid_power') || has('_ct_total_power') || has('_ac_power'),
+                solar_power:             sysTotalSolar || has('_pv_power_es') || has('_pv_power'),
+                load_power:              has('_offgrid_power'),
+                // Daily energy (marstek_modbus)
+                battery_charge_today:    has('_total_daily_charging_energy'),
+                battery_discharge_today: has('_total_daily_discharging_energy'),
+                // Lifetime energy (marstek_local_api — converted to daily by energy meter section below)
+                solar_energy:            has('_total_pv_energy'),
+                grid_import_energy:      has('_total_grid_import') || has('_total_grid_import_energy'),
+                grid_export_energy:      has('_total_grid_export') || has('_total_grid_export_energy'),
+                load_energy:             has('_total_load_energy'),
+                // MPPT strings (marstek_modbus, up to 4)
+                pv1_power:               has('_mppt1_power'),
+                pv2_power:               has('_mppt2_power'),
+                pv3_power:               has('_mppt3_power'),
+                pv4_power:               has('_mppt4_power'),
+              };
+
+              let marstekCount = 0;
+              for (const [key, eid] of Object.entries(map)) {
+                if (eid && !cfg2.entities[key]) {
+                  cfg2.entities[key] = eid;
+                  found.push('Marstek auto-detect ' + key + ': ' + eid);
+                  marstekCount++;
+                }
+              }
+
+              if (marstekCount > 0) {
+                // Marstek battery_power: positive = charging (charge is positive, discharge is negative)
+                cfg2.features.battery_positive_charging = true;
+                found.push('✓ Marstek detected (' + marstekCount + ' entities) — battery sign: positive = charging');
+                // PV string count for Modbus
+                let pvCount = 0;
+                for (let i = 1; i <= 4; i++) {
+                  if (has('_mppt' + i + '_power')) pvCount = i;
+                }
+                if (pvCount > 0 && !cfg2.features.pv_strings) {
+                  cfg2.features.pv_strings = pvCount;
+                  found.push('Marstek MPPT strings detected: ' + pvCount);
+                }
+                if (!cfg2.display) cfg2.display = {};
+                if (!cfg2.display.battery_label) {
+                  cfg2.display.battery_label = 'Marstek Venus';
+                  found.push('✓ Battery label set to Marstek Venus');
+                }
+              }
+            }
+          }
+
+          // ── Zendure auto-detect (SolarFlow, Hyper, Hub, Ace, SuperBase) ──
+          // Zendure HA creates entities like sensor.hyper_2000_electric_level,
+          // sensor.hub_1200_solar_input_power, etc.
+          // Key suffixes: electric_level (SoC), solar_input_power, grid_input_power,
+          // output_home_power, bat_in_out (net battery power, positive = charging)
+          if (this._hass && this._hass.states) {
+            const allKeys = Object.keys(this._hass.states);
+            // Detect Zendure by finding entities ending in _electric_level that also
+            // have sibling _solar_input_power entities (unique Zendure naming pattern)
+            const zenElectricLevel = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_electric_level'));
+            const zenSolarInput = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_solar_input_power'));
+
+            if (zenElectricLevel.length > 0 && zenSolarInput.length > 0) {
+              // Extract device prefix from the first electric_level entity
+              // e.g. sensor.hyper_2000_electric_level → "sensor.hyper_2000_"
+              const zenBase = zenElectricLevel[0].replace('electric_level', '');
+              const zenKeys = allKeys.filter(k => k.startsWith(zenBase));
+              const has = (suffix) => zenKeys.find(k => k.endsWith(suffix));
+
+              const map = {
+                battery_soc:             has('_electric_level'),
+                solar_power:             has('_solar_input_power'),
+                grid_power:              has('_grid_input_power'),
+                load_power:              has('_output_home_power'),
+                battery_power:           has('_bat_in_out'),
+                battery_capacity:        has('_total_kwh'),
+                // Aggregate energy (kWh, state_class total_increasing)
+                battery_charge_today:    has('_aggr_charge'),
+                battery_discharge_today: has('_aggr_discharge'),
+                solar_energy_today:      has('_aggr_solar'),
+                grid_import_today:       has('_aggr_grid_input_power'),
+                load_energy_today:       has('_aggr_output_home'),
+              };
+
+              let zenCount = 0;
+              for (const [key, eid] of Object.entries(map)) {
+                if (eid && !cfg2.entities[key]) {
+                  cfg2.entities[key] = eid;
+                  found.push('Zendure auto-detect ' + key + ': ' + eid);
+                  zenCount++;
+                }
+              }
+
+              if (zenCount > 0) {
+                // Zendure bat_in_out: positive = charging
+                cfg2.features.battery_positive_charging = true;
+                found.push('✓ Zendure detected (' + zenCount + ' entities) — battery sign: positive = charging');
+                // Derive device label from entity prefix
+                const zenDevice = zenElectricLevel[0].replace('sensor.', '').replace('_electric_level', '').replace(/_/g, ' ');
+                if (!cfg2.display) cfg2.display = {};
+                if (!cfg2.display.battery_label) {
+                  cfg2.display.battery_label = zenDevice.replace(/\b\w/g, c => c.toUpperCase());
+                  found.push('✓ Battery label set to ' + cfg2.display.battery_label);
+                }
+              }
+            }
+          }
+
+          // ── HomeWizard auto-detect (P1 Meter, Plug-In Battery, kWh Meter) ──
+          // HomeWizard entities use distinctive suffixes: _active_power_w,
+          // _state_of_charge_pct, _total_power_import_kwh, _total_power_export_kwh
+          if (this._hass && this._hass.states) {
+            const allKeys = Object.keys(this._hass.states);
+            const hwBatterySoc = allKeys.find(k => k.startsWith('sensor.') && k.endsWith('_state_of_charge_pct'));
+            const hwActivePower = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_active_power_w'));
+            const hwImport = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_total_power_import_kwh'));
+            const hwExport = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_total_power_export_kwh'));
+
+            // HomeWizard confirmed if we find _state_of_charge_pct OR (_active_power_w AND _total_power_import_kwh together)
+            const isHomeWizard = hwBatterySoc || (hwActivePower.length > 0 && hwImport.length > 0);
+
+            if (isHomeWizard) {
+              let hwCount = 0;
+
+              // Battery entities (Plug-In Battery / HWE-BAT)
+              if (hwBatterySoc && !cfg2.entities.battery_soc) {
+                cfg2.entities.battery_soc = hwBatterySoc;
+                found.push('HomeWizard auto-detect battery_soc: ' + hwBatterySoc);
+                hwCount++;
+                // Find sibling entities from same device (same prefix before "state_of_charge_pct")
+                const batBase = hwBatterySoc.replace('state_of_charge_pct', '');
+                const batPower = allKeys.find(k => k === batBase + 'active_power_w');
+                const batImport = allKeys.find(k => k === batBase + 'total_power_import_kwh');
+                const batExport = allKeys.find(k => k === batBase + 'total_power_export_kwh');
+                if (batPower && !cfg2.entities.battery_power) {
+                  cfg2.entities.battery_power = batPower;
+                  found.push('HomeWizard auto-detect battery_power: ' + batPower);
+                  hwCount++;
+                }
+                if (batImport && !cfg2.entities.battery_charge_today) {
+                  cfg2.entities.battery_charge_today = batImport;
+                  found.push('HomeWizard auto-detect battery_charge_today: ' + batImport);
+                  hwCount++;
+                }
+                if (batExport && !cfg2.entities.battery_discharge_today) {
+                  cfg2.entities.battery_discharge_today = batExport;
+                  found.push('HomeWizard auto-detect battery_discharge_today: ' + batExport);
+                  hwCount++;
+                }
+              }
+
+              // Grid entities (P1 Meter / HWE-P1 or kWh Meter / HWE-KWH)
+              // Find an _active_power_w entity that also has _total_power_import_kwh sibling,
+              // but is NOT the battery device (which also has _active_power_w)
+              const batBase2 = hwBatterySoc ? hwBatterySoc.replace('state_of_charge_pct', '') : '';
+              for (const apw of hwActivePower) {
+                if (batBase2 && apw.startsWith(batBase2)) continue; // skip battery device
+                const devBase = apw.replace('active_power_w', '');
+                const devImport = allKeys.find(k => k === devBase + 'total_power_import_kwh');
+                const devExport = allKeys.find(k => k === devBase + 'total_power_export_kwh');
+                if (devImport || devExport) {
+                  if (!cfg2.entities.grid_power) {
+                    cfg2.entities.grid_power = apw;
+                    found.push('HomeWizard auto-detect grid_power: ' + apw);
+                    hwCount++;
+                  }
+                  if (devImport && !cfg2.entities.grid_import_today) {
+                    cfg2.entities.grid_import_today = devImport;
+                    found.push('HomeWizard auto-detect grid_import_today: ' + devImport);
+                    hwCount++;
+                  }
+                  if (devExport && !cfg2.entities.grid_export_today) {
+                    cfg2.entities.grid_export_today = devExport;
+                    found.push('HomeWizard auto-detect grid_export_today: ' + devExport);
+                    hwCount++;
+                  }
+                  break; // Use first P1/kWh meter found
+                }
+              }
+
+              if (hwCount > 0) {
+                found.push('✓ HomeWizard detected (' + hwCount + ' entities)');
+                if (!cfg2.display) cfg2.display = {};
+                if (hwBatterySoc && !cfg2.display.battery_label) {
+                  cfg2.display.battery_label = 'HomeWizard Battery';
+                  found.push('✓ Battery label set to HomeWizard Battery');
+                }
+              }
+            }
+          }
+
           // ── Auto-detect battery sign convention ─────────────────────
           // If battery_power entity contains "output" or "discharge", positive = discharging
           if (this._hass && this._hass.states) {
             const bpEntity = (cfg2.entities.battery_power || '').toLowerCase();
             if (bpEntity) {
-              if (bpEntity.includes('output') || bpEntity.includes('discharge')) {
+              if (bpEntity.includes('marstek')) {
+                cfg2.features.battery_positive_charging = true;
+                found.push('⚡ Battery sign: positive = charging (Marstek convention)');
+              } else if (bpEntity.includes('bat_in_out')) {
+                cfg2.features.battery_positive_charging = true;
+                found.push('⚡ Battery sign: positive = charging (Zendure bat_in_out convention)');
+              } else if (bpEntity.includes('output') || bpEntity.includes('discharge')) {
                 cfg2.features.battery_positive_charging = false;
                 found.push('⚡ Battery sign: positive = discharging (entity name contains "output/discharge")');
               } else if (bpEntity.includes('sigen_') || bpEntity.includes('sigenergy')) {
@@ -2282,32 +3922,40 @@ class SigenergySettingsCard extends HTMLElement {
             }
           }
 
-          // ── Auto-detect BMS integrations (JK BMS, PACE BMS, Seplos BMS) ──
+          // ── Auto-detect BMS integrations ──
+          // Supported: JK BMS, Daly BMS, JBD/Xiaoxiang BMS, ANT BMS, PACE BMS,
+          // Seplos BMS, BMS BLE (patman15), BMS Connector (flip555),
+          // batmon-ha (fl4p), Gobel Power addon (fancyui), JKBMS RS485 addon
           if (this._hass && this._hass.states) {
             const allKeys = Object.keys(this._hass.states);
-            // Common BMS entity patterns:
-            // JK BMS:    sensor.jk_bms_*_state_of_charge, sensor.jk_bms_*_soc
-            // PACE BMS:  sensor.pace_bms_*_soc, sensor.pace_bms_*_state_of_charge
-            // Seplos BMS: sensor.seplos_*_soc, sensor.seplos_bms_*_soc
-            // BMS BLE (generic): sensor.*_bms_*_soc, sensor.*_bms_*_state_of_charge
-            // bms_connector: sensor.bms_*_soc
+
+            // ── Phase 1: Prefix-based detection (ESPHome & HACS integrations) ──
             const bmsPatterns = [
+              // ESPHome-based BMS integrations (syssi repos)
               { name: 'JK BMS', prefix: /^sensor\.jk_bms_/ },
+              { name: 'Daly BMS', prefix: /^sensor\.daly_bms_/ },
+              { name: 'JBD BMS', prefix: /^sensor\.jbd_bms_/ },
+              { name: 'ANT BMS', prefix: /^sensor\.ant_bms_/ },
               { name: 'PACE BMS', prefix: /^sensor\.pace_bms_/ },
               { name: 'Seplos BMS', prefix: /^sensor\.seplos[_.]/ },
+              // Generic BLE BMS (JBD BLE, etc.)
               { name: 'BMS BLE', prefix: /^sensor\.[a-z0-9_]*bms_ble_/ },
+              // HACS custom integration (flip555)
               { name: 'BMS Connector', prefix: /^sensor\.bms_connector_/ },
+              // JKBMS RS485 addon (jean-luc1203) via MQTT
+              { name: 'JKBMS RS485', prefix: /^sensor\.jkbms_/ },
             ];
             let bmsDetected = false;
             for (const bms of bmsPatterns) {
               const bmsKeys = allKeys.filter(k => bms.prefix.test(k));
               if (bmsKeys.length === 0) continue;
-              // Find SoC entities
-              const socKeys = bmsKeys.filter(k => k.endsWith('_soc') || k.endsWith('_state_of_charge'));
+              // Find SoC entities (multiple naming conventions)
+              const socKeys = bmsKeys.filter(k =>
+                k.endsWith('_soc') || k.endsWith('_state_of_charge') ||
+                k.endsWith('_battery_level') || k.endsWith('_soc_percent'));
               if (socKeys.length > 0) {
                 bmsDetected = true;
                 found.push('🔋 ' + bms.name + ' detected (' + socKeys.length + ' pack' + (socKeys.length > 1 ? 's' : '') + ')');
-                // Auto-assign pack SoC entities
                 const sortedSocs = socKeys.sort();
                 const packCount = Math.min(sortedSocs.length, 8);
                 cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, packCount);
@@ -2318,7 +3966,7 @@ class SigenergySettingsCard extends HTMLElement {
                     found.push('  Pack ' + (pi + 1) + ' SoC: ' + sortedSocs[pi]);
                   }
                 }
-                // Also look for battery voltage/current from this BMS
+                // Look for battery voltage/current from this BMS
                 const voltKey = bmsKeys.find(k => k.endsWith('_total_voltage') || k.endsWith('_pack_voltage') || k.endsWith('_voltage'));
                 const currKey = bmsKeys.find(k => k.endsWith('_current') || k.endsWith('_pack_current'));
                 if (voltKey && !cfg2.entities.battery_voltage) {
@@ -2330,6 +3978,152 @@ class SigenergySettingsCard extends HTMLElement {
                   found.push('  Battery Current: ' + currKey);
                 }
                 break; // Use first detected BMS brand
+              }
+            }
+
+            // ── Phase 2: batmon-ha (fl4p) — MQTT addon, suffix-based detection ──
+            // batmon-ha entities: sensor.{alias}_soc_percent, sensor.{alias}_total_voltage, sensor.{alias}_current
+            if (!bmsDetected) {
+              const batmonSocKeys = allKeys.filter(k => /^sensor\..+_soc_percent$/.test(k) || /^sensor\..+_soc_soc_percent$/.test(k));
+              if (batmonSocKeys.length > 0) {
+                bmsDetected = true;
+                found.push('🔋 batmon-ha detected (' + batmonSocKeys.length + ' battery' + (batmonSocKeys.length > 1 ? 's' : '') + ')');
+                const sortedSocs = batmonSocKeys.sort();
+                const packCount = Math.min(sortedSocs.length, 8);
+                cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, packCount);
+                for (let pi = 0; pi < packCount; pi++) {
+                  const packKey = 'battery_pack' + (pi + 1) + '_soc';
+                  if (!cfg2.entities[packKey]) {
+                    cfg2.entities[packKey] = sortedSocs[pi];
+                    found.push('  Pack ' + (pi + 1) + ' SoC: ' + sortedSocs[pi]);
+                  }
+                }
+                // Infer device prefix from SoC entity for voltage/current
+                const devPrefix = sortedSocs[0].replace(/_soc_percent$/, '').replace(/_soc_soc_percent$/, '');
+                const batmonVolt = allKeys.find(k => k === devPrefix + '_soc_total_voltage' || k === devPrefix + '_total_voltage');
+                const batmonCurr = allKeys.find(k => k === devPrefix + '_soc_current' || k === devPrefix + '_current');
+                if (batmonVolt && !cfg2.entities.battery_voltage) {
+                  cfg2.entities.battery_voltage = batmonVolt;
+                  found.push('  Battery Voltage: ' + batmonVolt);
+                }
+                if (batmonCurr && !cfg2.entities.battery_current) {
+                  cfg2.entities.battery_current = batmonCurr;
+                  found.push('  Battery Current: ' + batmonCurr);
+                }
+              }
+            }
+
+            // ── Phase 3: Gobel Power addon — MQTT, suffix-based detection ──
+            // Gobel entities: sensor.{device}_total_soc, sensor.{device}_pack_01_view_soc, sensor.{device}_total_voltage
+            if (!bmsDetected) {
+              const gobelPackSocKeys = allKeys.filter(k => /^sensor\..+_pack_\d+_view_soc$/.test(k));
+              const gobelTotalSocKeys = allKeys.filter(k => /^sensor\..+_total_soc$/.test(k));
+              if (gobelPackSocKeys.length > 0) {
+                bmsDetected = true;
+                found.push('🔋 Gobel Power BMS detected (' + gobelPackSocKeys.length + ' pack' + (gobelPackSocKeys.length > 1 ? 's' : '') + ')');
+                const sortedSocs = gobelPackSocKeys.sort();
+                const packCount = Math.min(sortedSocs.length, 8);
+                cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, packCount);
+                for (let pi = 0; pi < packCount; pi++) {
+                  const packKey = 'battery_pack' + (pi + 1) + '_soc';
+                  if (!cfg2.entities[packKey]) {
+                    cfg2.entities[packKey] = sortedSocs[pi];
+                    found.push('  Pack ' + (pi + 1) + ' SoC: ' + sortedSocs[pi]);
+                  }
+                }
+                // Infer device prefix for voltage/current from pack entity
+                const devPrefix = sortedSocs[0].replace(/_pack_\d+_view_soc$/, '');
+                const gobelVolt = allKeys.find(k => k === devPrefix + '_total_voltage');
+                const gobelCurr = allKeys.find(k => k === devPrefix + '_total_current');
+                if (gobelVolt && !cfg2.entities.battery_voltage) {
+                  cfg2.entities.battery_voltage = gobelVolt;
+                  found.push('  Battery Voltage: ' + gobelVolt);
+                }
+                if (gobelCurr && !cfg2.entities.battery_current) {
+                  cfg2.entities.battery_current = gobelCurr;
+                  found.push('  Battery Current: ' + gobelCurr);
+                }
+              } else if (gobelTotalSocKeys.length > 0) {
+                bmsDetected = true;
+                found.push('🔋 Gobel Power BMS detected (total SoC)');
+                // Use total_soc as single pack
+                cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, 1);
+                if (!cfg2.entities.battery_pack1_soc) {
+                  cfg2.entities.battery_pack1_soc = gobelTotalSocKeys[0];
+                  found.push('  Pack 1 SoC: ' + gobelTotalSocKeys[0]);
+                }
+                const devPrefix = gobelTotalSocKeys[0].replace(/_total_soc$/, '');
+                const gobelVolt = allKeys.find(k => k === devPrefix + '_total_voltage');
+                const gobelCurr = allKeys.find(k => k === devPrefix + '_total_current');
+                if (gobelVolt && !cfg2.entities.battery_voltage) {
+                  cfg2.entities.battery_voltage = gobelVolt;
+                  found.push('  Battery Voltage: ' + gobelVolt);
+                }
+                if (gobelCurr && !cfg2.entities.battery_current) {
+                  cfg2.entities.battery_current = gobelCurr;
+                  found.push('  Battery Current: ' + gobelCurr);
+                }
+              }
+            }
+
+            // ── Phase 4: BMS_BLE-HA (patman15) — smart detection via _battery_level ──
+            // BMS_BLE entities use device BLE name as prefix: sensor.{ble_name}_battery_level,
+            // sensor.{ble_name}_voltage, sensor.{ble_name}_current, sensor.{ble_name}_power
+            // Supported devices: JK, JBD, Daly, Seplos, SOK, ANT, Renogy, Redodo, LiTime, etc.
+            if (!bmsDetected) {
+              const bleSocKeys = allKeys.filter(k => k.startsWith('sensor.') && k.endsWith('_battery_level'));
+              const blePacks = [];
+              for (const socKey of bleSocKeys) {
+                const prefix = socKey.replace(/_battery_level$/, '');
+                // Verify it looks like a BMS by checking for sibling voltage/current/power entities
+                const hasVolt = allKeys.includes(prefix + '_voltage');
+                const hasCurr = allKeys.includes(prefix + '_current');
+                const hasPower = allKeys.includes(prefix + '_power');
+                if (hasVolt || hasCurr || hasPower) {
+                  blePacks.push({ soc: socKey, prefix, hasVolt, hasCurr });
+                }
+              }
+              if (blePacks.length > 0) {
+                bmsDetected = true;
+                found.push('🔋 BMS BLE detected (' + blePacks.length + ' battery' + (blePacks.length > 1 ? 's' : '') + ')');
+                const packCount = Math.min(blePacks.length, 8);
+                cfg2.features.battery_packs = Math.max(cfg2.features.battery_packs || 0, packCount);
+                for (let pi = 0; pi < packCount; pi++) {
+                  const packKey = 'battery_pack' + (pi + 1) + '_soc';
+                  if (!cfg2.entities[packKey]) {
+                    cfg2.entities[packKey] = blePacks[pi].soc;
+                    found.push('  Pack ' + (pi + 1) + ' SoC: ' + blePacks[pi].soc);
+                  }
+                }
+                // Use first pack's voltage/current/power/temp as battery-level entities
+                if (blePacks[0].hasVolt && !cfg2.entities.battery_voltage) {
+                  cfg2.entities.battery_voltage = blePacks[0].prefix + '_voltage';
+                  found.push('  Battery Voltage: ' + blePacks[0].prefix + '_voltage');
+                }
+                if (blePacks[0].hasCurr && !cfg2.entities.battery_current) {
+                  cfg2.entities.battery_current = blePacks[0].prefix + '_current';
+                  found.push('  Battery Current: ' + blePacks[0].prefix + '_current');
+                }
+                // Power
+                if (blePacks[0].prefix && !cfg2.entities.battery_power) {
+                  const pwr = allKeys.find(k => k === blePacks[0].prefix + '_power');
+                  if (pwr) { cfg2.entities.battery_power = pwr; found.push('  Battery Power: ' + pwr); }
+                }
+                // Temperature
+                if (blePacks[0].prefix && !cfg2.entities.battery_temp) {
+                  const temp = allKeys.find(k => k === blePacks[0].prefix + '_temperature') || allKeys.find(k => k === blePacks[0].prefix + '_temp');
+                  if (temp) { cfg2.entities.battery_temp = temp; found.push('  Battery Temp: ' + temp); }
+                }
+                // Cycle count
+                if (blePacks[0].prefix && !cfg2.entities.battery_cycles) {
+                  const cycles = allKeys.find(k => k === blePacks[0].prefix + '_cycle_count') || allKeys.find(k => k === blePacks[0].prefix + '_cycles') || allKeys.find(k => k === blePacks[0].prefix + '_cycle_charge');
+                  if (cycles) { cfg2.entities.battery_cycles = cycles; found.push('  Battery Cycles: ' + cycles); }
+                }
+                // Capacity
+                if (blePacks[0].prefix && !cfg2.entities.battery_capacity) {
+                  const cap = allKeys.find(k => k === blePacks[0].prefix + '_capacity') || allKeys.find(k => k === blePacks[0].prefix + '_battery_capacity');
+                  if (cap) { cfg2.entities.battery_capacity = cap; found.push('  Battery Capacity: ' + cap); }
+                }
               }
             }
           }
@@ -2981,6 +4775,19 @@ class SigenergySettingsCard extends HTMLElement {
         }
       }
     }
+    // Energy Manager detection — requires sensor.energy_manager_decision
+    if (!statusKey && cfg2.features.ems_provider === 'none') {
+      const hasEmDecision = allKeys.includes('sensor.energy_manager_decision');
+      const hasEmPlan = allKeys.includes('sensor.energy_manager_plan');
+      if (hasEmDecision || hasEmPlan) {
+        if (hasEmDecision) { cfg2.entities.em_decision = 'sensor.energy_manager_decision'; found.push('EM decision: sensor.energy_manager_decision'); }
+        // Detect Node-RED price sensors
+        if (allKeys.includes('sensor.nodered_buyprice')) { cfg2.entities.em_buy_price = 'sensor.nodered_buyprice'; found.push('EM buy price: sensor.nodered_buyprice'); }
+        if (allKeys.includes('sensor.nodered_sellprice')) { cfg2.entities.em_sell_price = 'sensor.nodered_sellprice'; found.push('EM sell price: sensor.nodered_sellprice'); }
+        cfg2.features.ems_provider = 'energy_manager';
+        found.push('✓ Energy Manager detected');
+      }
+    }
     if (found.length > 0) this._storeSave(cfg2);
     return found;
   }
@@ -3066,11 +4873,12 @@ class SigenergySettingsCard extends HTMLElement {
       </div>
       <div class="section">
         <div class="section-title">🤖 Energy Management (EMS)</div>
-        <div style="font-size:10px;color:#666;margin-bottom:8px;">Choose your energy optimizer. <a href="https://emhass.readthedocs.io/" target="_blank" style="color:#00d4b8;">EMHASS</a> (add-on) or <a href="https://github.com/hass-energy/haeo" target="_blank" style="color:#7c4dff;">HAEO</a> (HACS integration). Configure entities on the Entities tab → EMS section.</div>
+        <div style="font-size:10px;color:#666;margin-bottom:8px;">Choose your energy optimizer. <a href="https://emhass.readthedocs.io/" target="_blank" style="color:#00d4b8;">EMHASS</a> (add-on), <a href="https://github.com/hass-energy/haeo" target="_blank" style="color:#7c4dff;">HAEO</a> (HACS integration), or <a href="https://github.com/Roving-Ronin/myHomeAssistant" target="_blank" style="color:#ff9800;">Energy Manager</a> (Node-RED).  Configure entities on the Entities tab → EMS section.</div>
         <div style="display:flex;gap:8px;margin-bottom:12px;">
           <button class="ems-feature-btn ${emsProvider === 'none' ? 'active' : ''}" data-ems="none" style="flex:1;padding:10px 8px;border:1px solid ${emsProvider === 'none' ? '#8892a4' : '#2d3451'};background:${emsProvider === 'none' ? 'rgba(136,146,164,0.15)' : 'transparent'};color:${emsProvider === 'none' ? '#fff' : '#8892a4'};border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">None</button>
           <button class="ems-feature-btn ${emsProvider === 'emhass' ? 'active' : ''}" data-ems="emhass" style="flex:1;padding:10px 8px;border:1px solid ${emsProvider === 'emhass' ? '#00d4b8' : '#2d3451'};background:${emsProvider === 'emhass' ? 'rgba(0,212,184,0.15)' : 'transparent'};color:${emsProvider === 'emhass' ? '#00d4b8' : '#8892a4'};border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">EMHASS</button>
           <button class="ems-feature-btn ${emsProvider === 'haeo' ? 'active' : ''}" data-ems="haeo" style="flex:1;padding:10px 8px;border:1px solid ${emsProvider === 'haeo' ? '#7c4dff' : '#2d3451'};background:${emsProvider === 'haeo' ? 'rgba(124,77,255,0.15)' : 'transparent'};color:${emsProvider === 'haeo' ? '#7c4dff' : '#8892a4'};border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">HAEO</button>
+          <button class="ems-feature-btn ${emsProvider === 'energy_manager' ? 'active' : ''}" data-ems="energy_manager" style="flex:1;padding:10px 8px;border:1px solid ${emsProvider === 'energy_manager' ? '#ff9800' : '#2d3451'};background:${emsProvider === 'energy_manager' ? 'rgba(255,152,0,0.15)' : 'transparent'};color:${emsProvider === 'energy_manager' ? '#ff9800' : '#8892a4'};border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">Energy Mgr</button>
         </div>
         ${emsProvider === 'emhass' ? `
           ${this._toggleHtml('EMHASS Forecasts', 'Overlay MPC forecast series (PV/Battery/Grid/Load) on energy charts', 'emhass_forecasts', f.emhass_forecasts)}
@@ -3083,6 +4891,10 @@ class SigenergySettingsCard extends HTMLElement {
           ${this._toggleHtml('Forecast Table', 'Show a tabular timeline of upcoming forecast data (PV/Battery/Grid/Load/SoC/Prices)', 'forecast_table', f.forecast_table)}
           ${this._toggleHtml('Financial Tracking', 'Show optimization cost in chart annotations', 'financial_tracking', f.financial_tracking)}
         ` : ''}
+        ${emsProvider === 'energy_manager' ? `
+          ${this._toggleHtml('Forecast Table', 'Show the Energy Manager decision timeline with cost/profit tracking', 'forecast_table', f.forecast_table)}
+          ${this._toggleHtml('Financial Tracking', 'Show cost/profit tracking in chart annotations', 'financial_tracking', f.financial_tracking)}
+        ` : ''}
       </div>
       <div class="section">
         <div class="section-title">☀️ Solar Forecast</div>
@@ -3093,8 +4905,18 @@ class SigenergySettingsCard extends HTMLElement {
       <div class="section">
         <div class="section-title">🔌 Optional Equipment</div>
         <div style="font-size:10px;color:#666;margin-bottom:6px;">Enable to show equipment on the house card. Configure power/energy entities on the Entities tab.</div>
-        ${this._toggleHtml('EV Charger', 'Show EV charger with animated power flow', 'ev_charger', f.ev_charger)}
-        ${this._toggleHtml('EV Vehicle', 'Show car visual in the garage layer', 'ev_vehicle', f.ev_vehicle)}
+        <div style="margin-bottom:8px;padding:8px;background:rgba(232,112,90,0.08);border:1px solid rgba(232,112,90,0.2);border-radius:8px;">
+          <div style="font-size:11px;font-weight:600;color:#E8705A;margin-bottom:4px;">EV display modes</div>
+          <div style="font-size:10px;color:#8892a4;line-height:1.45;">Use <b>Auto EV</b> when you have a charger state/power entity. It dynamically shows/hides the car, EV charger image, EV cable line, charging dots, and EV labels. Use the manual toggles only when you want the EV visuals to stay visible without auto detection.</div>
+        </div>
+        ${this._toggleHtml('Auto EV Gate / Vehicle + Charger', 'Recommended: dynamically show the car, charger, cable line and labels only when the EV is plugged in, connected, or charging', 'ev_vehicle_auto', f.ev_vehicle_auto)}
+        ${this._toggleHtml('Always Show EV Vehicle', 'Manual fallback: always show the car in the garage. Turning this on disables Auto EV.', 'ev_vehicle', f.ev_vehicle)}
+        ${this._toggleHtml('Always Show EV Charger / Cable', 'Manual fallback: always show the charger image and EV cable line when Auto EV is off', 'ev_charger', f.ev_charger)}
+        <div class="row">
+          <span class="row-label">Charging Threshold (W)</span>
+          <input class="row-input" type="number" min="0" max="20000" step="10" value="${f.ev_vehicle_power_threshold ?? 100}" data-key="ev_vehicle_power_threshold" style="width:90px;" />
+        </div>
+        <div style="font-size:10px;color:#666;padding:0 0 6px 4px;">Auto EV uses the Charger State entity first (binary on, connected, plugged, preparing, charging, paused, complete, etc.) and falls back to charger power above this threshold. If you enable <b>Always Show EV Vehicle</b>, Auto EV is turned off to avoid conflicting modes.</div>
         ${this._toggleHtml('Heat Pump / HVAC', 'Show heat pump unit with power flow animation', 'heat_pump', f.heat_pump)}
       </div>
       <div class="section">
@@ -3161,11 +4983,22 @@ class SigenergySettingsCard extends HTMLElement {
           <div id="sl-load-list" style="margin-top:10px;">
             ${this._renderSmartLoadList(cfg)}
           </div>
+          ${this._renderSectionsManager(cfg)}
         ` : ''}
+      </div>
+      <div class="section">
+        <div class="section-title">🖱️ Interactive Modals</div>
+        <div style="font-size:10px;color:#666;margin-bottom:6px;">Make dashboard elements clickable to open rich detail modals with charts and controls.</div>
+        ${this._toggleHtml('Interactive House Card', 'Click on solar, battery, grid, home, EV, or heat pump labels to open detail modals', 'interactive_house', f.interactive_house)}
+        ${this._toggleHtml('Smart Load Modals', 'Click appliance tiles to open rich detail modals instead of HA more-info dialog', 'smart_load_modals', f.smart_load_modals)}
+        ${this._toggleHtml('Expandable Forecast', 'Click the forecast chart to open a fullscreen modal with tabbed views', 'expandable_forecast', f.expandable_forecast)}
       </div>
       <div class="section">
         <div class="section-title">🛠️ Developer</div>
         ${this._toggleHtml('Cable Path Editor', 'Drag-to-position cable routing overlay on house card (for layout customization)', 'path_editor', this._pathEditorOn)}
+        ${this._toggleHtml('Clickable Zone Editor', 'Drag and resize the transparent regions used by house-card modal clicks', 'zone_editor', this._zoneEditorOn)}
+        ${this._toggleHtml('Label Position Editor', 'Drag the house-card labels and live values (Solar, Home, Battery, Grid, EV, Heat Pump)', 'label_editor', this._labelEditorOn)}
+        ${this._toggleHtml('Asset Position Editor', 'Drag and adjust perspective/size of the heat pump image on the house card', 'asset_editor', this._assetEditorOn)}
       </div>
     `;
 
@@ -3177,13 +5010,37 @@ class SigenergySettingsCard extends HTMLElement {
           this._togglePathEditor(!this._pathEditorOn);
           return;
         }
+        if (key === 'zone_editor') {
+          this._toggleZoneEditor(!this._zoneEditorOn);
+          return;
+        }
+        if (key === 'label_editor') {
+          this._toggleLabelEditor(!this._labelEditorOn);
+          return;
+        }
+        if (key === 'asset_editor') {
+          this._toggleAssetEditor(!this._assetEditorOn);
+          return;
+        }
         const cfg2 = this._storeGet();
         cfg2.features[key] = !cfg2.features[key];
+        const changedFeatures = [key];
+        if ((key === 'ev_vehicle' || key === 'ev_charger') && cfg2.features[key]) {
+          cfg2.features.ev_vehicle_auto = false;
+          changedFeatures.push('ev_vehicle_auto');
+        }
+        if (key === 'ev_vehicle_auto' && cfg2.features.ev_vehicle_auto) {
+          cfg2.features.ev_vehicle = false;
+          cfg2.features.ev_charger = false;
+          changedFeatures.push('ev_vehicle', 'ev_charger');
+        }
         this._storeSave(cfg2);
         // Sync feature to house card's dashboard config
-        if (SigenergySettingsCard.SYNCED_FEATURES[key]) {
-          this._syncFeatureToDashboard(key, cfg2.features[key]);
-        }
+        changedFeatures.forEach(featureKey => {
+          if (SigenergySettingsCard.SYNCED_FEATURES[featureKey]) {
+            this._syncFeatureToDashboard(featureKey, cfg2.features[featureKey]);
+          }
+        });
         // Always rebuild dashboard to apply feature changes (charts, cards, etc.)
         if (this._hass) {
           this._buildDashboard().then(ok => {
@@ -3231,6 +5088,18 @@ class SigenergySettingsCard extends HTMLElement {
         const cfg2 = this._storeGet();
         cfg2.features.battery_packs = parseInt(bpInput.value) || 2;
         this._storeSave(cfg2);
+        this._render();
+      });
+    }
+
+    const evAutoThresholdInput = el.querySelector('input[data-key="ev_vehicle_power_threshold"]');
+    if (evAutoThresholdInput) {
+      evAutoThresholdInput.addEventListener('change', async () => {
+        const cfg2 = this._storeGet();
+        const threshold = parseFloat(evAutoThresholdInput.value);
+        cfg2.features.ev_vehicle_power_threshold = Number.isFinite(threshold) && threshold >= 0 ? threshold : 100;
+        this._storeSave(cfg2);
+        if (this._hass) await this._buildDashboard();
         this._render();
       });
     }
@@ -3371,6 +5240,109 @@ class SigenergySettingsCard extends HTMLElement {
     // Bind existing smart load list events
     this._bindSmartLoadListEvents(el);
     this._bindSmartLoadEntityAutocomplete(el);
+
+    // Bind sections manager
+    this._bindSectionsManagerEvents(el);
+  }
+
+  _bindSectionsManagerEvents(el) {
+    const addSectionBtn = el.querySelector('#sl-add-section');
+    if (addSectionBtn) {
+      addSectionBtn.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        cfg2.smart_load_sections = cfg2.smart_load_sections || [];
+        cfg2.smart_load_sections.push({ id: 'sec_' + Date.now(), name: '', device_ids: [] });
+        this._storeSave(cfg2);
+        this._render();
+      });
+    }
+
+    // Section name input save
+    el.querySelectorAll('.sl-section-name').forEach(input => {
+      input.addEventListener('change', () => {
+        const idx = parseInt(input.dataset.sectionIdx);
+        const cfg2 = this._storeGet();
+        if (cfg2.smart_load_sections?.[idx]) {
+          cfg2.smart_load_sections[idx].name = input.value.trim();
+          this._storeSave(cfg2);
+        }
+      });
+    });
+
+    // Section delete button
+    el.querySelectorAll('.sl-section-delete').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.sectionIdx);
+        const cfg2 = this._storeGet();
+        cfg2.smart_load_sections = (cfg2.smart_load_sections || []).filter((_, i) => i !== idx);
+        this._storeSave(cfg2);
+        this._render();
+      });
+    });
+
+    // Section assign button — show inline device checkboxes
+    el.querySelectorAll('.sl-section-assign').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.sectionIdx);
+        const cfg2 = this._storeGet();
+        const section = cfg2.smart_load_sections?.[idx];
+        if (!section) return;
+        const loads = cfg2.smart_loads || [];
+        const existing = document.querySelector('#sl-assign-panel');
+        if (existing) { existing.remove(); return; }
+        const panel = document.createElement('div');
+        panel.id = 'sl-assign-panel';
+        panel.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a2035;border:1px solid rgba(0,212,184,0.4);border-radius:12px;padding:16px;z-index:9999;min-width:260px;max-height:70vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,0.6);';
+        panel.innerHTML = `
+          <div style="font-size:13px;font-weight:700;color:#00d4b8;margin-bottom:10px;">Assign to "${section.name || 'Section'}"</div>
+          ${loads.map(l => `
+            <label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;font-size:12px;color:#e0e4ec;">
+              <input type="checkbox" value="${l.entity_power}" ${(section.device_ids||[]).includes(l.entity_power) ? 'checked' : ''} style="accent-color:#00d4b8;" />
+              ${l.label || l.entity_power}
+            </label>`).join('')}
+          <div style="margin-top:12px;display:flex;gap:8px;">
+            <button id="sl-assign-save" style="flex:1;padding:6px;background:#00d4b8;color:#071512;border:none;border-radius:6px;font-weight:700;cursor:pointer;">Save</button>
+            <button id="sl-assign-cancel" style="flex:1;padding:6px;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;">Cancel</button>
+          </div>`;
+        document.body.appendChild(panel);
+        panel.querySelector('#sl-assign-cancel').addEventListener('click', () => panel.remove());
+        panel.querySelector('#sl-assign-save').addEventListener('click', () => {
+          const checked = [...panel.querySelectorAll('input[type=checkbox]:checked')].map(c => c.value);
+          const cfg3 = this._storeGet();
+          if (cfg3.smart_load_sections?.[idx]) {
+            cfg3.smart_load_sections[idx].device_ids = checked;
+            this._storeSave(cfg3);
+          }
+          panel.remove();
+          this._render();
+        });
+      });
+    });
+  }
+
+  _renderSectionsManager(cfg) {
+    const loads = cfg.smart_loads || [];
+    if (!loads.length) return '';
+    const sections = cfg.smart_load_sections || [];
+    const sectionRows = sections.map((s, i) => {
+      const assignedCount = (s.device_ids || []).filter(id => loads.find(l => l.entity_power === id)).length;
+      return `
+        <div class="sl-section-row" data-section-idx="${i}" style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,212,184,0.06);border:1px solid rgba(0,212,184,0.15);border-radius:8px;margin-bottom:4px;">
+          <span style="font-size:14px;">☰</span>
+          <input class="sl-section-name" data-section-idx="${i}" value="${(s.name||'').replace(/"/g,'&quot;')}" placeholder="Section name" style="flex:1;border:none;background:transparent;color:var(--primary-text-color,#e0e4ec);font-size:12px;font-weight:600;outline:none;" />
+          <span style="font-size:10px;color:#8892a4;">${assignedCount}/${loads.length} loads</span>
+          <button class="sl-section-assign" data-section-idx="${i}" style="padding:3px 8px;background:rgba(0,212,184,0.12);border:1px solid rgba(0,212,184,0.3);border-radius:6px;color:#00d4b8;font-size:10px;cursor:pointer;">Assign</button>
+          <button class="sl-section-delete" data-section-idx="${i}" style="padding:3px 6px;background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.25);border-radius:6px;color:#e74c3c;font-size:10px;cursor:pointer;">✕</button>
+        </div>`;
+    }).join('');
+
+    return `
+      <div style="margin-top:14px;border-top:1px solid rgba(0,212,184,0.1);padding-top:10px;">
+        <div style="font-size:12px;font-weight:700;color:#00d4b8;margin-bottom:6px;">📂 Load Sections</div>
+        <div style="font-size:10px;color:#666;margin-bottom:8px;">Group devices into rooms or categories (e.g. Living Room, Kitchen). Sections appear as collapsible groups in the dashboard.</div>
+        <div id="sl-sections-list">${sectionRows}</div>
+        <button id="sl-add-section" style="width:100%;margin-top:4px;padding:7px;background:rgba(0,212,184,0.08);border:1px dashed rgba(0,212,184,0.3);border-radius:8px;color:#00d4b8;font-size:11px;font-weight:600;cursor:pointer;">+ Add Section</button>
+      </div>`;
   }
 
   _renderSmartLoadList(cfg) {
@@ -3388,6 +5360,10 @@ class SigenergySettingsCard extends HTMLElement {
           <div class="entity-input-wrap" style="position:relative;">
             <input class="sl-entity" data-idx="${idx}" value="${load.entity_power || ''}" placeholder="sensor.xxx_power — type to search" autocomplete="off" style="width:100%;border:none;background:transparent;color:#8892a4;font-size:10px;outline:none;margin-top:2px;" />
             <div class="entity-dropdown sl-entity-dropdown" data-dropdown-idx="${idx}"></div>
+          </div>
+          <div class="entity-input-wrap" style="position:relative;">
+            <input class="sl-switch" data-idx="${idx}" value="${load.entity_switch || load.switch_entity || ''}" placeholder="optional switch/light/input_boolean for modal toggle" autocomplete="off" style="width:100%;border:none;background:transparent;color:#6f7d92;font-size:10px;outline:none;margin-top:2px;" />
+            <div class="entity-dropdown sl-switch-dropdown" data-switch-dropdown-idx="${idx}"></div>
           </div>
         </div>
         <select class="sl-type" data-idx="${idx}" style="width:80px;background:var(--card-background-color,#1a1f2e);color:var(--secondary-text-color,#8892a4);border:1px solid var(--divider-color,#2d3451);border-radius:4px;font-size:10px;padding:2px;">
@@ -3417,6 +5393,18 @@ class SigenergySettingsCard extends HTMLElement {
         const idx = parseInt(input.dataset.idx);
         if (cfg2.smart_loads?.[idx]) {
           cfg2.smart_loads[idx].entity_power = input.value;
+          this._storeSave(cfg2);
+          if (this._hass) this._buildDashboard();
+        }
+      });
+    });
+    // Optional control entity for smart-load modal toggle
+    el.querySelectorAll('.sl-switch').forEach(input => {
+      input.addEventListener('change', () => {
+        const cfg2 = this._storeGet();
+        const idx = parseInt(input.dataset.idx);
+        if (cfg2.smart_loads?.[idx]) {
+          cfg2.smart_loads[idx].entity_switch = input.value;
           this._storeSave(cfg2);
           if (this._hass) this._buildDashboard();
         }
@@ -3460,6 +5448,7 @@ class SigenergySettingsCard extends HTMLElement {
     const allEntityIds = Object.keys(this._hass.states);
     const closeAllSLDropdowns = () => {
       el.querySelectorAll('.sl-entity-dropdown.open').forEach(d => d.classList.remove('open'));
+      el.querySelectorAll('.sl-switch-dropdown.open').forEach(d => d.classList.remove('open'));
     };
     el.querySelectorAll('.sl-entity').forEach(input => {
       const wrap = input.closest('.entity-input-wrap');
@@ -3480,6 +5469,39 @@ class SigenergySettingsCard extends HTMLElement {
           const val = st?.state || '';
           const uom = st?.attributes?.unit_of_measurement || '';
           return '<div class="entity-dropdown-item" data-eid="' + this._esc(k) + '"><span class="entity-name">' + this._esc(k) + '</span>' + (fn ? ' <span class="entity-state">' + this._esc(fn) + '</span>' : '') + ' <span class="entity-state">= ' + this._esc(val) + (uom ? ' ' + this._esc(uom) : '') + '</span></div>';
+        }).join('');
+        dropdown.classList.add('open');
+        dropdown.querySelectorAll('.entity-dropdown-item').forEach(item => {
+          item.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            input.value = item.dataset.eid;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            closeAllSLDropdowns();
+          });
+        });
+      };
+      input.addEventListener('focus', () => showDropdown(input.value));
+      input.addEventListener('input', () => showDropdown(input.value));
+      input.addEventListener('blur', () => { setTimeout(closeAllSLDropdowns, 200); });
+    });
+    el.querySelectorAll('.sl-switch').forEach(input => {
+      const wrap = input.closest('.entity-input-wrap');
+      const dropdown = wrap ? wrap.querySelector('.sl-switch-dropdown') : null;
+      if (!dropdown) return;
+      const showDropdown = (filter) => {
+        const q = (filter || '').toLowerCase();
+        if (!q || q.length < 2) { dropdown.classList.remove('open'); return; }
+        const matches = allEntityIds.filter(k => {
+          if (!/^(switch|input_boolean|light|fan)\./.test(k)) return false;
+          const st = this._hass.states[k];
+          const fn = (st?.attributes?.friendly_name || '').toLowerCase();
+          return k.toLowerCase().includes(q) || fn.includes(q);
+        }).slice(0, 40);
+        if (matches.length === 0) { dropdown.classList.remove('open'); return; }
+        dropdown.innerHTML = matches.map(k => {
+          const st = this._hass.states[k];
+          const fn = st?.attributes?.friendly_name || '';
+          return '<div class="entity-dropdown-item" data-eid="' + this._esc(k) + '"><span class="entity-name">' + this._esc(k) + '</span>' + (fn ? ' <span class="entity-state">' + this._esc(fn) + '</span>' : '') + '</div>';
         }).join('');
         dropdown.classList.add('open');
         dropdown.querySelectorAll('.entity-dropdown-item').forEach(item => {
@@ -3559,11 +5581,26 @@ class SigenergySettingsCard extends HTMLElement {
       const energyCandidates = [baseName + '_energy', baseName + '_consumption', baseName + '_kwh',
                                  baseName + '_energy_today', baseName + '_daily_energy'];
       const energyEntity = energyCandidates.find(e => e in allStates) || '';
+      const stem = entityId.replace(/^sensor\./, '').replace(/_(power|vermogen|watt|energy|consumption|kwh|daily_energy|energy_today)$/i, '');
+      const switchCandidates = [
+        'switch.' + stem,
+        'input_boolean.' + stem,
+        'light.' + stem,
+        'fan.' + stem,
+      ];
+      const controlEntity = switchCandidates.find(eid => eid in allStates) || Object.keys(allStates).find(eid => {
+        if (!/^(switch|input_boolean|light|fan)\./.test(eid)) return false;
+        const id = eid.toLowerCase();
+        const name = (allStates[eid].attributes?.friendly_name || '').toLowerCase();
+        const normalizedStem = stem.toLowerCase().replace(/_/g, ' ');
+        return id.includes(stem.toLowerCase()) || (normalizedStem.length > 3 && name.includes(normalizedStem));
+      }) || '';
 
       return {
         id: 'load_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
         entity_power: entityId,
         entity_energy: energyEntity,
+        entity_switch: controlEntity,
         type,
         label: friendlyName
           .replace(/\s*(Vermogen|Power|Puissance|Leistung|Watt|Consumed|Produced|Phase\s*\d*)\s*/gi, '')
@@ -3618,6 +5655,74 @@ class SigenergySettingsCard extends HTMLElement {
         await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
       }
     } catch (e) { console.error('Sync battery_label to dashboard failed:', e); }
+  }
+
+  async _syncHeatPumpLabelToDashboard(value) {
+    if (!this._hass) return;
+    try {
+      const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+      const patchHouse = (obj) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (obj.type === 'custom:sigenergy-house-card') {
+          if (value) obj.heat_pump_label = value;
+          else delete obj.heat_pump_label;
+          return true;
+        }
+        for (const v of Object.values(obj)) {
+          if (Array.isArray(v)) { for (const item of v) { if (patchHouse(item)) return true; } }
+          else if (typeof v === 'object' && v !== null) { if (patchHouse(v)) return true; }
+        }
+        return false;
+      };
+      if (patchHouse(config)) {
+        await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+      }
+    } catch (e) { console.error('Sync heat_pump_label to dashboard failed:', e); }
+  }
+
+  async _syncEvChargerLabelToDashboard(value) {
+    if (!this._hass) return;
+    try {
+      const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+      const patchHouse = (obj) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (obj.type === 'custom:sigenergy-house-card') {
+          if (value) obj.ev_charger_label = value;
+          else delete obj.ev_charger_label;
+          return true;
+        }
+        for (const v of Object.values(obj)) {
+          if (Array.isArray(v)) { for (const item of v) { if (patchHouse(item)) return true; } }
+          else if (typeof v === 'object' && v !== null) { if (patchHouse(v)) return true; }
+        }
+        return false;
+      };
+      if (patchHouse(config)) {
+        await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+      }
+    } catch (e) { console.error('Sync ev_charger_label to dashboard failed:', e); }
+  }
+
+  async _syncSwapBatteryColorsToDashboard(value) {
+    if (!this._hass) return;
+    try {
+      const config = await this._hass.callWS({ type: 'lovelace/config', url_path: 'dashboard-sigenergy' });
+      const patchHouse = (obj) => {
+        if (!obj || typeof obj !== 'object') return false;
+        if (obj.type === 'custom:sigenergy-house-card') {
+          obj.swap_battery_colors = !!value;
+          return true;
+        }
+        for (const v of Object.values(obj)) {
+          if (Array.isArray(v)) { for (const item of v) { if (patchHouse(item)) return true; } }
+          else if (typeof v === 'object' && v !== null) { if (patchHouse(v)) return true; }
+        }
+        return false;
+      };
+      if (patchHouse(config)) {
+        await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
+      }
+    } catch (e) { console.error('Sync swap_battery_colors to dashboard failed:', e); }
   }
 
   async _syncSocTargetsToDashboard(cfg) {
@@ -3745,8 +5850,13 @@ class SigenergySettingsCard extends HTMLElement {
     // Also rejects energy units (Wh/kWh/MWh) to prevent cumulative counters from breaking the axis
     const powerTransform = "const u = (entity?.attributes?.unit_of_measurement || '').trim(); if (/wh$/i.test(u)) return null; return u === 'MW' ? x * 1000 : u === 'kW' ? x : x / 1000;";
     const fp = this._storeGet()?.display?.decimal_places ?? 1;
+    const entityOk = (entityId) => {
+      if (!entityId) return false;
+      const st = this._hass?.states?.[entityId];
+      return !!st && st.state !== 'unavailable' && st.state !== 'unknown';
+    };
     // Actual solar
-    if (e.solar_power) series.push({
+    if (entityOk(e.solar_power)) series.push({
       entity: e.solar_power,
       name: 'Solar', color: '#F0A830', type: 'area', opacity: 0.25,
       stroke_width: 2.5, extend_to: false, unit: ' kW',
@@ -3756,7 +5866,7 @@ class SigenergySettingsCard extends HTMLElement {
       yaxis_id: 'power', float_precision: fp
     });
     // Actual battery
-    if (e.battery_power) series.push({
+    if (entityOk(e.battery_power)) series.push({
       entity: e.battery_power,
       name: 'Battery', color: '#00d4b8', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
@@ -3766,8 +5876,9 @@ class SigenergySettingsCard extends HTMLElement {
       yaxis_id: 'power', float_precision: fp
     });
     // Actual grid
-    if (e.grid_active_power || e.grid_power) series.push({
-      entity: e.grid_active_power || e.grid_power,
+    const gridPowerEntity = entityOk(e.grid_active_power) ? e.grid_active_power : (entityOk(e.grid_power) ? e.grid_power : '');
+    if (gridPowerEntity) series.push({
+      entity: gridPowerEntity,
       name: 'Grid', color: '#E53935', type: 'line',
       stroke_width: 2.5, extend_to: false, unit: ' kW',
       transform: powerTransform,
@@ -3776,7 +5887,7 @@ class SigenergySettingsCard extends HTMLElement {
       yaxis_id: 'power', float_precision: fp
     });
     // Actual consumption (inverted)
-    if (e.load_power) series.push({
+    if (entityOk(e.load_power)) series.push({
       entity: e.load_power,
       name: 'Consumption', color: '#AB47BC', type: 'area', opacity: 0.10,
       stroke_width: 1.5, extend_to: false, unit: ' kW',
@@ -3787,7 +5898,7 @@ class SigenergySettingsCard extends HTMLElement {
     });
 
     // EMHASS Forecast overlays (conditional)
-    if (features.emhass && features.emhass_forecasts && e.mpc_pv) {
+    if (features.emhass && features.emhass_forecasts && entityOk(e.mpc_pv)) {
       // PV forecast
       series.push({
         entity: e.mpc_pv, name: 'Solar (plan)', color: '#FFF59D',
@@ -3798,7 +5909,7 @@ class SigenergySettingsCard extends HTMLElement {
         yaxis_id: 'power'
       });
       // Battery forecast
-      if (e.mpc_battery) {
+      if (entityOk(e.mpc_battery)) {
         series.push({
           entity: e.mpc_battery, name: 'Battery (plan)', color: '#A5D6A7',
           type: 'area', opacity: 0.06, curve: 'stepline', extend_to: false,
@@ -3809,7 +5920,7 @@ class SigenergySettingsCard extends HTMLElement {
         });
       }
       // Grid forecast
-      if (e.mpc_grid) {
+      if (entityOk(e.mpc_grid)) {
         series.push({
           entity: e.mpc_grid, name: 'Grid (plan)', color: '#EF5350',
           type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
@@ -3820,7 +5931,7 @@ class SigenergySettingsCard extends HTMLElement {
         });
       }
       // Load forecast (inverted)
-      if (e.mpc_load) {
+      if (entityOk(e.mpc_load)) {
         series.push({
           entity: e.mpc_load, name: 'Load (plan)', color: '#CE93D8',
           type: 'line', curve: 'smooth', extend_to: false, unit: ' kW',
@@ -3831,7 +5942,7 @@ class SigenergySettingsCard extends HTMLElement {
         });
       }
       // SOC forecast (secondary axis)
-      if (e.mpc_soc) {
+      if (entityOk(e.mpc_soc)) {
         series.push({
           entity: e.mpc_soc, name: 'SOC (plan)', color: '#81C784',
           type: 'line', curve: 'stepline', stroke_width: 1, stroke_dash: 5,
@@ -3842,7 +5953,7 @@ class SigenergySettingsCard extends HTMLElement {
         });
       }
       // Actual SOC
-      if (e.battery_soc) {
+      if (entityOk(e.battery_soc)) {
         series.push({
           entity: e.battery_soc, name: 'SOC', color: '#2196F3',
           type: 'area', opacity: 0.2, stroke_width: 2.5,
@@ -3957,7 +6068,7 @@ return [];`;
         series.push({
           entity: e.buy_price, name: 'Import Price (plan)', color: '#FFD54F',
           type: 'line', extend_to: false, unit: priceUnit,
-          float_precision: 4, stroke_width: 1, opacity: 0.7,
+          float_precision: 2, stroke_width: 1, opacity: 0.7,
           show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: buyDG,
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 5
@@ -3967,7 +6078,7 @@ return [];`;
           series.push({
             entity: e.buy_price, name: 'Import Price', color: '#FFB300',
             type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
-            unit: priceUnit, float_precision: 4,
+            unit: priceUnit, float_precision: 2,
             group_by: { func: 'avg', duration: '30min' },
             show: { in_header: false, legend_value: true },
             yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
@@ -3983,7 +6094,7 @@ return [];`;
         series.push({
           entity: e.sell_price, name: 'Export Price (plan)', color: '#A5D6A7',
           type: 'line', extend_to: false, unit: priceUnit,
-          float_precision: 4, stroke_width: 1, opacity: 0.7,
+          float_precision: 2, stroke_width: 1, opacity: 0.7,
           show: { in_header: false, legend_value: false, in_legend: false },
           data_generator: sellDG,
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 5
@@ -3993,7 +6104,7 @@ return [];`;
           series.push({
             entity: e.sell_price, name: 'Export Price', color: '#43A047',
             type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
-            unit: priceUnit, float_precision: 4,
+            unit: priceUnit, float_precision: 2,
             group_by: { func: 'avg', duration: '30min' },
             show: { in_header: false, legend_value: true },
             yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
@@ -4005,7 +6116,7 @@ return [];`;
         series.push({
           entity: e.current_import_price, name: 'Import Price', color: '#FFB300',
           type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
+          unit: priceUnit, float_precision: 2,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
@@ -4015,7 +6126,7 @@ return [];`;
         series.push({
           entity: e.current_export_price, name: 'Export Price', color: '#43A047',
           type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
-          unit: priceUnit, float_precision: 4,
+          unit: priceUnit, float_precision: 2,
           group_by: { func: 'avg', duration: '1h' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
@@ -4041,7 +6152,7 @@ if (!forecast || !forecast.length) return [];
 return forecast.map(function(d) {
   var ts = d.period_start;
   var t = typeof ts === 'string' ? new Date(ts).getTime() : new Date(ts).getTime();
-  var kw = parseFloat(d.pv_estimate || 0);
+  var kw = (d.pv_estimate != null) ? parseFloat(d.pv_estimate) : (parseFloat(d.power_w || 0) / 1000);
   return [t, kw];
 }).filter(function(p) { return !isNaN(p[0]) && !isNaN(p[1]); });`,
           yaxis_id: 'power'
@@ -4062,7 +6173,7 @@ if (!forecast || !forecast.length) return [];
 return forecast.map(function(d) {
   var ts = d.period_start;
   var t = typeof ts === 'string' ? new Date(ts).getTime() : new Date(ts).getTime();
-  var kw = parseFloat(d.pv_estimate || 0);
+  var kw = (d.pv_estimate != null) ? parseFloat(d.pv_estimate) : (parseFloat(d.power_w || 0) / 1000);
   return [t, kw];
 }).filter(function(p) { return !isNaN(p[0]) && !isNaN(p[1]); });`,
           yaxis_id: 'power'
@@ -4124,7 +6235,7 @@ return forecast.map(function(d) {
       }
     }
 
-    return series;
+    return series.filter(s => !s.entity || entityOk(s.entity));
   }
 
   _buildYAxes(features, cfg) {
@@ -4288,7 +6399,7 @@ return forecast.map(function(d) {
           title: hasEmhassForecasts ? 'Energy + EMHASS Forecast' : hasHaeoForecasts ? 'Energy + HAEO Forecast' : hasSolarForecast ? 'Energy + Solar Forecast' : 'Energy Overview'
         },
         graph_span: showExtendedChart ? '48h' : '24h',
-        update_interval: '10s',
+        update_interval: cfg.display?.chart_refresh_interval || '60s',
         apex_config: {
           chart: {
             height: showExtendedChart ? '500px' : '350px',
@@ -4342,7 +6453,7 @@ return forecast.map(function(d) {
           }
         },
         now: { show: true, label: 'Now', color: '#00d4b8' },
-        span: showExtendedChart ? { start: 'hour', offset: '-6h' } : undefined,
+        span: showExtendedChart ? { start: 'hour', offset: '-12h' } : undefined,
         all_series_config: { stroke_width: 2 },
         yaxis: yaxis,
         series: series
@@ -4531,25 +6642,32 @@ return forecast.map(function(d) {
       const mainLayout = overviewView.cards[0];
       if (!mainLayout || mainLayout.type !== 'custom:layout-card') throw new Error('Layout card not found');
 
-      // Responsive grid: 3 columns on desktop (house|sankey|battery), 2 on tablet, 1 on mobile
+      // Responsive grid: keep the two primary overview cards (house + energy flow)
+      // in a balanced two-column row. The battery card follows below instead of
+      // reserving a mostly empty third desktop column.
+      // iPad portrait (768-834px) stays single column to avoid cramped layout
       if (mainLayout.layout) {
         mainLayout.layout['grid-template-columns'] = '1fr';
+        mainLayout.layout['grid-gap'] = '16px';
         mainLayout.layout['align-items'] = 'start';
         if (mainLayout.layout.mediaquery) {
-          mainLayout.layout.mediaquery['(min-width: 769px)'] = {
-            'grid-template-columns': '1fr 1fr',
+          mainLayout.layout.mediaquery['(min-width: 1025px)'] = {
+            'grid-template-columns': 'minmax(420px, 0.95fr) minmax(520px, 1.25fr)',
+            'grid-gap': '16px',
             'align-items': 'start'
           };
           mainLayout.layout.mediaquery['(min-width: 1201px)'] = {
-            'grid-template-columns': '1fr 1fr 1fr',
+            'grid-template-columns': 'minmax(460px, 0.95fr) minmax(620px, 1.35fr)',
             'grid-template-rows': 'auto',
+            'grid-gap': '16px',
             'align-items': 'start'
           };
           mainLayout.layout.mediaquery['(min-width: 1800px)'] = {
-            'grid-template-columns': '1fr 1fr 1fr',
+            'grid-template-columns': 'minmax(560px, 0.95fr) minmax(780px, 1.35fr)',
             'grid-template-rows': 'auto',
             'max-width': '2200px',
             'margin': '0 auto',
+            'grid-gap': '18px',
             'align-items': 'start'
           };
         }
@@ -4599,6 +6717,8 @@ return forecast.map(function(d) {
         sun: 'sun.sun',
         ev_charger_power: e.ev_charger_power || '',
         ev_charger_state: e.ev_charger_state || '',
+        ev_soc: e.ev_soc || '',
+        ev_range: e.ev_range || '',
         weather: e.weather || '',
         heat_pump_power: e.heat_pump_power || e.deferrable0_power || '',
         battery_capacity: e.battery_capacity || '',
@@ -4634,10 +6754,16 @@ return forecast.map(function(d) {
       delete houseCardOrig.image_path;
       houseCardOrig.features.ev_charger = f.ev_charger || false;
       houseCardOrig.features.ev_vehicle = f.ev_vehicle || false;
+      houseCardOrig.features.ev_vehicle_auto = f.ev_vehicle_auto || false;
+      houseCardOrig.features.ev_vehicle_power_threshold = f.ev_vehicle_power_threshold ?? 100;
       houseCardOrig.features.heat_pump = f.heat_pump || false;
       houseCardOrig.features.grid = f.grid_connection !== false;
       houseCardOrig.features.hide_cables = f.hide_cables || false;
       houseCardOrig.features.battery_runtime = f.battery_runtime !== false;
+      houseCardOrig.features.interactive_house = f.interactive_house !== false;
+      if (cfg.click_zones) houseCardOrig.click_zones = cfg.click_zones;
+      if (cfg.label_positions) houseCardOrig.label_positions = cfg.label_positions;
+      if (cfg.heat_pump_position) houseCardOrig.heat_pump_position = cfg.heat_pump_position;
       // Sigenergy convention: positive battery_power = charging
       houseCardOrig.battery_positive_charging = (f.battery_positive_charging !== false);
       // Battery label override (e.g. "SigenStor", "Huawei LUNA", "PowerWall")
@@ -4647,447 +6773,80 @@ return forecast.map(function(d) {
       } else {
         delete houseCardOrig.battery_label;
       }
+      const hpLabel = cfg.display?.heat_pump_label;
+      if (hpLabel) {
+        houseCardOrig.heat_pump_label = hpLabel;
+      } else {
+        delete houseCardOrig.heat_pump_label;
+      }
+      const evChargerLabel = cfg.display?.ev_charger_label;
+      if (evChargerLabel) {
+        houseCardOrig.ev_charger_label = evChargerLabel;
+      } else {
+        delete houseCardOrig.ev_charger_label;
+      }
+      houseCardOrig.swap_battery_colors = !!cfg.display?.swap_battery_colors;
       if (!houseCardOrig.card_mod) houseCardOrig.card_mod = {};
-      houseCardOrig.card_mod.style = 'ha-card { overflow: hidden !important; }\n.house-container { width: 100% !important; overflow: hidden !important; }\n.house-container img { width: 100% !important; height: auto !important; }\n.house-container svg { width: 100% !important; height: auto !important; }';
+      houseCardOrig.card_mod.style = 'ha-card { overflow: hidden !important; }\n.house-container { width: 100% !important; overflow: hidden !important; }\n.house-container img:not(.heat-pump-img) { width: 100% !important; height: auto !important; }\n.house-container svg { width: 100% !important; height: auto !important; }';
       const houseStack = [houseCardOrig];
       if (emsStatusCard) houseStack.push(emsStatusCard);
 
-      // Build Forecast Timeline Table (conditional on forecast_table feature)
-      let forecastTableCard = null;
-      let ftToggleCard = null;
-      let ftConditionalCard = null;
+      // Build Forecast Modal — compact trigger bar that opens fullscreen overlay on tap
+      let forecastModalCard = null;
       if (f.forecast_table && emsP !== 'none') {
-        const currency = cfg.pricing?.currency || '€';
         const _ft = _resolvedTheme;
         const _ftBg = _ft === 'light' ? '#f8f9fa' : 'rgba(30,35,54,0.94)';
         const _ftBorder = _ft === 'light' ? '#e0e0e0' : '#2d3451';
-        const _ftText = _ft === 'light' ? '#1a1f2e' : '#e0e4ec';
-        const _ftMuted = _ft === 'light' ? '#666' : '#8892a4';
-        const _ftRowAlt = _ft === 'light' ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)';
-        const _ftNowBg = _ft === 'light' ? 'rgba(0,212,184,0.12)' : 'rgba(0,212,184,0.15)';
 
+        let innerCard = null;
+        let modalTitle = '';
+        let modalIconColor = 'teal';
         if (emsP === 'haeo') {
-          // HAEO forecast table — uses forecast attributes (HTML table via html-template-card)
-          const hImpP = e.haeo_import_price || '';
-          const hExpP = e.haeo_export_price || '';
-          const hBatt = e.haeo_battery_charge || e.haeo_battery_discharge || '';
-          const hGrid = e.haeo_grid_power || '';
-          const hSolar = e.haeo_solar_power || '';
-          const hLoad = e.haeo_load_power || '';
-          const hSoc = e.haeo_battery_soc || '';
-          const hHasNet = hImpP && hExpP && hGrid;
-
-          // Build Jinja2 template — iterates over export price forecast or falls back
-          const iterEntity = hExpP || hImpP || hSolar || hLoad || hGrid || hBatt || hSoc;
-          if (iterEntity) {
-            // Count total columns for colspan in day-divider rows
-            let haeCols = 1; // Time
-            if (hImpP) haeCols++;
-            if (hExpP) haeCols++;
-            if (hSolar) haeCols++;
-            if (hLoad) haeCols++;
-            if (hGrid) haeCols++;
-            if (hBatt) haeCols++;
-            if (hSoc) haeCols++;
-            if (hHasNet) haeCols++;
-            const leftCols = Math.max(1, haeCols - 3);
-            const rightCols = haeCols - leftCols;
-
-            let tpl = '';
-            // CSS variables for theming
-            const _thStyle = "position:sticky; top:0; z-index:2; background:var(--card-background-color); padding:4px 6px; border-bottom:2px solid var(--divider-color); text-align:center; white-space:nowrap; font-size:11px; color:var(--secondary-text-color);";
-            const _tdStyle = "padding:4px 6px; border-bottom:1px solid var(--divider-color); text-align:center; white-space:nowrap;";
-            const _dayStyle = "padding:6px; border-bottom:1px solid var(--divider-color); border-top:2px solid var(--divider-color); font-weight:bold; background:var(--secondary-background-color);";
-
-            // Collect all forecast arrays into time-keyed maps
-            tpl += "{%- set _iter = state_attr('" + iterEntity + "', 'forecast') or [] %}\n";
-            if (hImpP) tpl += "{%- set _imp_fc = state_attr('" + hImpP + "', 'forecast') or [] %}\n";
-            if (hExpP) tpl += "{%- set _exp_fc = state_attr('" + hExpP + "', 'forecast') or [] %}\n";
-            if (hBatt) tpl += "{%- set _batt_fc = state_attr('" + hBatt + "', 'forecast') or [] %}\n";
-            if (hGrid) tpl += "{%- set _grid_fc = state_attr('" + hGrid + "', 'forecast') or [] %}\n";
-            if (hSolar) tpl += "{%- set _solar_fc = state_attr('" + hSolar + "', 'forecast') or [] %}\n";
-            if (hLoad) tpl += "{%- set _load_fc = state_attr('" + hLoad + "', 'forecast') or [] %}\n";
-            if (hSoc) tpl += "{%- set _soc_fc = state_attr('" + hSoc + "', 'forecast') or [] %}\n";
-
-            // Build time-keyed lookup dicts
-            tpl += "{%- set ns = namespace(imp={}, exp={}, batt={}, grid={}, solar={}, load={}, soc={}) %}\n";
-            if (hImpP) tpl += "{%- for p in _imp_fc %}{%- set ts = p.time | as_datetime | as_local | as_timestamp | string %}{%- set ns.imp = dict(ns.imp, **{ts: (p.value * 100) | round(2)}) %}{%- endfor %}\n";
-            if (hExpP) tpl += "{%- for p in _exp_fc %}{%- set ts = p.time | as_datetime | as_local | as_timestamp | string %}{%- set ns.exp = dict(ns.exp, **{ts: (p.value * 100) | round(2)}) %}{%- endfor %}\n";
-            if (hBatt) tpl += "{%- for p in _batt_fc %}{%- set ts = p.time | as_datetime | as_local | as_timestamp | string %}{%- set ns.batt = dict(ns.batt, **{ts: (p.value) | round(1)}) %}{%- endfor %}\n";
-            if (hGrid) tpl += "{%- for p in _grid_fc %}{%- set ts = p.time | as_datetime | as_local | as_timestamp | string %}{%- set ns.grid = dict(ns.grid, **{ts: (p.value) | round(1)}) %}{%- endfor %}\n";
-            if (hSolar) tpl += "{%- for p in _solar_fc %}{%- set ts = p.time | as_datetime | as_local | as_timestamp | string %}{%- set ns.solar = dict(ns.solar, **{ts: (p.value) | round(1)}) %}{%- endfor %}\n";
-            if (hLoad) tpl += "{%- for p in _load_fc %}{%- set ts = p.time | as_datetime | as_local | as_timestamp | string %}{%- set ns.load = dict(ns.load, **{ts: (p.value) | round(1)}) %}{%- endfor %}\n";
-            if (hSoc) tpl += "{%- for p in _soc_fc %}{%- set ts = p.time | as_datetime | as_local | as_timestamp | string %}{%- set ns.soc = dict(ns.soc, **{ts: (p.value) | round(0)}) %}{%- endfor %}\n";
-
-            // Compute per-slot net cost from buy/sell prices and grid power
-            if (hHasNet) {
-              tpl += "{%- set ns2 = namespace(daily={}, cur_day='', cur_total=0) %}\n";
-              tpl += "{%- for p in _iter %}\n";
-              tpl += "{%- set ts = p.time | as_datetime | as_local | as_timestamp %}\n";
-              tpl += "{%- set _day = ts | timestamp_custom('%Y-%m-%d') %}\n";
-              tpl += "{%- set _g = ns.grid.get(ts|string, 0)|float(0) %}\n";
-              tpl += "{%- set _bp = ns.imp.get(ts|string, 0)|float(0) / 100 %}\n";
-              tpl += "{%- set _sp = ns.exp.get(ts|string, 0)|float(0) / 100 %}\n";
-              // HAEO: grid > 0 = export (selling), grid < 0 = import (buying)
-              tpl += "{%- set _slot_cost = (_sp * [_g, 0]|max * -1) + (_bp * [-_g, 0]|max) %}\n";
-              tpl += "{%- if _day != ns2.cur_day %}\n";
-              tpl += "{%- if ns2.cur_day != '' %}{%- set ns2.daily = dict(ns2.daily, **{ns2.cur_day: ns2.cur_total | round(4)}) %}{%- endif %}\n";
-              tpl += "{%- set ns2.cur_day = _day %}{%- set ns2.cur_total = _slot_cost %}\n";
-              tpl += "{%- else %}{%- set ns2.cur_total = ns2.cur_total + _slot_cost %}{%- endif %}\n";
-              tpl += "{%- endfor %}\n";
-              tpl += "{%- if ns2.cur_day != '' %}{%- set ns2.daily = dict(ns2.daily, **{ns2.cur_day: ns2.cur_total | round(4)}) %}{%- endif %}\n";
-            }
-
-            tpl += "{%- set today = now() | as_timestamp | timestamp_custom('%Y-%m-%d') %}\n";
-            tpl += "{%- set months = ['January','February','March','April','May','June','July','August','September','October','November','December'] %}\n";
-
-            // HTML table start
-            tpl += '<div style="max-height:570px; overflow-y:auto; position:relative;">\n';
-            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px;">\n';
-            tpl += '<thead><tr>\n';
-            tpl += '<th style="' + _thStyle + '">Time</th>\n';
-            if (hImpP) tpl += '<th style="' + _thStyle + '">Buy ' + currency + '</th>\n';
-            if (hExpP) tpl += '<th style="' + _thStyle + '">Sell ' + currency + '</th>\n';
-            if (hSolar) tpl += '<th style="' + _thStyle + '">PV kW</th>\n';
-            if (hLoad) tpl += '<th style="' + _thStyle + '">Load kW</th>\n';
-            if (hGrid) tpl += '<th style="' + _thStyle + '">Grid kW</th>\n';
-            if (hBatt) tpl += '<th style="' + _thStyle + '">Batt kW</th>\n';
-            if (hSoc) tpl += '<th style="' + _thStyle + '">SoC %</th>\n';
-            if (hHasNet) tpl += '<th style="' + _thStyle + '">Net ' + currency + '</th>\n';
-            tpl += '</tr></thead>\n';
-
-            // TODAY section — fully expanded
-            tpl += '<tbody>\n';
-            tpl += "{%- set _todayHeader = namespace(shown=false) %}\n";
-            tpl += "{%- for p in _iter %}\n";
-            tpl += "{%- set ts = p.time | as_datetime | as_local | as_timestamp %}\n";
-            tpl += "{%- set _day = ts | timestamp_custom('%Y-%m-%d') %}\n";
-            tpl += "{%- if _day == today %}\n";
-            tpl += "{%- set _isNow = (ts | int - now().timestamp() | int) | abs < 900 %}\n";
-            tpl += "{%- if not _todayHeader.shown %}{%- set _todayHeader.shown = true %}\n";
-            if (hHasNet) {
-              tpl += "{%- set _day_total = ns2.daily.get(_day, 0) | float(0) %}\n";
-              tpl += "{%- set _day_color = '#00cc00' if _day_total < 0 else '#ff4444' %}\n";
-              tpl += "{%- set _day_label = 'Daily Total: -" + currency + "' + '%0.2f' | format(_day_total | abs) if _day_total < 0 else 'Daily Total: +" + currency + "' + '%0.2f' | format(_day_total | abs) %}\n";
-            }
-            tpl += "{%- set _month = months[(ts | timestamp_custom('%m') | int) - 1] %}\n";
-            tpl += "{%- set _day_name = '📅 ' + ts | timestamp_custom('%A %d ') + _month %}\n";
-            tpl += '<tr><td colspan="' + leftCols + '" style="' + _dayStyle + ' text-align:center;"><span>{{ _day_name }}</span></td>';
-            if (hHasNet) {
-              tpl += '<td colspan="' + rightCols + '" style="' + _dayStyle + ' text-align:right;"><span style="color:{{ _day_color }};">{{ _day_label }}</span></td>';
-            } else {
-              tpl += '<td colspan="' + rightCols + '" style="' + _dayStyle + ' text-align:right;">&nbsp;</td>';
-            }
-            tpl += '</tr>\n';
-            tpl += "{%- endif %}\n";
-
-            // Data row
-            tpl += "{%- set t = ts | timestamp_custom('%H:%M') %}\n";
-            tpl += "{%- set _isPast = ts | int < (now().timestamp() | int - 450) %}\n";
-            // Value lookups
-            if (hImpP) tpl += "{%- set _imp_val = ns.imp.get(ts|string, 0) | float(0) %}\n";
-            if (hExpP) tpl += "{%- set _exp_val = ns.exp.get(ts|string, 0) | float(0) %}\n";
-            if (hGrid) tpl += "{%- set _g = ns.grid.get(ts|string) %}\n";
-            if (hSoc) tpl += "{%- set _soc_val = ns.soc.get(ts|string) | float(50) %}\n";
-            if (hHasNet) {
-              tpl += "{%- set _g_f = ns.grid.get(ts|string, 0)|float(0) %}\n";
-              tpl += "{%- set _nc = (ns.exp.get(ts|string,0)|float(0)/100) * [_g_f, 0]|max * -1 + (ns.imp.get(ts|string,0)|float(0)/100) * [-_g_f, 0]|max %}\n";
-            }
-
-            // Colors
-            if (hImpP) tpl += "{%- set _imp_color = '#ff2222' if _imp_val >= 50 else '#cc6600' if _imp_val >= 40 else '#cccc00' if _imp_val >= 30 else '#00e5cc' if _imp_val >= 20 else '#888888' %}\n";
-            if (hExpP) tpl += "{%- set _exp_color = '#00ff00' if _exp_val >= 250 else '#00cc00' if _exp_val >= 100 else '#009900' if _exp_val >= 50 else '#336633' if _exp_val >= 30 else '#888888' %}\n";
-            if (hGrid) tpl += "{%- set _g_color = '#00cc00' if (_g|float(0)) > 0 else '#ff4444' if (_g|float(0)) < 0 else '#888888' %}\n";
-            if (hSoc) tpl += "{%- set _soc_color = '#ff4444' if _soc_val <= 20 else '#00cc00' if _soc_val >= 75 else '' %}\n";
-            if (hHasNet) tpl += "{%- set _nc_color = '#00cc00' if _nc < -0.001 else '#ff4444' if _nc > 0.001 else '' %}\n";
-
-            tpl += "{%- if _isPast %}\n";
-            // Past row — dimmed
-            tpl += '<tr style="opacity:0.4;"><td style="' + _tdStyle + '">{{ t }}</td>';
-            if (hImpP) tpl += '<td style="' + _tdStyle + '">{{ _imp_val | round(1) }}</td>';
-            if (hExpP) tpl += '<td style="' + _tdStyle + '">{{ _exp_val | round(1) }}</td>';
-            if (hSolar) tpl += '<td style="' + _tdStyle + '">{{ ns.solar.get(ts|string, 0) }}</td>';
-            if (hLoad) tpl += '<td style="' + _tdStyle + '">{{ ns.load.get(ts|string, \'—\') }}</td>';
-            if (hGrid) tpl += '<td style="' + _tdStyle + '">{{ _g if _g is not none else \'—\' }}</td>';
-            if (hBatt) tpl += '<td style="' + _tdStyle + '">{{ ns.batt.get(ts|string, \'—\') }}</td>';
-            if (hSoc) tpl += '<td style="' + _tdStyle + '">{{ ns.soc.get(ts|string, \'—\') }}%</td>';
-            if (hHasNet) tpl += "<td style=\"" + _tdStyle + "\">{{ '%+0.4f' | format(_nc) }}</td>";
-            tpl += '</tr>\n';
-
-            tpl += "{%- else %}\n";
-            // Current/future row — colored
-            tpl += "<tr{{ ' style=font-weight:bold;' if _isNow else '' }}>";
-            tpl += '<td style="' + _tdStyle + '">{{ \'▶ \' + t if _isNow else t }}</td>';
-            if (hImpP) tpl += '<td style="' + _tdStyle + '"><span style="color:{{ _imp_color }};">{{ _imp_val | round(1) }}</span></td>';
-            if (hExpP) tpl += '<td style="' + _tdStyle + '"><span style="color:{{ _exp_color }};">{{ _exp_val | round(1) }}</span></td>';
-            if (hSolar) tpl += "<td style=\"" + _tdStyle + "\">{%- set _s = ns.solar.get(ts|string) %}{{ '<span style=color:#e8a835;>' ~ _s ~ '</span>' if _s and _s != 0 else '0' }}</td>";
-            if (hLoad) tpl += '<td style="' + _tdStyle + '">{{ ns.load.get(ts|string, \'—\') }}</td>';
-            if (hGrid) tpl += '<td style="' + _tdStyle + '"><span style="color:{{ _g_color }};">{{ _g if _g is not none else \'—\' }}</span></td>';
-            if (hBatt) tpl += "<td style=\"" + _tdStyle + "\">{%- set _b = ns.batt.get(ts|string) %}<span style=\"color:{{ 'green' if (_b|float(0)) > 0 else 'orange' if (_b|float(0)) < 0 else 'grey' }};\">{{ _b if _b is not none else '—' }}</span></td>";
-            if (hSoc) tpl += '<td style="' + _tdStyle + '"><span style="color:{{ _soc_color }};">{{ ns.soc.get(ts|string, \'—\') }}%</span></td>';
-            if (hHasNet) tpl += "<td style=\"" + _tdStyle + "\"><span style=\"color:{{ _nc_color }};\">{{ '%+0.4f' | format(_nc) }}</span></td>";
-            tpl += '</tr>\n';
-            tpl += "{%- endif %}\n";
-
-            tpl += "{%- endif %}\n"; // end if _day == today
-            tpl += "{%- endfor %}\n";
-            tpl += '</tbody>\n';
-
-            // UPCOMING DAYS — summary rows only
-            tpl += '<tbody>\n';
-            tpl += '<tr><td colspan="' + haeCols + '" style="padding:8px 6px 4px 6px; text-align:left; font-size:11px; color:var(--secondary-text-color); letter-spacing:0.05em; border-top:3px solid var(--divider-color);">UPCOMING DAYS</td></tr>\n';
-            tpl += "{%- set _seenDays = namespace(days=[]) %}\n";
-            tpl += "{%- for p in _iter %}\n";
-            tpl += "{%- set ts = p.time | as_datetime | as_local | as_timestamp %}\n";
-            tpl += "{%- set _day = ts | timestamp_custom('%Y-%m-%d') %}\n";
-            tpl += "{%- if _day != today and _day not in _seenDays.days %}\n";
-            tpl += "{%- set _seenDays.days = _seenDays.days + [_day] %}\n";
-            if (hHasNet) {
-              tpl += "{%- set _day_total = ns2.daily.get(_day, 0) | float(0) %}\n";
-              tpl += "{%- set _day_color = '#00cc00' if _day_total < 0 else '#ff4444' %}\n";
-              tpl += "{%- set _day_label = 'Daily Total: -" + currency + "' + '%0.2f' | format(_day_total | abs) if _day_total < 0 else 'Daily Total: +" + currency + "' + '%0.2f' | format(_day_total | abs) %}\n";
-            }
-            tpl += "{%- set _month = months[(ts | timestamp_custom('%m') | int) - 1] %}\n";
-            tpl += "{%- set _day_name = '📅 ' + ts | timestamp_custom('%A %d ') + _month %}\n";
-            tpl += '<tr><td colspan="' + leftCols + '" style="' + _dayStyle + ' text-align:center;"><span>{{ _day_name }}</span></td>';
-            if (hHasNet) {
-              tpl += '<td colspan="' + rightCols + '" style="' + _dayStyle + ' text-align:right;"><span style="color:{{ _day_color }};">{{ _day_label }}</span></td>';
-            } else {
-              tpl += '<td colspan="' + rightCols + '" style="' + _dayStyle + ' text-align:right;">&nbsp;</td>';
-            }
-            tpl += '</tr>\n';
-            tpl += "{%- endif %}\n";
-            tpl += "{%- endfor %}\n";
-            tpl += '</tbody>\n';
-
-            tpl += '</table></div>\n';
-
-            forecastTableCard = {
-              type: 'custom:html-template-card',
-              ignore_line_breaks: true,
-              content: tpl,
-              card_mod: { style: 'ha-card { background: ' + _ftBg + ' !important; border: 1px solid ' + _ftBorder + ' !important; border-radius: 12px !important; }' }
-            };
-          }
+          modalTitle = '📊 HAEO Forecasts';
+          const haeoConfig = { type: 'custom:haeo-events-card' };
+          if (e.haeo_battery_charge || e.haeo_battery_discharge) haeoConfig.entity_battery = e.haeo_battery_charge || e.haeo_battery_discharge;
+          if (e.haeo_grid_power) haeoConfig.entity_grid = e.haeo_grid_power;
+          if (e.haeo_load_power) haeoConfig.entity_load = e.haeo_load_power;
+          if (e.haeo_solar_power) haeoConfig.entity_solar = e.haeo_solar_power;
+          if (e.haeo_battery_soc) haeoConfig.entity_soc = e.haeo_battery_soc;
+          if (e.haeo_import_price) haeoConfig.entity_buy_price = e.haeo_import_price;
+          if (e.haeo_export_price) haeoConfig.entity_sell_price = e.haeo_export_price;
+          haeoConfig.currency_symbol = cfg.pricing?.currency || '$';
+          innerCard = haeoConfig;
         } else if (emsP === 'emhass') {
-          // EMHASS forecast table — each MPC entity has its own forecast attribute (HTML table via html-template-card)
-          const mpPv = e.mpc_pv || '';
-          const mpBatt = e.mpc_battery || '';
-          const mpGrid = e.mpc_grid || '';
-          const mpLoad = e.mpc_load || '';
-          const mpSoc = e.mpc_soc || '';
-          const bpEnt = e.buy_price || '';
-          const spEnt = e.sell_price || '';
-          const emHasNet = bpEnt && spEnt && mpGrid;
-
-          const iterEnt = mpPv || mpGrid || mpLoad || mpBatt || '';
-          if (iterEnt) {
-            // Count total columns
-            let emCols = 1; // Time
-            if (bpEnt) emCols++;
-            if (spEnt) emCols++;
-            if (mpPv) emCols++;
-            if (mpLoad) emCols++;
-            if (mpGrid) emCols++;
-            if (mpBatt) emCols++;
-            if (mpSoc) emCols++;
-            if (emHasNet) emCols++;
-            const emLeftCols = Math.max(1, emCols - 3);
-            const emRightCols = emCols - emLeftCols;
-
-            const _thStyle = "position:sticky; top:0; z-index:2; background:var(--card-background-color); padding:4px 6px; border-bottom:2px solid var(--divider-color); text-align:center; white-space:nowrap; font-size:11px; color:var(--secondary-text-color);";
-            const _tdStyle = "padding:4px 6px; border-bottom:1px solid var(--divider-color); text-align:center; white-space:nowrap;";
-            const _dayStyle = "padding:6px; border-bottom:1px solid var(--divider-color); border-top:2px solid var(--divider-color); font-weight:bold; background:var(--secondary-background-color);";
-
-            let tpl = '';
-            // Load each entity's forecast into a time-keyed dict
-            tpl += "{%- set _iter = state_attr('" + iterEnt + "', 'forecasts') or state_attr('" + iterEnt + "', 'battery_scheduled_power') or [] %}\n";
-            tpl += "{%- set ns = namespace(pv={}, grid={}, load={}, batt={}, soc={}, buy={}, sell={}) %}\n";
-            if (mpPv) tpl += "{%- for p in (state_attr('" + mpPv + "', 'forecasts') or []) %}{%- set ns.pv = dict(ns.pv, **{p.date: ((p.mpc_pv_power | float(0)) / 1000) | round(2)}) %}{%- endfor %}\n";
-            if (mpGrid) tpl += "{%- for p in (state_attr('" + mpGrid + "', 'forecasts') or []) %}{%- set ns.grid = dict(ns.grid, **{p.date: ((p.mpc_grid_power | float(0)) / 1000) | round(2)}) %}{%- endfor %}\n";
-            if (mpLoad) tpl += "{%- for p in (state_attr('" + mpLoad + "', 'forecasts') or []) %}{%- set ns.load = dict(ns.load, **{p.date: ((p.mpc_load_power | float(0)) / 1000) | round(2)}) %}{%- endfor %}\n";
-            if (mpBatt) tpl += "{%- for p in (state_attr('" + mpBatt + "', 'battery_scheduled_power') or []) %}{%- set ns.batt = dict(ns.batt, **{p.date: ((p.mpc_batt_power | float(0)) / 1000) | round(2)}) %}{%- endfor %}\n";
-            if (mpSoc) tpl += "{%- for p in (state_attr('" + mpSoc + "', 'battery_scheduled_soc') or []) %}{%- set ns.soc = dict(ns.soc, **{p.date: (p.mpc_batt_soc | float(0)) | round(0)}) %}{%- endfor %}\n";
-            if (bpEnt) tpl += "{%- for p in (state_attr('" + bpEnt + "', 'unit_load_cost_forecasts') or []) %}{%- set ns.buy = dict(ns.buy, **{p.date: (p.mpc_general_price | float(0)) | round(4)}) %}{%- endfor %}\n";
-            if (spEnt) tpl += "{%- for p in (state_attr('" + spEnt + "', 'unit_prod_price_forecasts') or []) %}{%- set ns.sell = dict(ns.sell, **{p.date: (p.mpc_feed_in_price | float(0)) | round(4)}) %}{%- endfor %}\n";
-
-            // Compute per-slot net cost and daily totals
-            if (emHasNet) {
-              tpl += "{%- set ns2 = namespace(daily={}, cur_day='', cur_total=0) %}\n";
-              tpl += "{%- for row in _iter %}\n";
-              tpl += "{%- set dt = row.date %}\n";
-              tpl += "{%- set _day = dt | as_datetime | as_local | as_timestamp | timestamp_custom('%Y-%m-%d') %}\n";
-              tpl += "{%- set _g = ns.grid.get(dt, 0)|float(0) %}\n";
-              tpl += "{%- set _bp = ns.buy.get(dt, 0)|float(0) %}\n";
-              tpl += "{%- set _sp = ns.sell.get(dt, 0)|float(0) %}\n";
-              // EMHASS: grid > 0 = import (buying), grid < 0 = export (selling)
-              tpl += "{%- set _slot_cost = _bp * [_g, 0]|max + _sp * [_g, 0]|min * -1 * -1 %}\n";
-              tpl += "{%- if _day != ns2.cur_day %}\n";
-              tpl += "{%- if ns2.cur_day != '' %}{%- set ns2.daily = dict(ns2.daily, **{ns2.cur_day: ns2.cur_total | round(4)}) %}{%- endif %}\n";
-              tpl += "{%- set ns2.cur_day = _day %}{%- set ns2.cur_total = _slot_cost %}\n";
-              tpl += "{%- else %}{%- set ns2.cur_total = ns2.cur_total + _slot_cost %}{%- endif %}\n";
-              tpl += "{%- endfor %}\n";
-              tpl += "{%- if ns2.cur_day != '' %}{%- set ns2.daily = dict(ns2.daily, **{ns2.cur_day: ns2.cur_total | round(4)}) %}{%- endif %}\n";
-            }
-
-            tpl += "{%- set today = now() | as_timestamp | timestamp_custom('%Y-%m-%d') %}\n";
-            tpl += "{%- set months = ['January','February','March','April','May','June','July','August','September','October','November','December'] %}\n";
-
-            // HTML table start
-            tpl += '<div style="max-height:570px; overflow-y:auto; position:relative;">\n';
-            tpl += '<table style="border-collapse:collapse; width:100%; font-size:12px;">\n';
-            tpl += '<thead><tr>\n';
-            tpl += '<th style="' + _thStyle + '">Time</th>\n';
-            if (bpEnt) tpl += '<th style="' + _thStyle + '">Buy ' + currency + '</th>\n';
-            if (spEnt) tpl += '<th style="' + _thStyle + '">Sell ' + currency + '</th>\n';
-            if (mpPv) tpl += '<th style="' + _thStyle + '">PV kW</th>\n';
-            if (mpLoad) tpl += '<th style="' + _thStyle + '">Load kW</th>\n';
-            if (mpGrid) tpl += '<th style="' + _thStyle + '">Grid kW</th>\n';
-            if (mpBatt) tpl += '<th style="' + _thStyle + '">Batt kW</th>\n';
-            if (mpSoc) tpl += '<th style="' + _thStyle + '">SoC %</th>\n';
-            if (emHasNet) tpl += '<th style="' + _thStyle + '">Net ' + currency + '</th>\n';
-            tpl += '</tr></thead>\n';
-
-            // TODAY section — fully expanded
-            tpl += '<tbody>\n';
-            tpl += "{%- set _todayHeader = namespace(shown=false) %}\n";
-            tpl += "{%- for row in _iter %}\n";
-            tpl += "{%- set dt = row.date %}\n";
-            tpl += "{%- set ts = dt | as_datetime | as_local | as_timestamp %}\n";
-            tpl += "{%- set _day = ts | timestamp_custom('%Y-%m-%d') %}\n";
-            tpl += "{%- if _day == today %}\n";
-            tpl += "{%- set _isNow = (ts | int - now().timestamp() | int) | abs < 900 %}\n";
-            tpl += "{%- if not _todayHeader.shown %}{%- set _todayHeader.shown = true %}\n";
-            if (emHasNet) {
-              tpl += "{%- set _day_total = ns2.daily.get(_day, 0) | float(0) %}\n";
-              tpl += "{%- set _day_color = '#00cc00' if _day_total < 0 else '#ff4444' %}\n";
-              tpl += "{%- set _day_label = 'Daily Total: -" + currency + "' + '%0.2f' | format(_day_total | abs) if _day_total < 0 else 'Daily Total: +" + currency + "' + '%0.2f' | format(_day_total | abs) %}\n";
-            }
-            tpl += "{%- set _month = months[(ts | timestamp_custom('%m') | int) - 1] %}\n";
-            tpl += "{%- set _day_name = '📅 ' + ts | timestamp_custom('%A %d ') + _month %}\n";
-            tpl += '<tr><td colspan="' + emLeftCols + '" style="' + _dayStyle + ' text-align:center;"><span>{{ _day_name }}</span></td>';
-            if (emHasNet) {
-              tpl += '<td colspan="' + emRightCols + '" style="' + _dayStyle + ' text-align:right;"><span style="color:{{ _day_color }};">{{ _day_label }}</span></td>';
-            } else {
-              tpl += '<td colspan="' + emRightCols + '" style="' + _dayStyle + ' text-align:right;">&nbsp;</td>';
-            }
-            tpl += '</tr>\n';
-            tpl += "{%- endif %}\n";
-
-            // Data row
-            tpl += "{%- set t = ts | timestamp_custom('%H:%M') %}\n";
-            tpl += "{%- set _isPast = ts | int < (now().timestamp() | int - 450) %}\n";
-            // Value lookups
-            if (bpEnt) tpl += "{%- set _buy_val = ns.buy.get(dt, 0) | float(0) %}\n";
-            if (spEnt) tpl += "{%- set _sell_val = ns.sell.get(dt, 0) | float(0) %}\n";
-            if (mpGrid) tpl += "{%- set _g = ns.grid.get(dt) %}\n";
-            if (mpSoc) tpl += "{%- set _soc_val = ns.soc.get(dt) | float(50) %}\n";
-            if (emHasNet) {
-              tpl += "{%- set _g_f = ns.grid.get(dt, 0)|float(0) %}\n";
-              tpl += "{%- set _nc = ns.buy.get(dt,0)|float(0) * [_g_f, 0]|max + ns.sell.get(dt,0)|float(0) * [_g_f, 0]|min * -1 * -1 %}\n";
-            }
-
-            // Colors
-            if (bpEnt) tpl += "{%- set _buy_color = '#ff2222' if _buy_val >= 0.50 else '#cc6600' if _buy_val >= 0.40 else '#cccc00' if _buy_val >= 0.30 else '#00e5cc' if _buy_val >= 0.20 else '#888888' %}\n";
-            if (spEnt) tpl += "{%- set _sell_color = '#00ff00' if _sell_val >= 0.25 else '#00cc00' if _sell_val >= 0.10 else '#009900' if _sell_val >= 0.05 else '#336633' if _sell_val >= 0.03 else '#888888' %}\n";
-            if (mpGrid) tpl += "{%- set _g_color = '#ff4444' if (_g|float(0)) > 0 else '#00cc00' if (_g|float(0)) < 0 else '#888888' %}\n";
-            if (mpSoc) tpl += "{%- set _soc_color = '#ff4444' if _soc_val <= 20 else '#00cc00' if _soc_val >= 75 else '' %}\n";
-            if (emHasNet) tpl += "{%- set _nc_color = '#00cc00' if _nc < -0.001 else '#ff4444' if _nc > 0.001 else '' %}\n";
-
-            tpl += "{%- if _isPast %}\n";
-            // Past row — dimmed
-            tpl += '<tr style="opacity:0.4;"><td style="' + _tdStyle + '">{{ t }}</td>';
-            if (bpEnt) tpl += '<td style="' + _tdStyle + '">{{ _buy_val }}</td>';
-            if (spEnt) tpl += '<td style="' + _tdStyle + '">{{ _sell_val }}</td>';
-            if (mpPv) tpl += '<td style="' + _tdStyle + '">{{ ns.pv.get(dt, 0) }}</td>';
-            if (mpLoad) tpl += '<td style="' + _tdStyle + '">{{ ns.load.get(dt, \'—\') }}</td>';
-            if (mpGrid) tpl += '<td style="' + _tdStyle + '">{{ _g if _g is not none else \'—\' }}</td>';
-            if (mpBatt) tpl += '<td style="' + _tdStyle + '">{{ ns.batt.get(dt, \'—\') }}</td>';
-            if (mpSoc) tpl += '<td style="' + _tdStyle + '">{{ ns.soc.get(dt, \'—\') }}%</td>';
-            if (emHasNet) tpl += "<td style=\"" + _tdStyle + "\">{{ '%+0.4f' | format(_nc) }}</td>";
-            tpl += '</tr>\n';
-
-            tpl += "{%- else %}\n";
-            // Current/future row — colored
-            tpl += "<tr{{ ' style=font-weight:bold;' if _isNow else '' }}>";
-            tpl += '<td style="' + _tdStyle + '">{{ \'▶ \' + t if _isNow else t }}</td>';
-            if (bpEnt) tpl += '<td style="' + _tdStyle + '"><span style="color:{{ _buy_color }};">{{ _buy_val }}</span></td>';
-            if (spEnt) tpl += '<td style="' + _tdStyle + '"><span style="color:{{ _sell_color }};">{{ _sell_val }}</span></td>';
-            if (mpPv) tpl += "<td style=\"" + _tdStyle + "\">{%- set _pv = ns.pv.get(dt) %}{{ '<span style=color:#e8a835;>' ~ _pv ~ '</span>' if _pv and _pv != 0 else '0' }}</td>";
-            if (mpLoad) tpl += '<td style="' + _tdStyle + '">{{ ns.load.get(dt, \'—\') }}</td>';
-            if (mpGrid) tpl += '<td style="' + _tdStyle + '"><span style="color:{{ _g_color }};">{{ _g if _g is not none else \'—\' }}</span></td>';
-            if (mpBatt) tpl += "<td style=\"" + _tdStyle + "\">{%- set _b = ns.batt.get(dt) %}<span style=\"color:{{ 'green' if (_b|float(0)) > 0 else 'orange' if (_b|float(0)) < 0 else 'grey' }};\">{{ _b if _b is not none else '—' }}</span></td>";
-            if (mpSoc) tpl += '<td style="' + _tdStyle + '"><span style="color:{{ _soc_color }};">{{ ns.soc.get(dt, \'—\') }}%</span></td>';
-            if (emHasNet) tpl += "<td style=\"" + _tdStyle + "\"><span style=\"color:{{ _nc_color }};\">{{ '%+0.4f' | format(_nc) }}</span></td>";
-            tpl += '</tr>\n';
-            tpl += "{%- endif %}\n";
-
-            tpl += "{%- endif %}\n"; // end if _day == today
-            tpl += "{%- endfor %}\n";
-            tpl += '</tbody>\n';
-
-            // UPCOMING DAYS — summary rows only
-            tpl += '<tbody>\n';
-            tpl += '<tr><td colspan="' + emCols + '" style="padding:8px 6px 4px 6px; text-align:left; font-size:11px; color:var(--secondary-text-color); letter-spacing:0.05em; border-top:3px solid var(--divider-color);">UPCOMING DAYS</td></tr>\n';
-            tpl += "{%- set _seenDays = namespace(days=[]) %}\n";
-            tpl += "{%- for row in _iter %}\n";
-            tpl += "{%- set dt = row.date %}\n";
-            tpl += "{%- set ts = dt | as_datetime | as_local | as_timestamp %}\n";
-            tpl += "{%- set _day = ts | timestamp_custom('%Y-%m-%d') %}\n";
-            tpl += "{%- if _day != today and _day not in _seenDays.days %}\n";
-            tpl += "{%- set _seenDays.days = _seenDays.days + [_day] %}\n";
-            if (emHasNet) {
-              tpl += "{%- set _day_total = ns2.daily.get(_day, 0) | float(0) %}\n";
-              tpl += "{%- set _day_color = '#00cc00' if _day_total < 0 else '#ff4444' %}\n";
-              tpl += "{%- set _day_label = 'Daily Total: -" + currency + "' + '%0.2f' | format(_day_total | abs) if _day_total < 0 else 'Daily Total: +" + currency + "' + '%0.2f' | format(_day_total | abs) %}\n";
-            }
-            tpl += "{%- set _month = months[(ts | timestamp_custom('%m') | int) - 1] %}\n";
-            tpl += "{%- set _day_name = '📅 ' + ts | timestamp_custom('%A %d ') + _month %}\n";
-            tpl += '<tr><td colspan="' + emLeftCols + '" style="' + _dayStyle + ' text-align:center;"><span>{{ _day_name }}</span></td>';
-            if (emHasNet) {
-              tpl += '<td colspan="' + emRightCols + '" style="' + _dayStyle + ' text-align:right;"><span style="color:{{ _day_color }};">{{ _day_label }}</span></td>';
-            } else {
-              tpl += '<td colspan="' + emRightCols + '" style="' + _dayStyle + ' text-align:right;">&nbsp;</td>';
-            }
-            tpl += '</tr>\n';
-            tpl += "{%- endif %}\n";
-            tpl += "{%- endfor %}\n";
-            tpl += '</tbody>\n';
-
-            tpl += '</table></div>\n';
-
-            forecastTableCard = {
-              type: 'custom:html-template-card',
-              ignore_line_breaks: true,
-              content: tpl,
-              card_mod: { style: 'ha-card { background: ' + _ftBg + ' !important; border: 1px solid ' + _ftBorder + ' !important; border-radius: 12px !important; }' }
-            };
-          }
+          modalTitle = '📊 EMHASS Forecasts';
+          const emhassConfig = { type: 'custom:emhass-events-card' };
+          if (e.mpc_battery) emhassConfig.p_batt_forecast = e.mpc_battery;
+          if (e.mpc_grid) emhassConfig.p_grid_forecast = e.mpc_grid;
+          if (e.mpc_pv) emhassConfig.p_pv_forecast = e.mpc_pv;
+          if (e.mpc_load) emhassConfig.p_load_forecast = e.mpc_load;
+          if (e.mpc_soc) emhassConfig.soc_forecast = e.mpc_soc;
+          if (e.buy_price || e.current_import_price) emhassConfig.buy_price = e.buy_price || e.current_import_price;
+          if (e.sell_price || e.current_export_price) emhassConfig.sell_price = e.sell_price || e.current_export_price;
+          if (e.mpc_cost_fun) emhassConfig.net_cost = e.mpc_cost_fun;
+          emhassConfig.currency_symbol = cfg.pricing?.currency || '$';
+          innerCard = emhassConfig;
+        } else if (emsP === 'energy_manager') {
+          modalTitle = '📊 Energy Manager';
+          modalIconColor = '#ff9800';
+          innerCard = { type: 'custom:em-events-card', currency_symbol: cfg.pricing?.currency || '$' };
         }
-        // Build toggle + conditional cards if we have a forecast table
-        if (forecastTableCard) {
-          ftToggleCard = {
-            type: 'custom:mushroom-template-card',
-            primary: emsP === 'haeo' ? '📊 HAEO Forecasts' : '📊 EMHASS Forecasts',
-            secondary: "{{ 'Tap to collapse' if is_state('input_boolean.genergy_forecast_table', 'on') else 'Tap to expand' }}",
+        if (innerCard) {
+          forecastModalCard = {
+            type: 'custom:sigenergy-forecast-modal',
+            title: modalTitle,
             icon: 'mdi:table-clock',
-            icon_color: "{{ 'teal' if is_state('input_boolean.genergy_forecast_table', 'on') else 'grey' }}",
-            tap_action: { action: 'call-service', service: 'input_boolean.toggle', service_data: {}, target: { entity_id: 'input_boolean.genergy_forecast_table' } },
-            card_mod: { style: 'ha-card { cursor: pointer; background: ' + _ftBg + ' !important; border: 1px solid ' + _ftBorder + ' !important; border-radius: 12px 12px ' + "{{ '0 0' if is_state('input_boolean.genergy_forecast_table', 'on') else '12px 12px' }}" + ' !important; margin-bottom: 0 !important; padding-bottom: 0 !important; }' }
-          };
-          forecastTableCard.card_mod.style = forecastTableCard.card_mod.style.replace('border-radius: 12px', 'border-radius: 0 0 12px 12px; border-top: none');
-          ftConditionalCard = {
-            type: 'conditional',
-            conditions: [{ entity: 'input_boolean.genergy_forecast_table', state: 'on' }],
-            card: forecastTableCard
+            icon_color: modalIconColor,
+            bg: _ftBg,
+            border: _ftBorder,
+            card: innerCard
           };
         }
       }
-      if (ftToggleCard) houseStack.push(ftToggleCard);
-      if (ftConditionalCard) houseStack.push(ftConditionalCard);
+      if (forecastModalCard) houseStack.push(forecastModalCard);
 
       if (solcastCard) houseStack.push(solcastCard);
-      newCards.push({ type: 'vertical-stack', cards: houseStack });
+      newCards.push({ type: 'vertical-stack', cards: houseStack, view_layout: { 'grid-column': '1' } });
 
       // Card 1: Sankey (rebuild from store entities)
       // Date navigation — HA's built-in energy-date-selection card for historical date picking
@@ -5195,44 +6954,55 @@ return forecast.map(function(d) {
       const gridImportNode = { entity_id: _gridImportId, name: 'Grid', color: '#6B8FD4', children: gridImportChildren };
       if (_gridImportAdd) gridImportNode.add_entities = _gridImportAdd;
 
+      // Resolve Sankey color theme
+      const _sTheme = SANKEY_THEMES[cfg.display?.sankey_color_theme] || SANKEY_THEMES.modern;
+
       // Build node metadata for the custom energy flow card AND the interactive info panel
       const _sankeyNodes = [];
       // Source nodes
       if (e.solar_energy_today) _sankeyNodes.push({
-        id: 'solar', name: 'Solar', color: '#D4C850', entity_id: e.solar_energy_today, type: 'source',
+        id: 'solar', name: 'Solar', color: _sTheme.solar, entity_id: e.solar_energy_today, type: 'source',
         children: solarChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
       });
       if (e.battery_discharge_today) _sankeyNodes.push({
-        id: 'bat_d', name: 'Battery', color: '#4ECDC4', entity_id: e.battery_discharge_today, type: 'source',
+        id: 'bat_d', name: 'Battery', color: _sTheme.battery, entity_id: e.battery_discharge_today, type: 'source',
         children: battDischargeChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
       });
-      if (_gridImportId) _sankeyNodes.push({
-        id: 'grid_i', name: 'Grid', color: '#6B8FD4', entity_id: _gridImportId, type: 'source',
-        children: gridImportChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
-      });
+      if (_gridImportId) {
+        const _giNode = {
+          id: 'grid_i', name: 'Grid', color: _sTheme.grid_import, entity_id: _gridImportId, type: 'source',
+          children: gridImportChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
+        };
+        if (_gridImportAdd) _giNode.add_entities = _gridImportAdd;
+        _sankeyNodes.push(_giNode);
+      }
       // Destination nodes
       if (e.load_energy_today) _sankeyNodes.push({
-        id: 'load', name: 'Home', color: '#9B7AB8', entity_id: e.load_energy_today, type: 'dest',
+        id: 'load', name: 'Home', color: _sTheme.home, entity_id: e.load_energy_today, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
       if (e.battery_charge_today) _sankeyNodes.push({
-        id: 'bat_c', name: 'Battery', color: '#4ECDC4', entity_id: e.battery_charge_today, type: 'dest',
+        id: 'bat_c', name: 'Battery', color: _sTheme.battery, entity_id: e.battery_charge_today, type: 'dest',
         children: [], parents: [e.solar_energy_today, _gridImportId].filter(Boolean)
       });
-      if (_gridExportId) _sankeyNodes.push({
-        id: 'grid_e', name: 'Grid', color: '#7B8FD4', entity_id: _gridExportId, type: 'dest',
-        children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
-      });
+      if (_gridExportId) {
+        const _geNode = {
+          id: 'grid_e', name: 'Grid', color: _sTheme.grid_export, entity_id: _gridExportId, type: 'dest',
+          children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
+        };
+        if (_gridExportAdd) _geNode.add_entities = _gridExportAdd;
+        _sankeyNodes.push(_geNode);
+      }
       if (f.show_ev_in_sankey && evSankeyEntity) _sankeyNodes.push({
-        id: 'ev', name: 'EV', color: '#E8705A', entity_id: evSankeyEntity, type: 'dest',
+        id: 'ev', name: 'EV', color: _sTheme.ev, entity_id: evSankeyEntity, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
       if (f.show_hp_in_sankey && hpSankeyEntity) _sankeyNodes.push({
-        id: 'hp', name: 'HP', color: '#E8A799', entity_id: hpSankeyEntity, type: 'dest',
+        id: 'hp', name: 'HP', color: _sTheme.hp, entity_id: hpSankeyEntity, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
       if (f.show_losses_in_sankey) _sankeyNodes.push({
-        id: 'losses', name: 'Losses', color: '#444444', entity_id: '_sankey_losses', type: 'dest',
+        id: 'losses', name: 'Losses', color: _sTheme.losses, entity_id: '_sankey_losses', type: 'dest',
         children: [], parents: []
       });
 
@@ -5249,36 +7019,44 @@ return forecast.map(function(d) {
       const _panelNodes = [];
       // Source nodes
       if (e.solar_energy_today) _panelNodes.push({
-        id: 'solar', name: 'Solar', color: '#D4C850', entity_id: e.solar_energy_today, type: 'source',
+        id: 'solar', name: 'Solar', color: _sTheme.solar, entity_id: e.solar_energy_today, type: 'source',
         children: solarChildren.map(eid => eid), parents: []
       });
       if (e.battery_discharge_today) _panelNodes.push({
-        id: 'bat_d', name: 'Battery Discharged', color: '#4ECDC4', entity_id: e.battery_discharge_today, type: 'source',
+        id: 'bat_d', name: 'Battery Discharged', color: _sTheme.battery, entity_id: e.battery_discharge_today, type: 'source',
         children: battDischargeChildren.map(eid => eid), parents: []
       });
-      if (_gridImportId) _panelNodes.push({
-        id: 'grid_i', name: 'Grid Imported', color: '#6B8FD4', entity_id: _gridImportId, type: 'source',
-        children: gridImportChildren.map(eid => eid), parents: []
-      });
+      if (_gridImportId) {
+        const _giPanelNode = {
+          id: 'grid_i', name: 'Grid Imported', color: _sTheme.grid_import, entity_id: _gridImportId, type: 'source',
+          children: gridImportChildren.map(eid => eid), parents: []
+        };
+        if (_gridImportAdd) _giPanelNode.add_entities = _gridImportAdd;
+        _panelNodes.push(_giPanelNode);
+      }
       // Destination nodes
       if (e.load_energy_today) _panelNodes.push({
-        id: 'load', name: 'Home Consumed', color: '#9B7AB8', entity_id: e.load_energy_today, type: 'dest',
+        id: 'load', name: 'Home Consumed', color: _sTheme.home, entity_id: e.load_energy_today, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
       if (e.battery_charge_today) _panelNodes.push({
-        id: 'bat_c', name: 'Battery Charged', color: '#4ECDC4', entity_id: e.battery_charge_today, type: 'dest',
+        id: 'bat_c', name: 'Battery Charged', color: _sTheme.battery, entity_id: e.battery_charge_today, type: 'dest',
         children: [], parents: [e.solar_energy_today, _gridImportId].filter(Boolean)
       });
-      if (_gridExportId) _panelNodes.push({
-        id: 'grid_e', name: 'Grid Exported', color: '#7B8FD4', entity_id: _gridExportId, type: 'dest',
-        children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
-      });
+      if (_gridExportId) {
+        const _gePanelNode = {
+          id: 'grid_e', name: 'Grid Exported', color: _sTheme.grid_export, entity_id: _gridExportId, type: 'dest',
+          children: [], parents: [e.solar_energy_today, e.battery_discharge_today].filter(Boolean)
+        };
+        if (_gridExportAdd) _gePanelNode.add_entities = _gridExportAdd;
+        _panelNodes.push(_gePanelNode);
+      }
       if (f.show_ev_in_sankey && evSankeyEntity) _panelNodes.push({
-        id: 'ev', name: 'EV Charger', color: '#E8705A', entity_id: evSankeyEntity, type: 'dest',
+        id: 'ev', name: 'EV Charger', color: _sTheme.ev, entity_id: evSankeyEntity, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
       if (f.show_hp_in_sankey && hpSankeyEntity) _panelNodes.push({
-        id: 'hp', name: 'Heat Pump', color: '#E8A799', entity_id: hpSankeyEntity, type: 'dest',
+        id: 'hp', name: 'Heat Pump', color: _sTheme.hp, entity_id: hpSankeyEntity, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
 
@@ -5288,7 +7066,7 @@ return forecast.map(function(d) {
         nodes: _panelNodes
       };
 
-      newCards.push({ type: 'vertical-stack', cards: [sankeyHeader, sankeyChart, sankeyInfoPanel] });
+      newCards.push({ type: 'vertical-stack', cards: [sankeyHeader, sankeyChart, sankeyInfoPanel], view_layout: { 'grid-column': '2' } });
 
       // Section divider helper — creates a styled label between major card groups
       const _sectionDivider = (label, icon) => ({
@@ -5324,11 +7102,13 @@ return forecast.map(function(d) {
       const _defaultBatteryCard = { type: 'vertical-stack', cards: [{ type: 'custom:sigenergy-device-card', battery_packs: f.battery_packs || 2 }] };
       const batteryCard = _findBatteryCard(mainLayout.cards) || _defaultBatteryCard;
       // Push battery card as a separate item — grid handles 3-col layout
-      newCards.push(batteryCard);
+      newCards.push({ ...batteryCard, view_layout: { 'grid-column': '1 / -1' } });
 
       // Card 3: Apex chart + self-sufficiency (full width)
       newCards.push({ ..._sectionDivider('FORECAST', '📈'), view_layout: { 'grid-column': '1 / -1' } });
-      const chartStack = [apexChart];
+      const chartStack = [];
+      if (f.expandable_forecast) chartStack.push({ type: 'custom:sigenergy-forecast-modal-button' });
+      chartStack.push(apexChart);
       if (selfSuffCard) chartStack.push(selfSuffCard);
       newCards.push({ type: 'vertical-stack', cards: chartStack, view_layout: { 'grid-column': '1 / -1' } });
 
@@ -5346,7 +7126,7 @@ return forecast.map(function(d) {
             'grid-gap': '8px',
             'padding': '0',
             mediaquery: {
-              '(max-width: 600px)': { 'grid-template-columns': '1fr' }
+              '(max-width: 1024px)': { 'grid-template-columns': '1fr' }
             }
           },
           cards: [smartLoadsCard, insightsCard],
@@ -5442,6 +7222,24 @@ return forecast.map(function(d) {
           <span class="row-state">Name shown on house card</span>
         </div>
         <div class="row">
+          <span class="row-label">Heat Pump Label</span>
+          <input class="row-input" type="text" value="${d.heat_pump_label||''}" data-key="heat_pump_label" placeholder="HEAT PUMP" />
+          <span class="row-state">e.g. HVAC, AirCon</span>
+        </div>
+        <div class="row">
+          <span class="row-label">EV Charger Label</span>
+          <input class="row-input" type="text" value="${d.ev_charger_label||''}" data-key="ev_charger_label" placeholder="AC CHARGER" />
+          <span class="row-state">e.g. DC CHARGER</span>
+        </div>
+        <div class="row">
+          <span class="row-label">Battery Flow Colors</span>
+          <select class="row-input" data-key="swap_battery_colors">
+            <option value="0" ${!d.swap_battery_colors?'selected':''}>Default (charge red, discharge green)</option>
+            <option value="1" ${d.swap_battery_colors?'selected':''}>Swapped (charge green, discharge red)</option>
+          </select>
+          <span class="row-state">Use when your battery convention colors feel reversed</span>
+        </div>
+        <div class="row">
           <span class="row-label">SoC Ring Low</span>
           <input class="row-input" type="number" min="0" max="100" value="${d.soc_ring_low!==undefined?d.soc_ring_low:40}" data-key="soc_ring_low" />
           <span class="row-state">Below: red pulse</span>
@@ -5453,6 +7251,17 @@ return forecast.map(function(d) {
         </div>
       </div>
       <div class="section">
+        <div class="section-title">Energy Flow (Sankey)</div>
+        <div class="row">
+          <span class="row-label">Color Theme</span>
+          <select class="row-input" data-key="sankey_color_theme">
+            <option value="modern" ${d.sankey_color_theme==='modern'||!d.sankey_color_theme?'selected':''}>Modern (muted)</option>
+            <option value="vibrant" ${d.sankey_color_theme==='vibrant'?'selected':''}>Vibrant (classic)</option>
+          </select>
+          <span class="row-state">${d.sankey_color_theme==='vibrant'?'Bright pastel':'Soft tones'}</span>
+        </div>
+      </div>
+      <div class="section">
         <div class="section-title">Charts</div>
         <div class="row">
           <span class="row-label">Default Range</span>
@@ -5460,6 +7269,38 @@ return forecast.map(function(d) {
             <option value="today" ${d.chart_range==='today'?'selected':''}>Today</option>
             <option value="24h" ${d.chart_range==='24h'?'selected':''}>Last 24h</option>
             <option value="7d" ${d.chart_range==='7d'?'selected':''}>Last 7 Days</option>
+          </select>
+        </div>
+        <div class="row">
+          <span class="row-label">Refresh Interval</span>
+          <select class="row-input" data-key="chart_refresh_interval">
+            <option value="10s" ${(d.chart_refresh_interval||'60s')==='10s'?'selected':''}>10 seconds (live)</option>
+            <option value="30s" ${(d.chart_refresh_interval||'60s')==='30s'?'selected':''}>30 seconds</option>
+            <option value="60s" ${(d.chart_refresh_interval||'60s')==='60s'?'selected':''}>60 seconds (zoom friendly)</option>
+            <option value="5min" ${(d.chart_refresh_interval||'60s')==='5min'?'selected':''}>5 minutes</option>
+          </select>
+          <span class="row-state">Longer intervals preserve ApexCharts zoom/pan better</span>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">🖱️ Modal Settings</div>
+        <div class="row">
+          <span class="row-label">Modal Animation</span>
+          <select class="row-input" data-key="modal_animation">
+            <option value="scale" ${(d.modal_animation||'scale')==='scale'?'selected':''}>Scale (default)</option>
+            <option value="slide" ${d.modal_animation==='slide'?'selected':''}>Slide Up</option>
+            <option value="fade" ${d.modal_animation==='fade'?'selected':''}>Fade Only</option>
+            <option value="none" ${d.modal_animation==='none'?'selected':''}>None</option>
+          </select>
+        </div>
+        <div class="row">
+          <span class="row-label">Default Forecast View</span>
+          <select class="row-input" data-key="default_forecast_view">
+            <option value="combined" ${(d.default_forecast_view||'combined')==='combined'?'selected':''}>Combined</option>
+            <option value="power" ${d.default_forecast_view==='power'?'selected':''}>Power</option>
+            <option value="soc" ${d.default_forecast_view==='soc'?'selected':''}>SoC</option>
+            <option value="price" ${d.default_forecast_view==='price'?'selected':''}>Price</option>
+            <option value="loads" ${d.default_forecast_view==='loads'?'selected':''}>Loads</option>
           </select>
         </div>
       </div>
@@ -5516,17 +7357,28 @@ return forecast.map(function(d) {
     }
 
     // Input/select changes
-    el.querySelectorAll('.row-input').forEach(input => {
+    const STRING_SELECTS = ['sankey_color_theme', 'chart_range', 'chart_refresh_interval', 'modal_animation', 'default_forecast_view'];
+    el.querySelectorAll('.row-input:not(.profile-name)').forEach(input => {
       input.addEventListener('change', () => {
         const cfg2 = this._storeGet();
         const key = input.dataset.key;
-        const val = input.type === 'number' || input.tagName === 'SELECT'
+        const val = input.type === 'number' || (input.tagName === 'SELECT' && !STRING_SELECTS.includes(key))
           ? parseInt(input.value) : input.value;
         cfg2.display[key] = val;
         this._storeSave(cfg2);
         // Sync battery_label directly to house card when changed
         if (key === 'battery_label') {
           this._syncBatteryLabelToDashboard(val);
+        }
+        // Sync heat_pump_label directly to house card when changed
+        if (key === 'heat_pump_label') {
+          this._syncHeatPumpLabelToDashboard(val);
+        }
+        if (key === 'ev_charger_label') {
+          this._syncEvChargerLabelToDashboard(val);
+        }
+        if (key === 'swap_battery_colors') {
+          this._syncSwapBatteryColorsToDashboard(!!val);
         }
       });
     });
@@ -5608,7 +7460,9 @@ class SigenergyEnergyFlowCard extends HTMLElement {
   }
 
   set states(states) {
-    this._overriddenStates = (states && Object.keys(states).length) ? states : null;
+    const newOverride = (states && Object.keys(states).length) ? states : null;
+    if (newOverride === this._overriddenStates) return; // same reference, skip re-render
+    this._overriddenStates = newOverride;
     this._lastRenderKey = '';
     this._scheduleRender();
   }
@@ -5627,17 +7481,17 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     if (!eid) return;
     this.shadowRoot.querySelectorAll('.flow-path').forEach(p => {
       const src = p.dataset.src, dst = p.dataset.dst;
-      p.style.fillOpacity = (src === eid || dst === eid) ? '0.8' : '0.12';
+      p.style.fillOpacity = (src === eid || dst === eid) ? '0.9' : '0.12';
     });
     this.shadowRoot.querySelectorAll('.node-bar').forEach(b => {
-      b.style.filter = b.dataset.entityId === eid ? 'brightness(1.15)' : 'brightness(0.7)';
+      b.style.opacity = b.dataset.entityId === eid ? '1' : '0.45';
     });
   }
 
   _handleMouseLeave() {
     if (!this.shadowRoot) return;
     this.shadowRoot.querySelectorAll('.flow-path').forEach(p => { p.style.fillOpacity = ''; });
-    this.shadowRoot.querySelectorAll('.node-bar').forEach(b => { b.style.filter = ''; });
+    this.shadowRoot.querySelectorAll('.node-bar').forEach(b => { b.style.opacity = ''; });
   }
 
   _shouldRerender() {
@@ -5645,7 +7499,13 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     const states = this._overriddenStates || (this._hass && this._hass.states) || {};
     const key = nodes.map(n => {
       const s = states[n.entity_id];
-      const raw = s ? parseFloat(s.state) || 0 : 0;
+      let raw = s ? parseFloat(s.state) || 0 : 0;
+      if (n.add_entities) {
+        for (const ae of n.add_entities) {
+          const as = states[ae];
+          raw += as ? parseFloat(as.state) || 0 : 0;
+        }
+      }
       return Math.round(raw * 10);
     }).join(',');
     if (key === this._lastRenderKey) return false;
@@ -5664,16 +7524,29 @@ class SigenergyEnergyFlowCard extends HTMLElement {
   connectedCallback() { this._scheduleRender(); }
   disconnectedCallback() { if (this._renderRAF) { cancelAnimationFrame(this._renderRAF); this._renderRAF = null; } }
 
-  _getKwh(entityId) {
+  _getKwh(entityId, addEntities) {
     if (!entityId) return 0;
     const states = this._overriddenStates || (this._hass && this._hass.states) || {};
     const s = states[entityId];
     if (!s) return 0;
     const raw = parseFloat(s.state) || 0;
     const unit = (s.attributes && s.attributes.unit_of_measurement) || 'kWh';
-    if (unit === 'MWh') return raw * 1000;
-    if (unit === 'Wh') return raw / 1000;
-    return raw;
+    let total;
+    if (unit === 'MWh') total = raw * 1000;
+    else if (unit === 'Wh') total = raw / 1000;
+    else total = raw;
+    if (addEntities && addEntities.length) {
+      for (const ae of addEntities) {
+        const as = states[ae];
+        if (!as) continue;
+        const ar = parseFloat(as.state) || 0;
+        const au = (as.attributes && as.attributes.unit_of_measurement) || 'kWh';
+        if (au === 'MWh') total += ar * 1000;
+        else if (au === 'Wh') total += ar / 1000;
+        else total += ar;
+      }
+    }
+    return total;
   }
 
   _formatValue(kwh) {
@@ -5687,8 +7560,8 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     if (!this.shadowRoot || !this._config.nodes) return;
     const nodes = this._config.nodes || [];
     const minKwh = this._config.min_flow || 0.1;
-    const sources = nodes.filter(n => n.type === 'source' && this._getKwh(n.entity_id) >= minKwh);
-    const dests = nodes.filter(n => n.type === 'dest' && this._getKwh(n.entity_id) >= minKwh);
+    const sources = nodes.filter(n => n.type === 'source' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
+    const dests = nodes.filter(n => n.type === 'dest' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
     if (sources.length === 0 && dests.length === 0) {
       this.shadowRoot.innerHTML = '<div style="padding:24px;text-align:center;color:#aaa;font-size:13px;">No energy data available</div>';
       return;
@@ -5699,8 +7572,8 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     const gap = 8;
 
     // Compute totals
-    const totalSrc = sources.reduce((s, n) => s + this._getKwh(n.entity_id), 0);
-    const totalDst = dests.reduce((s, n) => s + this._getKwh(n.entity_id), 0);
+    const totalSrc = sources.reduce((s, n) => s + this._getKwh(n.entity_id, n.add_entities), 0);
+    const totalDst = dests.reduce((s, n) => s + this._getKwh(n.entity_id, n.add_entities), 0);
 
     // Proportional box height allocation — bars scale with energy values
     const minBarH = 20;
@@ -5709,7 +7582,7 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     const _allocateBoxes = (nodeList, totalKwh, avail) => {
       if (nodeList.length === 0) return [];
       const boxes = nodeList.map(n => {
-        const kwh = this._getKwh(n.entity_id);
+        const kwh = this._getKwh(n.entity_id, n.add_entities);
         return { ...n, kwh, h: totalKwh > 0 ? (kwh / totalKwh) * avail : avail / nodeList.length, cursor: 0 };
       });
       // Enforce minimum heights: bump small bars, shrink large bars proportionally
@@ -5856,25 +7729,56 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     // Build mySigen-style node panel (full-height bar covering flow edge)
     const makeLabel = (box, pct, align) => {
       const fmt = this._formatValue(box.kwh);
-      const isTiny = box.h < 55;
-      const isCompact = box.h < 105;
+      const h = box.h;
       const alignCls = align === 'left' ? 'lbl-left' : 'lbl-right';
       // Per-node color-tinted background (mySigen style)
       const [r,g,b] = hexRgb(box.color || '#4ECDC4');
       const panelBg = isDark
         ? `linear-gradient(180deg, rgba(${r},${g},${b},0.32) 0%, rgba(${r},${g},${b},0.15) 100%)`
         : `linear-gradient(180deg, rgba(${r},${g},${b},0.18) 0%, rgba(${r},${g},${b},0.08) 100%)`;
-      if (isTiny) {
-        return `<div class="node-panel ${alignCls}" style="background:${panelBg};">
+
+      // Tiny inline mode (< 40px): horizontal layout
+      if (h < 40) {
+        return `<div class="node-panel ${alignCls} lbl-inline-wrap" style="background:${panelBg};">
           <span class="lbl-name">${this._escHtml(box.name)}</span>
           <span class="lbl-inline">${fmt.v} ${fmt.u.charAt(0) === 'M' ? 'MWh' : 'kWh'}</span>
         </div>`;
       }
-      return `<div class="node-panel ${alignCls}${isCompact ? ' lbl-compact' : ''}" style="background:${panelBg};">
-        <span class="lbl-name">${this._escHtml(box.name)}</span>
-        <span class="lbl-val">${fmt.v}</span>
-        <span class="lbl-unit">${fmt.u}</span>
-        ${!isCompact ? `<span class="lbl-pct">${pct}%</span>` : ''}
+
+      // Proportional sizing: scale font sizes based on bar height
+      // Reference: 200px = full size, scale down linearly to 40px = minimum
+      const scale = Math.min(1, Math.max(0.45, (h - 40) / 160));
+      const nameSize = Math.round(7 + scale * 3);    // 7px → 10px
+      const namePadV = scale > 0.6 ? 2 : 1;
+      const namePadH = scale > 0.6 ? 8 : 5;
+      const nameMb = scale > 0.6 ? 2 : 1;
+      const valSize = Math.round(14 + scale * 12);    // 14px → 26px
+      const valLh = scale > 0.6 ? 1.1 : 1.0;
+      const unitSize = Math.round(8 + scale * 4);     // 8px → 12px
+      const pctSize = Math.round(9 + scale * 4);      // 9px → 13px
+      const panelPadV = scale > 0.5 ? 6 : 2;
+      const panelPadH = scale > 0.5 ? 8 : 5;
+
+      // Calculate content height to decide what fits
+      const nameH = Math.ceil(nameSize * 1.4) + namePadV * 2 + nameMb;
+      const valH = Math.ceil(valSize * valLh);
+      const unitH = Math.ceil(unitSize * 1.15);
+      const pctH = Math.ceil(pctSize * 1.15) + 2;
+      const availH = h - panelPadV * 2;
+      const baseH = nameH + valH;
+      const showUnit = (baseH + unitH) <= availH;
+      const showPct = showUnit && (baseH + unitH + pctH) <= availH;
+
+      // Use auto-margin centering: margin-top:auto on first + margin-bottom:auto
+      // on last child centers the group — auto margins collapse to 0 on overflow
+      // (unlike justify-content:center which clips the top on Safari)
+      const lastEl = showPct ? 'pct' : showUnit ? 'unit' : 'val';
+
+      return `<div class="node-panel ${alignCls}" style="background:${panelBg};padding:${panelPadV}px ${panelPadH}px;">
+        <span class="lbl-name" style="font-size:${nameSize}px;line-height:1.4;padding:${namePadV}px ${namePadH}px;margin-top:auto;margin-bottom:${nameMb}px;">${this._escHtml(box.name)}</span>
+        <span class="lbl-val" style="font-size:${valSize}px;line-height:${valLh};${lastEl === 'val' ? 'margin-bottom:auto;' : ''}">${fmt.v}</span>
+        ${showUnit ? `<span class="lbl-unit" style="font-size:${unitSize}px;line-height:1.15;margin-top:0;${lastEl === 'unit' ? 'margin-bottom:auto;' : ''}">${fmt.u}</span>` : ''}
+        ${showPct ? `<span class="lbl-pct" style="font-size:${pctSize}px;line-height:1.15;margin-top:2px;margin-bottom:auto;">${pct}%</span>` : ''}
       </div>`;
     };
 
@@ -5931,13 +7835,14 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           pointer-events: auto;
           cursor: pointer;
           overflow: hidden;
+          transition: opacity 0.3s ease;
         }
 
         /* mySigen-style node panel (full-height bar) */
         .node-panel {
           display: flex;
           flex-direction: column;
-          justify-content: center;
+          justify-content: flex-start;
           width: 100%;
           height: 100%;
           backdrop-filter: blur(6px);
@@ -5945,9 +7850,9 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           padding: 6px 8px;
           gap: 0px;
           box-sizing: border-box;
-          overflow: hidden;
+          overflow: visible;
         }
-        .node-panel > * { flex-shrink: 1; min-height: 0; }
+        .node-panel > * { flex-shrink: 0; min-height: 0; }
         .lbl-left { align-items: center; text-align: center; }
         .lbl-right { align-items: center; text-align: center; }
 
@@ -5984,26 +7889,23 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           margin-top: 2px;
         }
 
-        /* Compact (small nodes) */
-        .lbl-compact { padding: 3px 6px; }
-        .lbl-compact .lbl-name { font-size: 8px; padding: 1px 5px; margin-bottom: 1px; }
-        .lbl-compact .lbl-val { font-size: 16px; }
-        .lbl-compact .lbl-unit { font-size: 9px; }
-
-        /* Tiny inline label */
-        .node-panel:has(.lbl-inline) {
+        /* Tiny inline label — duplicate both :has() and .lbl-inline-wrap for Safari compat */
+        .node-panel:has(.lbl-inline),
+        .node-panel.lbl-inline-wrap {
           flex-direction: row;
           align-items: center;
           justify-content: flex-start;
           gap: 4px;
           padding: 3px 5px;
         }
-        .node-panel:has(.lbl-inline) .lbl-name {
+        .node-panel:has(.lbl-inline) .lbl-name,
+        .node-panel.lbl-inline-wrap .lbl-name {
           font-size: 8px;
           padding: 1px 5px;
           flex-shrink: 0;
         }
-        .lbl-right:has(.lbl-inline) {
+        .lbl-right:has(.lbl-inline),
+        .lbl-right.lbl-inline-wrap {
           justify-content: flex-end;
         }
         .lbl-inline {
@@ -6016,20 +7918,6 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           flex: 1;
           min-width: 0;
         }
-
-        @media (max-width: 500px) {
-          .lbl-val { font-size: 16px !important; }
-          .lbl-name { font-size: 7px !important; padding: 1px 4px !important; }
-          .lbl-unit { font-size: 9px !important; }
-          .lbl-pct { font-size: 10px !important; }
-          .node-panel { padding: 3px 5px; }
-        }
-        @media (min-width: 769px) {
-          .lbl-val { font-size: 26px !important; }
-          .lbl-name { font-size: 10px !important; }
-          .lbl-unit { font-size: 12px !important; }
-          .lbl-pct { font-size: 13px !important; }
-        }
       </style>
       <ha-card class="efc-card">
         <div class="efc-container">
@@ -6037,12 +7925,12 @@ class SigenergyEnergyFlowCard extends HTMLElement {
             <defs>
               ${gradients.map(g => `
                 <linearGradient id="${g.id}" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stop-color="${g.c1}" stop-opacity="0.75"/>
-                  <stop offset="100%" stop-color="${g.c2}" stop-opacity="0.7"/>
+                  <stop offset="0%" stop-color="${g.c1}" stop-opacity="0.9"/>
+                  <stop offset="100%" stop-color="${g.c2}" stop-opacity="0.85"/>
                 </linearGradient>
               `).join('')}
             </defs>
-            ${[...paths].sort((a, b) => (b.isCrossing ? 1 : 0) - (a.isCrossing ? 1 : 0)).map(p => `<path class="flow-path" d="${p.d}" fill="url(#${p.gradId})" fill-opacity="${p.isCrossing ? 0.35 : 0.65}" data-src="${p.srcEid}" data-dst="${p.dstEid}"/>`).join('\n            ')}
+            ${[...paths].sort((a, b) => (b.isCrossing ? 1 : 0) - (a.isCrossing ? 1 : 0)).map(p => `<path class="flow-path" d="${p.d}" fill="url(#${p.gradId})" fill-opacity="${p.isCrossing ? 0.55 : 0.85}" data-src="${p.srcEid}" data-dst="${p.dstEid}"/>`).join('\n            ')}
           </svg>
           <div class="label-col left">
             ${srcBoxes.map(b => {
@@ -6064,11 +7952,15 @@ class SigenergyEnergyFlowCard extends HTMLElement {
       const eid = box.dataset.entityId;
       box.addEventListener('mouseenter', () => {
         this.shadowRoot.querySelectorAll('.flow-path').forEach(p => {
-          p.style.fillOpacity = (p.dataset.src === eid || p.dataset.dst === eid) ? '0.8' : '0.12';
+          p.style.fillOpacity = (p.dataset.src === eid || p.dataset.dst === eid) ? '0.9' : '0.12';
+        });
+        this.shadowRoot.querySelectorAll('.node-bar').forEach(b => {
+          b.style.opacity = b.dataset.entityId === eid ? '1' : '0.45';
         });
       });
       box.addEventListener('mouseleave', () => {
         this.shadowRoot.querySelectorAll('.flow-path').forEach(p => { p.style.fillOpacity = ''; });
+        this.shadowRoot.querySelectorAll('.node-bar').forEach(b => { b.style.opacity = ''; });
       });
     });
   }
@@ -6202,7 +8094,7 @@ class SigenergySankeyPanel extends HTMLElement {
           this._expanded = false;
         } else {
           this._selectedNode = node.id;
-          this._expanded = true;
+          this._expanded = false;
         }
         this._updatePanel();
       };
@@ -6388,9 +8280,15 @@ class SigenergySankeyPanel extends HTMLElement {
       return;
     }
 
-    // When historical date is active, re-apply states every tick to override HA's live updates
+    // When historical date is active, re-apply states only if HA pushed live updates
+    // that would overwrite our historical data. Avoid re-applying unchanged states
+    // because each _setSankeyChartStates triggers a re-render that destroys DOM
+    // elements (and their click handlers).
     if (selectedStr === this._dateNavLastStr && this._dateNavActive && this._historicalStates) {
-      this._setSankeyChartStates(this._historicalStates);
+      const sankeyBase = this._findSankeyBase();
+      if (sankeyBase && sankeyBase._overriddenStates !== this._historicalStates) {
+        this._setSankeyChartStates(this._historicalStates);
+      }
       return;
     }
 
@@ -6544,6 +8442,15 @@ class SigenergySankeyPanel extends HTMLElement {
         // Apply via SANKEY-CHART.states (parent, Lit reactive) so it flows through the render template
         this._setSankeyChartStates(newStates);
 
+        // Re-attach click handlers after the flow card re-renders (next frame)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            this._cleanupBoxListeners();
+            this._boxClickCleanup = [];
+            this._attachBoxListeners();
+          });
+        });
+
         // Refresh the stats panel and detail panel with historical values
         this._updateStatsPanel();
         this._updatePanel();
@@ -6587,7 +8494,7 @@ class SigenergySankeyPanel extends HTMLElement {
     return deepFind(document, 'sigenergy-energy-flow-card', 0) || deepFind(document, 'sankey-chart-base', 0);
   }
 
-  _getKwh(entityId) {
+  _getKwh(entityId, addEntities) {
     if (!entityId || !this._hass) return 0;
     // When viewing a historical date, read from the overridden states
     // so stats panel and detail panel show historical values, not live.
@@ -6596,20 +8503,27 @@ class SigenergySankeyPanel extends HTMLElement {
     if (!stateObj) return 0;
     const raw = parseFloat(stateObj.state) || 0;
     const unit = (stateObj.attributes?.unit_of_measurement || 'kWh').toString();
-    if (unit === 'MWh') return raw * 1000;
-    if (unit === 'Wh') return raw / 1000;
-    return raw;
+    let total;
+    if (unit === 'MWh') total = raw * 1000;
+    else if (unit === 'Wh') total = raw / 1000;
+    else total = raw;
+    if (addEntities && addEntities.length) {
+      for (const ae of addEntities) {
+        const as = states[ae];
+        if (!as) continue;
+        const ar = parseFloat(as.state) || 0;
+        const au = (as.attributes?.unit_of_measurement || 'kWh').toString();
+        if (au === 'MWh') total += ar * 1000;
+        else if (au === 'Wh') total += ar / 1000;
+        else total += ar;
+      }
+    }
+    return total;
   }
 
   _toggleExpand() {
-    if (this._expanded) {
-      // First click: collapse the breakdown section
-      this._expanded = false;
-    } else {
-      // Second click when already collapsed: deselect the node entirely
-      this._selectedNode = null;
-      this._expanded = false;
-    }
+    // Toggle between expanded and collapsed breakdown
+    this._expanded = !this._expanded;
     this._updatePanel();
   }
 
@@ -6721,15 +8635,20 @@ class SigenergySankeyPanel extends HTMLElement {
           margin-top: 2px;
         }
         .expand-btn {
-          text-align: center; padding: 4px 0; cursor: pointer;
+          text-align: center; padding: 6px 0; cursor: pointer;
           background: ${_panelBg};
           border-left: 1px solid var(--divider-color, #2d3451);
           border-right: 1px solid var(--divider-color, #2d3451);
           color: var(--secondary-text-color, #aaa);
           user-select: none; line-height: 1;
+          display: flex; align-items: center; justify-content: center; gap: 6px;
         }
-        .expand-btn svg { transition: transform 0.3s ease; }
-        .expand-btn.expanded svg { transform: rotate(180deg); }
+        .expand-btn .expand-chevron {
+          font-size: 10px; transition: transform 0.2s ease;
+        }
+        .expand-btn.expanded .expand-chevron { transform: rotate(180deg); }
+        .expand-btn .expand-hint { font-size: 10px; opacity: 0.5; transition: opacity 0.3s ease; }
+        .expand-btn.expanded .expand-hint { opacity: 0; width: 0; overflow: hidden; }
         .breakdown {
           display: flex; flex-wrap: wrap; gap: 0;
           background: ${_panelBg};
@@ -6748,7 +8667,7 @@ class SigenergySankeyPanel extends HTMLElement {
         .breakdown-item .dot {
           width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
         }
-        .breakdown-item .details { flex: 1; }
+        .breakdown-item .details { flex: 1; text-align: center; }
         .breakdown-item .pct {
           font-size: 20px; font-weight: bold;
           color: var(--primary-text-color, #fff);
@@ -6759,9 +8678,7 @@ class SigenergySankeyPanel extends HTMLElement {
         .breakdown-item .kwh {
           font-size: 12px; color: var(--secondary-text-color, #aaa);
         }
-        .chevron-icon {
-          width: 18px; height: 18px; fill: currentColor; vertical-align: middle;
-        }
+
         @media (max-width: 500px) {
           .stat-grid { grid-template-columns: 1fr 1fr; }
           .stat-chip .chip-val { font-size: 16px; }
@@ -6780,8 +8697,8 @@ class SigenergySankeyPanel extends HTMLElement {
       <div class="sankey-info-panel hidden" id="panel">
         <div class="info-main" id="infoMain"></div>
         <div class="expand-btn" id="expandBtn">
-          <svg class="chevron-icon" viewBox="0 0 24 24"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>
-          <svg class="chevron-icon" style="margin-left:-14px;" viewBox="0 0 24 24"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>
+          <span class="expand-chevron">▼</span>
+          <span class="expand-hint">tap to expand</span>
         </div>
         <div class="breakdown collapsed" id="breakdown"></div>
       </div>
@@ -6815,8 +8732,8 @@ class SigenergySankeyPanel extends HTMLElement {
     const solarVal = solar ? this._getKwh(solar.entity_id) : 0;
     const loadVal = load ? this._getKwh(load.entity_id) : 0;
     const batCVal = batC ? this._getKwh(batC.entity_id) : 0;
-    const gridEVal = gridE ? this._getKwh(gridE.entity_id) : 0;
-    const gridIVal = gridI ? this._getKwh(gridI.entity_id) : 0;
+    const gridEVal = gridE ? this._getKwh(gridE.entity_id, gridE.add_entities) : 0;
+    const gridIVal = gridI ? this._getKwh(gridI.entity_id, gridI.add_entities) : 0;
     const evVal = ev ? this._getKwh(ev.entity_id) : 0;
     const hpVal = hp ? this._getKwh(hp.entity_id) : 0;
 
@@ -6870,7 +8787,7 @@ class SigenergySankeyPanel extends HTMLElement {
             this._expanded = false;
           } else {
             this._selectedNode = nodeId;
-            this._expanded = true;
+            this._expanded = false;
           }
           this._updatePanel();
         });
@@ -6901,7 +8818,7 @@ class SigenergySankeyPanel extends HTMLElement {
     panel.className = 'sankey-info-panel visible';
 
     // Get the value of the selected entity
-    const val = this._getKwh(node.entity_id);
+    const val = this._getKwh(node.entity_id, node.add_entities);
     infoMain.innerHTML = `
       <div class="value">${val.toFixed(2)} <span class="unit">kWh</span></div>
       <div class="label">${node.name}</div>
@@ -6931,10 +8848,10 @@ class SigenergySankeyPanel extends HTMLElement {
     const flowMatrix = {};
     const remaining = {};
     // Initialize remaining capacity for each destination
-    allDests.forEach(d => { remaining[d.entity_id] = this._getKwh(d.entity_id); });
+    allDests.forEach(d => { remaining[d.entity_id] = this._getKwh(d.entity_id, d.add_entities); });
     // Greedy allocation: sources in order (Grid first = smallest, then Battery, then Solar)
     allSources.forEach(src => {
-      const srcVal = this._getKwh(src.entity_id);
+      const srcVal = this._getKwh(src.entity_id, src.add_entities);
       let srcRemaining = srcVal;
       flowMatrix[src.entity_id] = {};
       const childSet = new Set((src.children || []).filter(eid => remaining[eid] !== undefined));
@@ -6990,7 +8907,7 @@ class SigenergySankeyPanel extends HTMLElement {
 
 // ═══════════════════════════════════════════════════════════
 // Lottie Insights Card — Animated system health overview
-// Uses lottie-web from CDN for lightweight Lottie JSON rendering
+// Uses local lottie-web with CDN fallback
 // ═══════════════════════════════════════════════════════════
 
 const _LOTTIE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js';
@@ -6999,11 +8916,21 @@ let _lottiePromise = null;
 function _loadLottie() {
   if (window.lottie) return Promise.resolve(window.lottie);
   if (_lottiePromise) return _lottiePromise;
+  // Resolve local path: JS served from /genergy_dashboard/js/, lottie at /genergy_dashboard/frontend/
+  const localUrl = (import.meta.url || '').replace('/js/', '/frontend/').replace(/\/[^/]+$/, '/lottie.min.js');
   _lottiePromise = new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = _LOTTIE_CDN;
+    s.src = localUrl;
     s.onload = () => resolve(window.lottie);
-    s.onerror = () => reject(new Error('Failed to load lottie-web'));
+    s.onerror = () => {
+      // Fallback to CDN if local fails
+      console.warn('Genergy: local lottie-web failed, falling back to CDN');
+      const s2 = document.createElement('script');
+      s2.src = _LOTTIE_CDN;
+      s2.onload = () => resolve(window.lottie);
+      s2.onerror = () => reject(new Error('Failed to load lottie-web from both local and CDN'));
+      document.head.appendChild(s2);
+    };
     document.head.appendChild(s);
   });
   return _lottiePromise;
@@ -7164,17 +9091,25 @@ class SigenergyInsightsCard extends HTMLElement {
       title: 'Revenue',
       icon: '💰',
       getValue: () => {
+        const cur = cfg.pricing?.currency || '€';
         const savings = this._getVal(ents.emhass_savings_today);
         const cost = this._getVal(ents.emhass_net_cost_today);
+        // Fallback to HA Energy Dashboard cost entities
+        const importCost = savings === null && cost === null ? this._getVal('sensor.imported_energy_total_cost') : null;
+        const exportComp = savings === null && cost === null ? this._getVal('sensor.exported_energy_total_compensation') : null;
         const parts = [];
-        if (savings !== null) parts.push(`Saved: €${savings.toFixed(2)}`);
-        if (cost !== null) parts.push(`Cost: €${cost.toFixed(2)}`);
+        if (savings !== null) parts.push(`Saved: ${cur}${savings.toFixed(2)}`);
+        if (cost !== null) parts.push(`Cost: ${cur}${cost.toFixed(2)}`);
+        if (importCost !== null) parts.push(`Import: ${cur}${importCost.toFixed(2)}`);
+        if (exportComp !== null) parts.push(`Export: ${cur}${exportComp.toFixed(2)}`);
         return parts.length ? parts.join(' · ') : 'No data';
       },
       getStatus: () => {
         const savings = this._getVal(ents.emhass_savings_today);
-        if (savings === null) return 'unknown';
-        if (savings > 0) return 'good';
+        const exportComp = savings === null ? this._getVal('sensor.exported_energy_total_compensation') : null;
+        const v = savings ?? exportComp;
+        if (v === null) return 'unknown';
+        if (v > 0) return 'good';
         return 'warning';
       }
     });
@@ -7196,10 +9131,31 @@ class SigenergyInsightsCard extends HTMLElement {
     if (!s || s.state === 'unavailable' || s.state === 'unknown') return null;
     const v = parseFloat(s.state);
     if (isNaN(v)) return null;
-    const unit = (s.attributes?.unit_of_measurement || 'kWh').toString();
+    const unit = (s.attributes?.unit_of_measurement || 'kWh').toString().trim();
     if (unit === 'MWh') return v * 1000;
-    if (unit === 'Wh') return v / 1000;
+    if (unit === 'Wh' || unit === 'W') return v / 1000;
+    if (unit === 'kW' || unit === 'KW') return v;          // kW ≈ kWh for display
+    if (unit === 'MW') return v * 1000;
     return v;
+  }
+
+  /** Return {value, unit} for a power entity, normalised for display.
+   *  Reads the sensor's unit_of_measurement and auto-scales to W or kW. */
+  _getValPower(entityId) {
+    if (!this._hass || !entityId) return null;
+    const s = this._hass.states[entityId];
+    if (!s || s.state === 'unavailable' || s.state === 'unknown') return null;
+    const raw = parseFloat(s.state);
+    if (isNaN(raw)) return null;
+    const unit = (s.attributes?.unit_of_measurement || 'W').toString().trim();
+    // Normalise to watts
+    let w = raw;
+    if (unit === 'kW' || unit === 'KW') w = raw * 1000;
+    else if (unit === 'MW') w = raw * 1000000;
+    // Auto-scale for display
+    const abs = Math.abs(w);
+    if (abs >= 1000) return { value: w / 1000, unit: ' kW', decimals: 2 };
+    return { value: w, unit: ' W', decimals: 0 };
   }
 
   _statusColor(status) {
@@ -7433,6 +9389,7 @@ class SigenergyInsightsCard extends HTMLElement {
 
   async _loadAnimations(tiles) {
     const lottiePath = _SIGENERGY_SCRIPT_DIR + 'images/lottie/';
+    const isDark = (window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark') === 'dark';
 
     // Load lottie-web and initialize animations
     try {
@@ -7445,7 +9402,10 @@ class SigenergyInsightsCard extends HTMLElement {
         if (!container) continue;
 
         try {
-          const resp = await fetch(lottiePath + tile.lottie);
+          // Use light theme Lottie variants when in light mode
+          const lottieFile = !isDark ? tile.lottie.replace('.json', '_light.json') : tile.lottie;
+          let resp = await fetch(lottiePath + lottieFile);
+          if (!resp.ok) resp = await fetch(lottiePath + tile.lottie);
           if (!resp.ok) continue;
           const animData = await resp.json();
 
@@ -7458,7 +9418,8 @@ class SigenergyInsightsCard extends HTMLElement {
           });
           this._animations.push(anim);
         } catch(e) {
-          container.innerHTML = `<div class="fallback-icon">${tile.icon}</div>`;
+          const pngPath = _SIGENERGY_SCRIPT_DIR + 'images/care_' + tile.id + '.png';
+          container.innerHTML = `<img src="${pngPath}" style="width:80px;height:80px;object-fit:contain;" onerror="this.outerHTML='<div class=fallback-icon>${tile.icon}</div>'">`;
         }
       }
     } catch(e) {
@@ -7466,7 +9427,8 @@ class SigenergyInsightsCard extends HTMLElement {
       for (const tile of tiles) {
         const container = this.shadowRoot.getElementById('lottie-' + tile.id);
         if (container) {
-          container.innerHTML = `<div class="fallback-icon">${tile.icon}</div>`;
+          const pngPath = _SIGENERGY_SCRIPT_DIR + 'images/care_' + tile.id + '.png';
+          container.innerHTML = `<img src="${pngPath}" style="width:80px;height:80px;object-fit:contain;" onerror="this.outerHTML='<div class=fallback-icon>${tile.icon}</div>'">`;
         }
       }
     }
@@ -7567,8 +9529,13 @@ class SigenergyInsightsCard extends HTMLElement {
     const ents = cfg.entities || {};
     const rows = [];
 
-    const addRow = (label, entityId, unit, decimals) => {
-      const v = this._getVal(entityId);
+    const addRow = (label, entityId, unit, decimals, useKWhConvert, usePowerConvert) => {
+      if (usePowerConvert) {
+        const p = this._getValPower(entityId);
+        if (p !== null) rows.push({ label, value: p.value.toFixed(p.decimals) + p.unit });
+        return;
+      }
+      const v = useKWhConvert ? this._getValKWh(entityId) : this._getVal(entityId);
       if (v !== null) rows.push({ label, value: v.toFixed(decimals ?? 1) + (unit || '') });
     };
 
@@ -7578,7 +9545,7 @@ class SigenergyInsightsCard extends HTMLElement {
         addRow('Temperature', ents.battery_temp, '°C', 1);
         addRow('Voltage', ents.battery_voltage, ' V', 1);
         addRow('Current', ents.battery_current, ' A', 2);
-        addRow('Power', ents.battery_power, ' W', 0);
+        addRow('Power', ents.battery_power, null, null, false, true);
         addRow('Capacity', ents.battery_capacity, ' kWh', 1);
         addRow('Max SoC', ents.battery_max_soc, '%', 0);
         addRow('Min SoC', ents.battery_min_soc, '%', 0);
@@ -7588,34 +9555,36 @@ class SigenergyInsightsCard extends HTMLElement {
         addRow('Total Capacity', ents.battery_capacity, ' kWh', 1);
         addRow('Max SoC Limit', ents.battery_max_soc, '%', 0);
         addRow('Min SoC Limit', ents.battery_min_soc, '%', 0);
-        addRow('Charge Power', ents.battery_charge_power, ' W', 0);
-        addRow('Discharge Power', ents.battery_discharge_power, ' W', 0);
+        addRow('Charge Power', ents.battery_charge_power, null, null, false, true);
+        addRow('Discharge Power', ents.battery_discharge_power, null, null, false, true);
         break;
       case 'environmental':
-        addRow('Solar Today', ents.solar_energy_today, ' kWh', 1);
-        addRow('Grid Export', ents.grid_export_today, ' kWh', 1);
-        addRow('Grid Import', ents.grid_import_today, ' kWh', 1);
+        addRow('Solar Today', ents.solar_energy_today, ' kWh', 1, true);
+        addRow('Grid Export', ents.grid_export_today, ' kWh', 1, true);
+        addRow('Grid Import', ents.grid_import_today, ' kWh', 1, true);
         addRow('Self-Sufficiency', ents.self_sufficiency, '%', 0);
-        addRow('Solar Power Now', ents.solar_power, ' W', 0);
+        addRow('Solar Power Now', ents.solar_power, null, null, false, true);
         break;
       case 'equipment':
         addRow('Inverter Temp', ents.inverter_temp || ents.inverter_internal_temp, '°C', 1);
-        addRow('Inverter Power', ents.inverter_active_power, ' W', 0);
+        addRow('Inverter Power', ents.inverter_active_power, null, null, false, true);
         addRow('Grid Frequency', ents.grid_frequency, ' Hz', 2);
         break;
       case 'network':
         addRow('Voltage', ents.grid_voltage, ' V', 1);
         addRow('Frequency', ents.grid_frequency, ' Hz', 2);
-        addRow('Grid Power', ents.grid_active_power || ents.grid_power, ' W', 0);
-        addRow('Import Today', ents.grid_import_today, ' kWh', 1);
-        addRow('Export Today', ents.grid_export_today, ' kWh', 1);
+        addRow('Grid Power', ents.grid_active_power || ents.grid_power, null, null, false, true);
+        addRow('Import Today', ents.grid_import_today, ' kWh', 1, true);
+        addRow('Export Today', ents.grid_export_today, ' kWh', 1, true);
         break;
-      case 'revenue':
-        addRow('Savings Today', ents.emhass_savings_today, ' €', 2);
-        addRow('Net Cost', ents.emhass_net_cost_today, ' €', 2);
-        addRow('Import Cost', ents.grid_import_cost_today, ' €', 2);
-        addRow('Export Revenue', ents.grid_export_revenue_today, ' €', 2);
+      case 'revenue': {
+        const cur = ' ' + (cfg.pricing?.currency || '€');
+        addRow('Savings Today', ents.emhass_savings_today, cur, 2);
+        addRow('Net Cost', ents.emhass_net_cost_today, cur, 2);
+        addRow('Import Cost', ents.grid_import_cost_today || 'sensor.imported_energy_total_cost', cur, 2);
+        addRow('Export Revenue', ents.grid_export_revenue_today || 'sensor.exported_energy_total_compensation', cur, 2);
         break;
+      }
     }
 
     if (rows.length === 0) {
@@ -7671,7 +9640,6 @@ class SigenergyDeviceCard extends HTMLElement {
     const REQUIRED_CARDS = [
       { name: 'Layout Card', tag: 'layout-card', hacs: 'layout-card', owner: 'thomasloven', repository: 'lovelace-layout-card', purpose: 'Responsive grid layout' },
       { name: 'ApexCharts Card', tag: 'apexcharts-card', hacs: 'apexcharts-card', owner: 'RomRider', repository: 'apexcharts-card', purpose: 'Energy time-series charts' },
-      { name: 'Sankey Chart Card', tag: 'sankey-chart', hacs: 'ha-sankey-chart', owner: 'MindFreeze', repository: 'ha-sankey-chart', purpose: 'Energy flow diagram' },
       { name: 'Mushroom Cards', tag: 'mushroom-template-card', hacs: 'mushroom', owner: 'piitaya', repository: 'lovelace-mushroom', purpose: 'Status pills and cards' },
       { name: 'Card Mod', tag: 'mod-card', hacs: 'lovelace-card-mod', owner: 'thomasloven', repository: 'lovelace-card-mod', purpose: 'CSS styling injection' },
     ];
@@ -8206,6 +10174,181 @@ class SigenergyDeviceCard extends HTMLElement {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Forecast Modal — fullscreen overlay for EMS forecast cards
+// Shows compact trigger bar on dashboard; opens modal on tap
+// ═══════════════════════════════════════════════════════════
+
+class SigForecastModal extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._hass = null;
+    this._config = {};
+    this._innerCard = null;
+    this._open = false;
+    this._boundKeyHandler = this._onKeyDown.bind(this);
+  }
+
+  setConfig(config) {
+    if (!config.card) throw new Error('SigForecastModal requires a "card" config');
+    this._config = config;
+    if (this.shadowRoot) this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._innerCard) this._innerCard.hass = hass;
+  }
+
+  getCardSize() { return 1; }
+
+  connectedCallback() { this._render(); }
+
+  _render() {
+    const c = this._config;
+    const title = c.title || 'Forecasts';
+    const icon = c.icon || 'mdi:table-clock';
+    const iconColor = c.icon_color || 'teal';
+    const bgColor = c.bg || 'rgba(30,35,54,0.94)';
+    const borderColor = c.border || '#2d3451';
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; }
+        .trigger {
+          display: flex; align-items: center; gap: 12px;
+          padding: 12px 16px; cursor: pointer;
+          background: ${bgColor}; border: 1px solid ${borderColor};
+          border-radius: 12px; color: var(--primary-text-color, #e0e4ec);
+          transition: background 0.2s, border-color 0.2s;
+          user-select: none; -webkit-user-select: none;
+        }
+        .trigger:hover { border-color: ${iconColor}; }
+        .trigger:active { transform: scale(0.99); }
+        .trigger-icon { color: ${iconColor}; flex-shrink: 0; --mdc-icon-size: 24px; }
+        .trigger-text { flex: 1; font-size: 14px; font-weight: 500; }
+        .trigger-hint { font-size: 12px; opacity: 0.5; flex-shrink: 0; }
+        .trigger-arrow { opacity: 0.4; --mdc-icon-size: 20px; }
+
+        .overlay {
+          position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+          z-index: 999; display: none;
+          background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+          align-items: center; justify-content: center;
+          animation: fadeIn 0.2s ease;
+        }
+        .overlay.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        .modal {
+          background: ${bgColor}; border: 1px solid ${borderColor};
+          border-radius: 16px; width: 95vw; max-width: 1200px;
+          max-height: 92vh; display: flex; flex-direction: column;
+          box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+          animation: slideUp 0.25s ease;
+          overflow: hidden;
+        }
+        .modal-header {
+          display: flex; align-items: center; gap: 12px;
+          padding: 16px 20px; border-bottom: 1px solid ${borderColor};
+          flex-shrink: 0;
+        }
+        .modal-title-icon { color: ${iconColor}; --mdc-icon-size: 24px; }
+        .modal-title { flex: 1; font-size: 18px; font-weight: 600; color: var(--primary-text-color, #e0e4ec); }
+        .modal-close {
+          background: none; border: 1px solid ${borderColor}; border-radius: 8px;
+          color: var(--primary-text-color, #e0e4ec); cursor: pointer;
+          width: 36px; height: 36px; display: flex; align-items: center;
+          justify-content: center; font-size: 18px; transition: background 0.15s;
+          flex-shrink: 0;
+        }
+        .modal-close:hover { background: rgba(255,255,255,0.1); }
+        .modal-body {
+          flex: 1; overflow-y: auto; padding: 0;
+          -webkit-overflow-scrolling: touch;
+        }
+        .modal-body > * {
+          --ha-card-background: transparent !important;
+          --card-background-color: transparent !important;
+        }
+
+        @media (max-width: 768px) {
+          .modal { width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
+          .trigger-hint { display: none; }
+        }
+      </style>
+
+      <div class="trigger" id="trigger">
+        <ha-icon class="trigger-icon" icon="${icon}"></ha-icon>
+        <span class="trigger-text">${title}</span>
+        <span class="trigger-hint">Tap to open</span>
+        <ha-icon class="trigger-arrow" icon="mdi:arrow-expand"></ha-icon>
+      </div>
+
+      <div class="overlay" id="overlay">
+        <div class="modal" id="modal">
+          <div class="modal-header">
+            <ha-icon class="modal-title-icon" icon="${icon}"></ha-icon>
+            <span class="modal-title">${title}</span>
+            <button class="modal-close" id="closeBtn" aria-label="Close">✕</button>
+          </div>
+          <div class="modal-body" id="modalBody"></div>
+        </div>
+      </div>
+    `;
+
+    this.shadowRoot.getElementById('trigger').addEventListener('click', () => this._openModal());
+    this.shadowRoot.getElementById('closeBtn').addEventListener('click', () => this._closeModal());
+    this.shadowRoot.getElementById('overlay').addEventListener('click', (e) => {
+      if (e.target === this.shadowRoot.getElementById('overlay')) this._closeModal();
+    });
+    // Stop modal clicks from propagating to overlay backdrop
+    this.shadowRoot.getElementById('modal').addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  _openModal() {
+    const overlay = this.shadowRoot.getElementById('overlay');
+    overlay.classList.add('active');
+    this._open = true;
+    document.addEventListener('keydown', this._boundKeyHandler);
+
+    if (!this._innerCard) {
+      const body = this.shadowRoot.getElementById('modalBody');
+      const cardConfig = Object.assign({}, this._config.card);
+      // Remove card_mod — we style the modal ourselves
+      delete cardConfig.card_mod;
+      const tag = cardConfig.type.startsWith('custom:') ? cardConfig.type.slice(7) : 'hui-' + cardConfig.type + '-card';
+      try {
+        this._innerCard = document.createElement(tag);
+        this._innerCard.setConfig(cardConfig);
+        if (this._hass) this._innerCard.hass = this._hass;
+        body.appendChild(this._innerCard);
+      } catch (err) {
+        body.innerHTML = '<div style="padding:20px;color:#e57373;">Failed to load card: ' + err.message + '</div>';
+      }
+    }
+  }
+
+  _closeModal() {
+    this.shadowRoot.getElementById('overlay').classList.remove('active');
+    this._open = false;
+    document.removeEventListener('keydown', this._boundKeyHandler);
+  }
+
+  _onKeyDown(e) {
+    if (e.key === 'Escape' && this._open) {
+      e.preventDefault();
+      this._closeModal();
+    }
+  }
+
+  disconnectedCallback() {
+    document.removeEventListener('keydown', this._boundKeyHandler);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // Robust Element Registration — belt-and-suspenders approach
 // Handles ES module caching, race conditions, and timing issues
 // ═══════════════════════════════════════════════════════════
@@ -8217,6 +10360,7 @@ window.__sigCardClasses['sigenergy-device-card'] = SigenergyDeviceCard;
 window.__sigCardClasses['sigenergy-sankey-panel'] = SigenergySankeyPanel;
 window.__sigCardClasses['sigenergy-insights-card'] = SigenergyInsightsCard;
 window.__sigCardClasses['sigenergy-energy-flow-card'] = SigenergyEnergyFlowCard;
+window.__sigCardClasses['sigenergy-forecast-modal'] = SigForecastModal;
 
 // Core registration function — safe to call repeatedly
 function _sigRegisterAll() {
@@ -8329,7 +10473,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.19.0 ',
+  '%c GENERGY-DASHBOARD %c v2.23.0-pre.1 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
@@ -8341,15 +10485,15 @@ console.info(
 // ═══════════════════════════════════════════════════════════
 (function() {
   var RESPONSIVE_CSS = [
-    '/* Mobile: 1 column, all items stacked */',
-    '@media (max-width: 800px) {',
+    '/* Mobile + Tablet portrait: 1 column, all items stacked */',
+    '@media (max-width: 1024px) {',
     '  :host { overflow-x: hidden !important; max-width: 100vw !important; }',
     '  #root { grid-template-columns: 1fr !important; grid-template-rows: repeat(10, auto) !important; overflow-x: hidden !important; max-width: 100% !important; box-sizing: border-box !important; }',
     '  #root > * { grid-column: 1 !important; grid-row: auto !important; max-width: 100% !important; overflow: hidden !important; box-sizing: border-box !important; }',
     '}',
     '',
-    '/* Tablet: 2 columns with explicit placement */',
-    '@media (min-width: 801px) and (max-width: 1200px) {',
+    '/* Tablet landscape: 2 columns with explicit placement */',
+    '@media (min-width: 1025px) and (max-width: 1200px) {',
     '  #root { grid-template-columns: 1fr 1fr !important; grid-template-rows: repeat(6, auto) !important; }',
     '  #root > *:nth-child(1) { grid-column: 1 !important; grid-row: 1 !important; }',
     '  #root > *:nth-child(2) { grid-column: 2 !important; grid-row: 1 !important; }',

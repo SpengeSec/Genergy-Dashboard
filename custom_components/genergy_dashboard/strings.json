@@ -38,7 +38,7 @@
       },
       "extras": {
         "title": "Additional Entities & Features",
-        "description": "Configure optional sensors, device details, and feature toggles. Enable EMHASS/HAEO/Solcast to auto-populate their standard entity names.",
+        "description": "Configure optional sensors, device details, and feature toggles. Enable EMHASS/HAEO/Energy Manager/Solcast to auto-populate their standard entity names.",
         "data": {
           "weather": "Weather Entity",
           "inverter_temp": "Inverter Temperature",
@@ -74,6 +74,7 @@
           "show_hp_in_sankey": "Show Heat Pump in Sankey Graph",
           "feature_emhass": "Enable EMHASS (auto-fills standard entity names)",
           "feature_haeo": "Enable HAEO (Home Assistant Energy Optimizer)",
+          "feature_em": "Enable Energy Manager (auto-fills EM decision entity)",
           "feature_solcast": "Enable Solcast (auto-fills forecast entities)",
           "battery_packs": "Number of Battery Packs"
         }
@@ -146,6 +147,7 @@
           "show_hp_in_sankey": "Show Heat Pump in Sankey Graph",
           "feature_emhass": "Enable EMHASS (auto-fills standard entity names)",
           "feature_haeo": "Enable HAEO (Home Assistant Energy Optimizer)",
+          "feature_em": "Enable Energy Manager (auto-fills EM decision entity)",
           "feature_solcast": "Enable Solcast (auto-fills forecast entities)",
           "battery_packs": "Number of Battery Packs"
         }

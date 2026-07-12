@@ -74,6 +74,7 @@ class SigenergySmartLoadCard extends HTMLElement {
     this._unsubStore = null;
     this._rendered = false;
     this._lastLoadKeys = '';
+    this._collapsedSections = new Set(); // track which section IDs are collapsed
   }
 
   set hass(hass) {
@@ -252,6 +253,98 @@ class SigenergySmartLoadCard extends HTMLElement {
     const totalKwh = items.reduce((sum, i) => sum + (i.kwh || 0), 0);
     const activeCount = items.filter(i => i.watts != null && i.watts > standbyThreshold).length;
 
+    // Sections support
+    const sections = (window.SigenergyConfig?.get()?.smart_load_sections || []).filter(s => s.name);
+    const hasSections = sections.length > 0;
+
+    // Helper: render a single tile
+    const _renderTile = (item, rankIdx, totalActive) => {
+      const w = item.watts;
+      let cls = 'off', tileCls = 'off';
+      if (w != null && w > 0) {
+        if (w > 1000) { cls = 'high'; tileCls = 'high'; }
+        else if (w <= standbyThreshold) { cls = 'standby'; tileCls = 'standby'; }
+        else { cls = 'active'; tileCls = 'active'; }
+      }
+      const rankHtml = rankIdx >= 0 ? `<span class="rank-badge">#${rankIdx + 1}</span>` : '';
+      const energyHtml = item.kwh != null && !isNaN(item.kwh) ? `<div class="tile-energy">${_formatEnergy(item.kwh)}</div>` : '';
+      const toggleHtml = item.entity_switch ? `<div class="tile-toggle" data-switch="${item.entity_switch}" title="Toggle"></div>` : '';
+      return `
+        <div class="tile ${tileCls}" data-entity="${item.entity_power}" data-name="${item.label || item.typeInfo?.label || 'Load'}" data-type="${item.type}" data-power="${w}" data-switch="${item.entity_switch || ''}">
+          ${rankHtml}
+          ${toggleHtml}
+          <img class="tile-icon" src="${IMG_BASE}${item.type}_mid.png" alt="${item.typeInfo?.label || item.type}" loading="lazy" onerror="this.src='${IMG_BASE}plug_socket_mid.png'">
+          <div class="tile-label">${item.label || item.typeInfo?.label || 'Load'}</div>
+          <div class="tile-power ${cls}">${_formatPower(w)}</div>
+          ${energyHtml}
+        </div>`;
+    };
+
+    const activeItems = items.filter(i => i.watts != null && i.watts > standbyThreshold);
+
+    // Build section groups
+    const renderSections = () => {
+      if (!hasSections) {
+        // No sections — render flat grid as before
+        return `<div class="grid">${items.map((item, idx) => {
+          const rankIdx = activeItems.indexOf(item);
+          return _renderTile(item, rankIdx, activeItems.length);
+        }).join('')}</div>`;
+      }
+
+      let html = '';
+      const assignedIds = new Set(sections.flatMap(s => s.device_ids || []));
+      const unassigned = items.filter(i => !assignedIds.has(i.entity_power));
+
+      for (const section of sections) {
+        const sectionItems = (section.device_ids || [])
+          .map(id => items.find(i => i.entity_power === id))
+          .filter(Boolean);
+        if (sectionItems.length === 0) continue;
+        const sectionWatts = sectionItems.reduce((s, i) => s + (i.watts || 0), 0);
+        const sectionActive = sectionItems.filter(i => i.watts != null && i.watts > standbyThreshold).length;
+        const isCollapsed = this._collapsedSections.has(section.id);
+        html += `
+          <div class="section-header" data-section-id="${section.id}">
+            <span class="section-name">
+              <span class="section-collapse-icon${isCollapsed ? ' collapsed' : ''}">▾</span>
+              ${section.name}
+            </span>
+            <span class="section-stats">
+              ${sectionActive > 0 ? `<span>${sectionActive} active</span>` : ''}
+              <span class="section-power">${_formatPower(sectionWatts)}</span>
+            </span>
+          </div>
+          <div class="section-grid${isCollapsed ? ' collapsed' : ''}">
+            ${sectionItems.map(item => {
+              const rankIdx = activeItems.indexOf(item);
+              return _renderTile(item, rankIdx, activeItems.length);
+            }).join('')}
+          </div>`;
+      }
+
+      if (unassigned.length > 0) {
+        const isCollapsed = this._collapsedSections.has('__other__');
+        html += `
+          <div class="section-header" data-section-id="__other__">
+            <span class="section-name">
+              <span class="section-collapse-icon${isCollapsed ? ' collapsed' : ''}">▾</span>
+              Other
+            </span>
+            <span class="section-stats">
+              <span class="section-power">${_formatPower(unassigned.reduce((s,i)=>s+(i.watts||0),0))}</span>
+            </span>
+          </div>
+          <div class="section-grid${isCollapsed ? ' collapsed' : ''}">
+            ${unassigned.map(item => {
+              const rankIdx = activeItems.indexOf(item);
+              return _renderTile(item, rankIdx, activeItems.length);
+            }).join('')}
+          </div>`;
+      }
+      return html;
+    };
+
     const isDark = (window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark') === 'dark';
     this.shadowRoot.innerHTML = `
       <style>
@@ -289,6 +382,7 @@ class SigenergySmartLoadCard extends HTMLElement {
           display: grid;
           grid-template-columns: repeat(${cols}, 1fr);
           gap: 8px;
+          margin-top: 4px;
         }
         @media (max-width: 768px) {
           .grid { grid-template-columns: repeat(${Math.min(cols, 3)}, 1fr); }
@@ -397,42 +491,97 @@ class SigenergySmartLoadCard extends HTMLElement {
           font-weight: 600;
           color: var(--accent);
         }
+        .section-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 4px 6px;
+          margin-top: 12px;
+          border-bottom: 1px solid var(--border);
+          cursor: pointer;
+          user-select: none;
+        }
+        .section-header:first-child { margin-top: 0; }
+        .section-name {
+          font-size: 12px;
+          font-weight: 700;
+          color: var(--accent);
+          letter-spacing: 0.5px;
+          text-transform: uppercase;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .section-collapse-icon {
+          font-size: 10px;
+          color: var(--text-secondary);
+          transition: transform 0.2s;
+        }
+        .section-collapse-icon.collapsed { transform: rotate(-90deg); }
+        .section-stats {
+          font-size: 11px;
+          color: var(--text-secondary);
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .section-power {
+          color: var(--accent);
+          font-weight: 600;
+        }
+        .section-grid {
+          display: grid;
+          grid-template-columns: repeat(${cols}, 1fr);
+          gap: 8px;
+          margin-top: 8px;
+          overflow: hidden;
+          transition: max-height 0.25s ease;
+        }
+        .section-grid.collapsed { display: none; }
+        @media (max-width: 768px) {
+          .section-grid { grid-template-columns: repeat(${Math.min(cols, 3)}, 1fr); }
+        }
+        @media (max-width: 480px) {
+          .section-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        .tile-toggle {
+          position: absolute;
+          top: 4px;
+          left: 5px;
+          width: 22px;
+          height: 13px;
+          background: rgba(255,255,255,0.12);
+          border-radius: 7px;
+          border: 1px solid rgba(255,255,255,0.2);
+          cursor: pointer;
+          transition: background 0.2s;
+          display: flex;
+          align-items: center;
+          padding: 1px 2px;
+        }
+        .tile-toggle::after {
+          content: '';
+          width: 9px;
+          height: 9px;
+          background: rgba(255,255,255,0.5);
+          border-radius: 50%;
+          transition: transform 0.2s, background 0.2s;
+        }
+        .tile.active .tile-toggle, .tile.high .tile-toggle {
+          background: rgba(0,212,184,0.35);
+          border-color: rgba(0,212,184,0.6);
+        }
+        .tile.active .tile-toggle::after, .tile.high .tile-toggle::after {
+          transform: translateX(9px);
+          background: #00d4b8;
+        }
       </style>
       <div class="card">
         <div class="header">
           <span class="header-title">⚡ Smart Loads</span>
           <span class="header-total">${_formatPower(totalWatts)}</span>
         </div>
-        <div class="grid">
-          ${items.map(item => {
-            const w = item.watts;
-            let cls = 'off';
-            let tileCls = 'off';
-            if (w != null && w > 0) {
-              if (w > 1000) { cls = 'high'; tileCls = 'high'; }
-              else if (w <= standbyThreshold) { cls = 'standby'; tileCls = 'standby'; }
-              else { cls = 'active'; tileCls = 'active'; }
-            }
-            // Rank badge for active/high devices (1-based)
-            const activeItems = items.filter(i2 => i2.watts != null && i2.watts > standbyThreshold);
-            const rankIdx = activeItems.indexOf(item);
-            const rankHtml = rankIdx >= 0 ? `<span class="rank-badge">#${rankIdx + 1}</span>` : '';
-            const energyHtml = item.kwh != null && !isNaN(item.kwh)
-              ? `<div class="tile-energy">${_formatEnergy(item.kwh)}</div>` : '';
-            return `
-              <div class="tile ${tileCls}" data-entity="${item.entity_power}">
-                ${rankHtml}
-                <img class="tile-icon" src="${IMG_BASE}${item.type}_mid.png"
-                     alt="${item.typeInfo?.label || item.type}"
-                     loading="lazy"
-                     onerror="this.src='${IMG_BASE}plug_socket_mid.png'">
-                <div class="tile-label">${item.label || item.typeInfo?.label || 'Load'}</div>
-                <div class="tile-power ${cls}">${_formatPower(w)}</div>
-                ${energyHtml}
-              </div>
-            `;
-          }).join('')}
-        </div>
+        ${renderSections()}
         ${items.length > 1 ? `
           <div class="total-row">
             <span class="total-label">Total (${items.length} loads)</span>
@@ -442,17 +591,60 @@ class SigenergySmartLoadCard extends HTMLElement {
       </div>
     `;
 
-    // Bind tile click -> HA more-info dialog
+    // Bind section header click -> collapse/expand
+    this.shadowRoot.querySelectorAll('.section-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const id = header.dataset.sectionId;
+        if (!id) return;
+        if (this._collapsedSections.has(id)) {
+          this._collapsedSections.delete(id);
+        } else {
+          this._collapsedSections.add(id);
+        }
+        this._rendered = false;
+        this._render();
+      });
+    });
+
+    // Bind tile toggle click -> homeassistant.toggle service
+    this.shadowRoot.querySelectorAll('.tile-toggle').forEach(tog => {
+      tog.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const switchEntity = tog.dataset.switch;
+        if (!switchEntity || !this._hass) return;
+        this._hass.callService('homeassistant', 'toggle', { entity_id: switchEntity })
+          .catch(err => console.error('Smart load toggle failed:', err));
+      });
+    });
+
+    // Bind tile click -> GenergyModal or HA more-info dialog
+    const _useModals = window.SigenergyConfig?.get()?.features?.smart_load_modals;
     this.shadowRoot.querySelectorAll('.tile').forEach(tile => {
-      tile.addEventListener('click', () => {
+      tile.addEventListener('click', (e) => {
+        // Don't open modal if toggle was clicked
+        if (e.target.classList.contains('tile-toggle')) return;
         const entityId = tile.dataset.entity;
-        if (entityId && this._hass) {
-          const event = new CustomEvent('hass-more-info', {
+        if (!entityId || !this._hass) return;
+
+        if (_useModals && window.GenergyModal) {
+          this.dispatchEvent(new CustomEvent('genergy-modal', {
+            bubbles: true,
+            composed: true,
+            detail: {
+              type: 'smart_load',
+              entityId,
+              label: tile.dataset.name || entityId,
+              applianceType: tile.dataset.type || 'plug_socket',
+              power: tile.dataset.power || '0',
+              hass: this._hass,
+            }
+          }));
+        } else {
+          this.dispatchEvent(new CustomEvent('hass-more-info', {
             bubbles: true,
             composed: true,
             detail: { entityId }
-          });
-          this.dispatchEvent(event);
+          }));
         }
       });
     });

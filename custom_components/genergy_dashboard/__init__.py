@@ -25,7 +25,6 @@ REQUIRED_HACS_CARDS: list[tuple[str, str, str, str, str]] = [
     ("apexcharts-card", "ApexCharts Card", "apexcharts-card", "RomRider", "apexcharts-card"),
     ("mushroom", "Mushroom Cards", "mushroom", "piitaya", "lovelace-mushroom"),
     ("card-mod", "Card Mod", "card-mod", "thomasloven", "lovelace-card-mod"),
-    ("html-template-card", "HTML Template Card", "html-template-card", "PiotrMachowski", "Home-Assistant-Lovelace-HTML-Jinja2-Template-card"),
 ]
 
 

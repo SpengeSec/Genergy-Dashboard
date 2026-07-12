@@ -22,6 +22,7 @@ from .const import (
     SIGENERGY_DEFAULTS,
     EMHASS_DEFAULTS,
     SOLCAST_DEFAULTS,
+    EM_DEFAULTS,
     CONF_USE_SIGENERGY_DEFAULTS,
     CONF_SOLAR_POWER,
     CONF_LOAD_POWER,
@@ -29,6 +30,7 @@ from .const import (
     CONF_BATTERY_SOC,
     CONF_GRID_POWER,
     CONF_SOLAR_ENERGY_TODAY,
+    CONF_THIRD_PARTY_PV_ENERGY_TODAY,
     CONF_LOAD_ENERGY_TODAY,
     CONF_BATTERY_CHARGE_TODAY,
     CONF_BATTERY_DISCHARGE_TODAY,
@@ -55,6 +57,7 @@ from .const import (
     CONF_FEATURE_EMHASS,
     CONF_FEATURE_HAEO,
     CONF_FEATURE_SOLCAST,
+    CONF_FEATURE_EM,
     CONF_BATTERY_PACKS,
     CONF_INVERTER_RATED_POWER,
     CONF_PV1_POWER,
@@ -115,6 +118,7 @@ def _energy_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     return vol.Schema(
         {
             _optional_entity(CONF_SOLAR_ENERGY_TODAY, defaults): _SENSOR_SELECTOR,
+            _optional_entity(CONF_THIRD_PARTY_PV_ENERGY_TODAY, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_LOAD_ENERGY_TODAY, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_BATTERY_CHARGE_TODAY, defaults): _SENSOR_SELECTOR,
             _optional_entity(CONF_BATTERY_DISCHARGE_TODAY, defaults): _SENSOR_SELECTOR,
@@ -198,6 +202,10 @@ def _extras_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 default=d.get(CONF_FEATURE_HAEO, False),
             ): BooleanSelector(),
             vol.Optional(
+                CONF_FEATURE_EM,
+                default=d.get(CONF_FEATURE_EM, False),
+            ): BooleanSelector(),
+            vol.Optional(
                 CONF_FEATURE_SOLCAST,
                 default=d.get(CONF_FEATURE_SOLCAST, False),
             ): BooleanSelector(),
@@ -221,6 +229,9 @@ def _merge_feature_defaults(data: dict[str, Any]) -> dict[str, Any]:
             data.setdefault(key, val)
     if data.get(CONF_FEATURE_SOLCAST):
         for key, val in SOLCAST_DEFAULTS.items():
+            data.setdefault(key, val)
+    if data.get(CONF_FEATURE_EM):
+        for key, val in EM_DEFAULTS.items():
             data.setdefault(key, val)
     return data
 

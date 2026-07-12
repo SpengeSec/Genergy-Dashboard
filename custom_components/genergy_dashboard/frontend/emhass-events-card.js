@@ -451,6 +451,7 @@ class EmhassEventsCard extends HTMLElement {
     this._lastFcTs     = null;
     this._lastRenderTs = 0;
     this._pastState    = 'idle';
+    this._pastLoadTs   = 0;
   }
 
   // Three-tier entity ID resolution: card YAML → MPC → std EMHASS
@@ -547,6 +548,9 @@ class EmhassEventsCard extends HTMLElement {
     this._config = config || {};
     _EMHASS_CUR = this._config.currency_symbol || '$';
     if (!this.shadowRoot.getElementById('tb-future')) {
+      this._lastFcTs = null;
+      this._pastState = 'idle';
+      this._pastLoadTs = 0;
       this.shadowRoot.innerHTML = _emhass_buildHTML();
       this._wireEvents();
       requestAnimationFrame(() => this._setWrapHeight());
@@ -647,6 +651,9 @@ class EmhassEventsCard extends HTMLElement {
     if (fcTs !== this._lastFcTs) {
       this._lastFcTs = fcTs;
       this._renderFuture();
+    }
+    if (this._pastState === 'loading' && this._pastLoadTs && Date.now() - this._pastLoadTs > 30000) {
+      this._pastState = 'idle';
     }
     if (this._pastState === 'idle') {
       this._pastState = 'loading';
@@ -905,7 +912,11 @@ class EmhassEventsCard extends HTMLElement {
   async _loadPast() {
     const st = this.shadowRoot.getElementById('st-past');
     const tb = this.shadowRoot.getElementById('tb-past');
-    if (!st || !tb) return;
+    if (!st || !tb) {
+      this._pastState = 'idle';
+      return;
+    }
+    this._pastLoadTs = Date.now();
     try {
       const { start, end } = this._getRangeP();
       st.textContent = 'Fetching...';
@@ -965,7 +976,7 @@ class EmhassEventsCard extends HTMLElement {
           setTimeout(() => this._loadPast(), 500); return;
         }
         tb.innerHTML = '<tr><td colspan="15" class="msg">⚠️ No sensor data for this period.</td></tr>';
-        st.textContent = 'No data'; this._pastState = 'ready'; return;
+        st.textContent = 'No data'; this._pastState = 'ready'; this._pastLoadTs = 0; return;
       }
 
       const step    = 5 * 60 * 1000;
@@ -1074,6 +1085,7 @@ class EmhassEventsCard extends HTMLElement {
       const sel2 = this.shadowRoot.getElementById('range-past');
       st.textContent = entries.length + ' readings — ' + (sel2 ? sel2.options[sel2.selectedIndex].text : '');
       this._pastState = 'ready';
+      this._pastLoadTs = 0;
 
     } catch (e) {
       const tb2 = this.shadowRoot.getElementById('tb-past');
@@ -1081,6 +1093,7 @@ class EmhassEventsCard extends HTMLElement {
       const st2 = this.shadowRoot.getElementById('st-past');
       if (st2) st2.textContent = 'Error — ' + e.message.slice(0, 60);
       this._pastState = 'ready';
+      this._pastLoadTs = 0;
     }
   }
 

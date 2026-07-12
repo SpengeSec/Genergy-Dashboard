@@ -1,7 +1,7 @@
 """Constants for the Genergy Dashboard integration."""
 
 DOMAIN = "genergy_dashboard"
-VERSION = "2.21.1"
+VERSION = "2.23.1"
 DASHBOARD_URL_PATH = "dashboard-sigenergy"
 DASHBOARD_TITLE = "Genergy"
 
@@ -18,6 +18,7 @@ CONF_GRID_POWER = "grid_power"
 
 # Daily energy totals
 CONF_SOLAR_ENERGY_TODAY = "solar_energy_today"
+CONF_THIRD_PARTY_PV_ENERGY_TODAY = "third_party_pv_energy_today"
 CONF_LOAD_ENERGY_TODAY = "load_energy_today"
 CONF_BATTERY_CHARGE_TODAY = "battery_charge_today"
 CONF_BATTERY_DISCHARGE_TODAY = "battery_discharge_today"
@@ -125,7 +126,11 @@ CONF_FEATURE_HEAT_PUMP = "feature_heat_pump"
 CONF_FEATURE_EMHASS = "feature_emhass"
 CONF_FEATURE_HAEO = "feature_haeo"
 CONF_FEATURE_SOLCAST = "feature_solcast"
+CONF_FEATURE_EM = "feature_em"
 CONF_BATTERY_PACKS = "battery_packs"
+
+# Energy Manager entities
+CONF_EM_DECISION = "em_decision"
 
 # HAEO (Home Assistant Energy Optimizer) entities
 CONF_HAEO_BATTERY_CHARGE = "haeo_battery_charge"
@@ -235,6 +240,7 @@ SIGENERGY_DEFAULTS = {
     CONF_GRID_POWER: "sensor.sigen_plant_grid_active_power",
     # Daily energy totals
     CONF_SOLAR_ENERGY_TODAY: "sensor.sigen_plant_daily_pv_energy",
+    CONF_THIRD_PARTY_PV_ENERGY_TODAY: "",  # Disabled by default; enable sensor.sigen_plant_daily_third_party_inverter_energy if connected
     CONF_LOAD_ENERGY_TODAY: "sensor.sigen_plant_daily_load_consumption",
     CONF_BATTERY_CHARGE_TODAY: "sensor.sigen_plant_daily_battery_charge_energy",
     CONF_BATTERY_DISCHARGE_TODAY: "sensor.sigen_plant_daily_battery_discharge_energy",
@@ -317,4 +323,11 @@ SOLCAST_DEFAULTS = {
     CONF_SOLCAST_TODAY: "sensor.solcast_pv_forecast_forecast_today",
     CONF_SOLCAST_TOMORROW: "sensor.solcast_pv_forecast_forecast_tomorrow",
     CONF_SOLCAST_REMAINING: "sensor.solcast_pv_forecast_forecast_remaining_today",
+}
+
+# ---------------------------------------------------------------------------
+# Energy Manager defaults (standard entity from the Energy Manager Node-RED flow)
+# ---------------------------------------------------------------------------
+EM_DEFAULTS = {
+    CONF_EM_DECISION: "sensor.energy_manager_decision",
 }
