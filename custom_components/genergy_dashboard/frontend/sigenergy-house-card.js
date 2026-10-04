@@ -2532,6 +2532,10 @@ class SigenergyHouseCard extends LitElement {
         .label-status { font-size: 8px; }
         .label-runtime { font-size: 7px; }
         .label { min-width: 60px; }
+        /* Compact weather badge so it clears the HOME label on phones */
+        .weather-badge { top: 4px; right: 4px; gap: 4px; padding: 3px 8px; }
+        .weather-icon { font-size: 14px; }
+        .weather-temp { font-size: 11px; }
       }
     `;
   }
