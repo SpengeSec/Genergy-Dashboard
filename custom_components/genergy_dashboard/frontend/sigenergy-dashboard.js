@@ -7760,7 +7760,15 @@ return forecast.map(function(d) {
       const _settingsStack = _settingsView?.cards?.find(c => c?.type === 'vertical-stack'
         && c.cards?.[0]?.type === 'custom:sigenergy-settings-card');
       if (_settingsStack) {
-        _settingsStack.cards = [_settingsStack.cards[0], ..._genergyQuickRefTiles(cfg, this._hass)];
+        // Replace only the generated tiles (their dark #22273a card_mod style, or grids of them);
+        // keep any card a user added to this stack themselves.
+        const _isGenTile = (c) => {
+          if (!c || typeof c !== 'object') return false;
+          if (c.type === 'grid') return (c.cards || []).length > 0 && c.cards.every(_isGenTile);
+          return /^custom:mushroom-(template|entity)-card$/.test(c.type || '') && JSON.stringify(c.card_mod || '').includes('#22273a');
+        };
+        const _userCards = _settingsStack.cards.slice(1).filter(c => !_isGenTile(c));
+        _settingsStack.cards = [_settingsStack.cards[0], ..._genergyQuickRefTiles(cfg, this._hass), ..._userCards];
       }
 
       // A store.save() made during this build (path backup, auto-detected entities, daily
