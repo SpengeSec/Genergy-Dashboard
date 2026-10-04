@@ -9211,21 +9211,46 @@ class SigenergySankeyPanel extends HTMLElement {
     // Clicking a Sankey node opens the stream-detail modal. Delegated on the flow card's
     // shadow root: the card replaces its .node-bar elements on every live re-render, so
     // per-box listeners went stale between the 2 s re-attach checks and taps did nothing.
+    // Touch taps are handled on pointerup: WebKit does not always synthesize the click
+    // after a tap on these elements. A tap that moved (a scroll) is ignored. For a handled
+    // tap, touchend's default is cancelled so no compatibility click lands on the modal
+    // backdrop that just opened (which closed it again on tablets).
     const root = sankeyBase.shadowRoot;
     if (this._delegatedRoot !== root) {
-      const onClick = (ev) => {
+      const nodeFor = (ev) => {
         const box = ev.composedPath().find(n => n.classList && n.classList.contains('node-bar'));
-        if (!box) return;
-        const node = (this._config.nodes || []).find(n => n.entity_id === box.dataset.entityId);
+        return box ? (this._config.nodes || []).find(n => n.entity_id === box.dataset.entityId) : null;
+      };
+      let down = null, lastTap = 0;
+      const onDown = (ev) => { down = ev.pointerType === 'mouse' ? null : { x: ev.clientX, y: ev.clientY }; };
+      const onUp = (ev) => {
+        if (ev.pointerType === 'mouse' || !down) return;
+        const moved = Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 10;
+        down = null;
+        const node = !moved && nodeFor(ev);
+        if (!node) return;
+        lastTap = Date.now();
+        this._openNodeModal(node);
+      };
+      const onTouchEnd = (ev) => { if (Date.now() - lastTap < 300 && ev.cancelable) ev.preventDefault(); };
+      const onClick = (ev) => {
+        const node = nodeFor(ev);
         if (!node) return;
         ev.preventDefault();
         ev.stopPropagation();
         ev.stopImmediatePropagation();
+        if (Date.now() - lastTap < 800) return;
         this._openNodeModal(node);
       };
+      root.addEventListener('pointerdown', onDown, true);
+      root.addEventListener('pointerup', onUp, true);
+      root.addEventListener('touchend', onTouchEnd, { capture: true, passive: false });
       root.addEventListener('click', onClick, true);
       this._delegatedRoot = root;
       this._boxClickCleanup.push(() => {
+        root.removeEventListener('pointerdown', onDown, true);
+        root.removeEventListener('pointerup', onUp, true);
+        root.removeEventListener('touchend', onTouchEnd, true);
         root.removeEventListener('click', onClick, true);
         if (this._delegatedRoot === root) this._delegatedRoot = null;
       });
