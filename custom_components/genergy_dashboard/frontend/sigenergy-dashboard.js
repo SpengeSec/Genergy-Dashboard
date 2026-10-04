@@ -10188,8 +10188,9 @@ class SigenergyInsightsCard extends HTMLElement {
         const importCost = savings === null && cost === null ? this._getVal(_importId) : null;
         const exportComp = savings === null && cost === null ? this._getVal(_exportId) : null;
         const parts = [];
-        if (savings !== null) parts.push(`Saved: ${cur}${savings.toFixed(2)}`);
-        if (cost !== null) parts.push(`Cost: ${cur}${cost.toFixed(2)}`);
+        const money = (v) => (v < 0 ? '-' : '') + cur + Math.abs(v).toFixed(2);
+        if (savings !== null) parts.push(`Saved: ${money(savings)}`);
+        if (cost !== null) parts.push(`Cost: ${money(cost)}`);
         if (importCost !== null) parts.push(`Import: ${cur}${importCost.toFixed(2)}`);
         if (exportComp !== null) parts.push(`Export: ${cur}${exportComp.toFixed(2)}`);
         return parts.length ? parts.join(' · ') : 'No data';
@@ -10289,6 +10290,13 @@ class SigenergyInsightsCard extends HTMLElement {
           .insights-grid { grid-template-columns: repeat(2, 1fr); }
         }
         @media (max-width: 480px) {
+          .insights-grid { gap: 8px; padding: 10px; }
+          .insights-grid .insight-tile { padding: 10px 8px; }
+          .insights-grid .lottie-container, .insights-grid .fallback-icon { width: 60px; height: 55px; }
+          .insights-grid .tile-title { font-size: 12px; }
+          .insights-grid .tile-value { font-size: 10px; }
+        }
+        @media (max-width: 300px) {
           .insights-grid { grid-template-columns: 1fr; }
         }
         @media (min-width: 1600px) {
