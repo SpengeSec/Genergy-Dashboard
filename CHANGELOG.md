@@ -2,6 +2,30 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.27.0] - 2026-10-04
+
+Issue sweep: a more accurate Sankey, Forecasts fixes for non-Sigenergy inverters, EV and heat pump fixes, and Settings view repairs.
+
+### Fixed
+- **Sankey shows the wrong sources** (#36, #45, #51) -- Flows were split from daily totals, which can't tell which source fed which destination: an EV charged overnight from the grid showed up as Solar + Battery, and night-time battery discharge looked like it was exported. The Sankey now allocates energy per hour from Home Assistant's recorder statistics, using the same priority as the HA Energy dashboard (solar to consumers, then battery, then export; battery to consumers, then export; grid to consumers, then battery), and sums the day. Past dates in the date picker use the same method. Entities without long-term statistics fall back to the previous method.
+- **HAEO Forecasts "Past Events" empty** (#52) -- The bundled HAEO card fetched history for one sensor but read the table from another, so the Past tab showed "No sensor data" inside Genergy while working standalone.
+- **Forecasts Past tab battery inverted on Deye / Goodwe** (#41) -- The EMHASS and HAEO cards now negate the recorded battery power when **Positive = Charging** is off.
+- **Heat pump image oversized** (#50) -- The heat pump's 3D perspective now scales with the house card width; on wide cards or with a strong tilt it could blow up to many times the card size.
+- **Settings view tiles show `states('')`, "Deye SUN-SG05LP1-EU" and €** (#48, #49) -- Tiles for unconfigured entities are now removed instead of rendering broken templates, the currency follows your Home Assistant / Pricing setting, and **Apply Settings** regenerates these tiles from your Settings-card entity mapping (cards you added to that stack are kept). New **Display -> Inverter Name** sets the inverter tile title (defaults to the device registry, then "Inverter").
+- **Card Mod reported missing with UIX installed** (#46) -- UIX (card-mod's successor) now satisfies the card-mod prerequisite (thanks @neoKushan, PR #47).
+- **Apply Settings could revert the dashboard it just built** -- A config save made during the build overwrote the freshly built layout.
+- **EV Chargers panel broke when the vehicle SoC was unavailable** -- Shows a dash instead.
+- **Detail modals fell back to €** for price sensors without a unit; they now use the Pricing currency.
+
+### Added
+- **EV "Plugged In" entity** (#44) -- Optional per EV (e.g. `binary_sensor.*_car_plugged`). When set it decides connected / disconnected, while the charger state and power still drive "Charging". Fixes chargers whose state sensor reports "Ready" with no car attached.
+- **EV range unit** (#44) -- Range now uses the sensor's own unit, with **Display -> EV Range Unit** (Auto / km / mi) to convert.
+- **3rd-party PV as a separate Sankey node** (#35) -- Optional, like the mySigen app's "3rd inv" (Settings -> Entities -> Daily Energy).
+- **Forecasts settings show the entity in use** (#42) -- The EMHASS / HAEO card settings show which sensor each field actually resolves to (and flag missing ones); the inverter-brand auto-fill only fills empty fields with sensors that exist.
+
+### Notes
+- The EMHASS / HAEO event-card fixes (#41, #42, #52) are local patches to the bundled cards, listed at the top of each card file.
+
 ## [2.26.1] - 2026-07-22
 
 Sankey card responsive scaling and dashboard column rebalance.
