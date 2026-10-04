@@ -1077,6 +1077,8 @@ function _genergyFormat(value, unit = '') {
   if (!Number.isFinite(n)) return _genergyEsc(value);
   if (unit === 'W') return Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(1)} kW` : `${Math.round(n)} W`;
   if (unit === 'kWh') return `${n.toFixed(n >= 10 ? 1 : 2)} kWh`;
+  if (unit === 'MWh') return _genergyFormat(n * 1000, 'kWh');
+  if (unit === 'Wh') return _genergyFormat(n / 1000, 'kWh');
   if (unit === '%') return `${Math.round(n)}%`;
   // '€' / '€/kWh' are placeholder fallback units: show the currency from Pricing settings
   const cur = (window.SigenergyConfig && window.SigenergyConfig.get().pricing?.currency) || '€';
@@ -1298,7 +1300,7 @@ function _genergyOpenElementModal(type, detail, cfg, hass) {
     const mainEntity = rows.find(r => r.entityId)?.entityId;
     body.innerHTML = `<div style="padding:20px;color:var(--primary-text-color,#e0e4ec);">
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
-        ${_genergyMetric(_genergyPrimaryLabel(type), detail.primary || _genergyStateDisplay(hass, mainEntity), color)}
+        ${_genergyMetric(detail.primaryLabel || _genergyPrimaryLabel(type), detail.primary || _genergyStateDisplay(hass, mainEntity), color)}
         ${detail.statusLine ? _genergyMetric(_genergyStatusLabel(type), _genergyEsc(detail.statusLine), color) : _genergyMetric('Data source', mainEntity ? _genergyEsc(mainEntity.split('.')[0]) : '—', color)}
       </div>
       ${_genergyFlowBreakdownSection(detail)}
@@ -9142,23 +9144,35 @@ class SigenergySankeyPanel extends HTMLElement {
     // Track these boxes so we can detect when the flow card re-renders
     this._attachedBoxes = new Set(boxes);
 
+    // Clicking a Sankey node opens the stream-detail modal. Delegated on the flow card's
+    // shadow root: the card replaces its .node-bar elements on every live re-render, so
+    // per-box listeners went stale between the 2 s re-attach checks and taps did nothing.
+    const root = sankeyBase.shadowRoot;
+    if (this._delegatedRoot !== root) {
+      const onClick = (ev) => {
+        const box = ev.composedPath().find(n => n.classList && n.classList.contains('node-bar'));
+        if (!box) return;
+        const node = (this._config.nodes || []).find(n => n.entity_id === box.dataset.entityId);
+        if (!node) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        ev.stopImmediatePropagation();
+        this._openNodeModal(node);
+      };
+      root.addEventListener('click', onClick, true);
+      this._delegatedRoot = root;
+      this._boxClickCleanup.push(() => {
+        root.removeEventListener('click', onClick, true);
+        if (this._delegatedRoot === root) this._delegatedRoot = null;
+      });
+    }
+
     let attached = 0;
     boxes.forEach((box) => {
       const entityId = box.dataset.entityId;
       if (!entityId) return;
       const node = meta.find(n => n.entity_id === entityId);
       if (!node) return;
-
-      const handler = (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        ev.stopImmediatePropagation();
-        // Clicking a Sankey node opens the rich stream-detail modal
-        // (replaces the old inline stats panel / info panel).
-        this._openNodeModal(node);
-      };
-      box.addEventListener('click', handler, true);
-      this._boxClickCleanup.push(() => box.removeEventListener('click', handler, true));
 
       // Attach hover highlighting to the full .box element
       if (sankeyBase._handleMouseEnter && sankeyBase._handleMouseLeave) {
@@ -9903,6 +9917,7 @@ class SigenergySankeyPanel extends HTMLElement {
         label: node.name,
         nodeId: node.id,
         primary: val.toFixed(2) + ' kWh',
+        primaryLabel: this._dateNavActive && this._dateNavLastStr ? 'Total ' + this._dateNavLastStr : 'Total today',
         color: node.color,
         direction: node.type === 'source' ? 'out' : 'in',
         breakdown,
