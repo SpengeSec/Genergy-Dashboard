@@ -7042,7 +7042,12 @@ return __pts;`;
           ...(e.solcast_tomorrow ? [{ type: 'entity', entity: e.solcast_tomorrow, icon: 'mdi:weather-sunny-alert', name: 'Tomorrow' }] : []),
           ...(e.solcast_remaining ? [{ type: 'entity', entity: e.solcast_remaining, icon: 'mdi:timelapse', name: 'Remaining' }] : []),
           ...(e.forecast_solar_today ? [{ type: 'entity', entity: e.forecast_solar_today, icon: 'mdi:solar-power-variant', name: 'FS Today' }] : [])
-        ],
+        ].map(chip => ({
+          // Hide a chip while its forecast sensor is down instead of showing a bare "Unavailable"
+          type: 'conditional',
+          conditions: [{ entity: chip.entity, state_not: 'unavailable' }, { entity: chip.entity, state_not: 'unknown' }],
+          chip,
+        })),
         card_mod: { style: 'ha-card { --ha-card-background: transparent !important; --card-background-color: transparent !important; box-shadow: none !important; }' }
       } : null;
 
