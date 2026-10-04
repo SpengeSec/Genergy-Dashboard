@@ -168,6 +168,11 @@ async def _check_prerequisites(hass: HomeAssistant) -> None:
                 if not any(kw in url for kw in keywords for url in loaded_urls):
                     missing.append((display_name, owner, repository))
 
+            # UIX is an integration; if it's loaded, card_mod: styling works even if its
+            # resource URL ever changes.
+            if "uix" in hass.config.components:
+                missing = [m for m in missing if m[0] != "Card Mod"]
+
     except Exception as err:
         _LOGGER.debug("Genergy Dashboard: Could not check Lovelace resources: %s", err)
         return
