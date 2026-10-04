@@ -74,6 +74,8 @@ const DEFAULT_CONFIG = {
     weather: "weather.forecast_home",
     ev_charger_power: "",
     ev_charger_state: "",
+    ev_plugged: "",
+    ev2_plugged: "",
     ev_soc: "",
     ev_range: "",
     heat_pump_power: "",
@@ -478,7 +480,25 @@ class SigenergyHouseCard extends LitElement {
     return /(connected|plugged|plugged_in|charging|charge_complete|ready|ready_to_charge|waiting|awaiting|preparing|paused|suspended|complete|completed|finished|finishing|stopped|no_power)/.test(state) ||
       /(pluggedin|chargecomplete|readytocharge|nopower)/.test(compactState);
   }
-  get _isEvConnectedByState() { return this._connectedByState(this._evConnectionState); }
+  // A dedicated plug sensor (ev_plugged), when configured, decides connected/disconnected;
+  // otherwise the charger state entity does.
+  _plugOrState(plugEid, state) {
+    if (!plugEid) return this._connectedByState(state);
+    return this._connectedByState(this._stateStr(plugEid).toLowerCase().trim().replace(/[\s-]+/g, '_'));
+  }
+  // Charger state explicitly reports charging (independent of the power reading)
+  _stateSaysCharging(state) {
+    return /charging/.test(state) && !/not_?charging|discharg/.test(state);
+  }
+  // Range label: sensor's unit, or converted to the configured ev_range_unit (km / mi)
+  _formatRange(eid, val) {
+    const u = String(this.hass?.states?.[eid]?.attributes?.unit_of_measurement || 'km').toLowerCase();
+    const src = ['mi', 'mile', 'miles'].includes(u) ? 'mi' : 'km';
+    const target = this._config.ev_range_unit || src;
+    const v = src === 'km' && target === 'mi' ? val * 0.621371 : src === 'mi' && target === 'km' ? val * 1.609344 : val;
+    return `${Math.round(v)} ${target}`;
+  }
+  get _isEvConnectedByState() { return this._plugOrState(this._config.entities.ev_plugged, this._evConnectionState); }
 
   // ── EV 2 (only used when features.two_ev_garage is on) ──────────────────────
   get _twoEvGarage() { return !!(this._config.features && this._config.features.two_ev_garage); }
@@ -491,7 +511,7 @@ class SigenergyHouseCard extends LitElement {
     return this._stateStr(this._config.entities.ev2_charger_state).toLowerCase().trim()
       .replace(/[\s-]+/g, '_');
   }
-  get _isEv2ConnectedByState() { return this._connectedByState(this._ev2ConnectionState); }
+  get _isEv2ConnectedByState() { return this._plugOrState(this._config.entities.ev2_plugged, this._ev2ConnectionState); }
   get _isEv2AutoActive() { return this._isEv2ConsumingAboveThreshold || this._isEv2ConnectedByState; }
   // Whether EV 2's car/gate should show. Auto mode → EV 2's own power/state; manual
   // mode → mirrors the single "Always Show EV Vehicle" toggle (both cars appear).
@@ -1657,8 +1677,8 @@ class SigenergyHouseCard extends LitElement {
         const socPart = (evSocVal != null && !Number.isNaN(evSocVal)) ? ` · ${Math.round(evSocVal)}%` : '';
         primary = `${evName} · ${evPwr}${socPart}`;
         secondary = "";
-        if (evRangeVal != null && !Number.isNaN(evRangeVal)) runtimeLine = `${Math.round(evRangeVal)} km`;
-        if (this._isEvCharging) statusLine = "Charging";
+        if (evRangeVal != null && !Number.isNaN(evRangeVal)) runtimeLine = this._formatRange(this._config.entities.ev_range, evRangeVal);
+        if (this._isEvCharging || (this._isEvConnectedByState && this._stateSaysCharging(this._evConnectionState))) statusLine = "Charging";
         else if (this._isEvConnectedByState) statusLine = "Connected";
         break;
       }
@@ -1670,8 +1690,8 @@ class SigenergyHouseCard extends LitElement {
         const socPart = (ev2Soc != null && !Number.isNaN(ev2Soc)) ? ` · ${Math.round(ev2Soc)}%` : '';
         primary = `${ev2Name} · ${ev2Pwr}${socPart}`;
         secondary = "";
-        if (ev2Range != null && !Number.isNaN(ev2Range)) runtimeLine = `${Math.round(ev2Range)} km`;
-        if (this._ev2Power > 5) statusLine = "Charging";
+        if (ev2Range != null && !Number.isNaN(ev2Range)) runtimeLine = this._formatRange(this._config.entities.ev2_range, ev2Range);
+        if (this._ev2Power > 5 || (this._isEv2ConnectedByState && this._stateSaysCharging(this._ev2ConnectionState))) statusLine = "Charging";
         else if (this._isEv2ConnectedByState) statusLine = "Connected";
         break;
       }

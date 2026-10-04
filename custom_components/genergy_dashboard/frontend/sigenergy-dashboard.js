@@ -47,6 +47,7 @@ const DEFAULT_ENTITIES = {
   weather: '',
   ev_charger_power: '',
   ev_charger_state: '',
+  ev_plugged: '',
   ev_soc: '',
   ev_range: '',
   ev_time_to_full: '',   // optional: EV integration's "time to full charge" sensor
@@ -54,6 +55,7 @@ const DEFAULT_ENTITIES = {
   // the unprefixed keys above for backward compatibility with existing configs.
   ev2_charger_power: '',
   ev2_charger_state: '',
+  ev2_plugged: '',
   ev2_soc: '',
   ev2_range: '',
   ev2_time_to_full: '',
@@ -253,6 +255,7 @@ const DEFAULT_CONFIG = {
     home_label: '',
     grid_label: '',
     inverter_label: '',
+    ev_range_unit: '',
     swap_battery_colors: false,
     battery_deadband_w: 0,
     hp_image_style: 'outdoor',
@@ -2949,6 +2952,8 @@ class SigenergySettingsCard extends HTMLElement {
         <div class="ev-detect-status" style="font-size:10px;color:#8892a4;display:none;margin-bottom:6px;"></div>
         ${this._entityRow('Charger Power', 'ev_charger_power', e)}
         ${this._entityRow('Charger State', 'ev_charger_state', e)}
+        ${this._entityRow('Plugged In', 'ev_plugged', e)}
+        <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">Optional — a plug sensor (e.g. <code>binary_sensor.*_car_plugged</code>). When set it decides Connected/Disconnected, while Charger State and power still drive "Charging". Use it when your charger's state sensor reports e.g. "Ready" with no car attached.</div>
         ${this._entityRow('EV SoC', 'ev_soc', e)}
         <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">EV SoC shows on the house card EV node. The EV node must be visible — enable <b>Always Show EV Vehicle</b> in Features → EV if your car is not auto-detected.</div>
         ${this._entityRow('EV Range', 'ev_range', e)}
@@ -2986,6 +2991,7 @@ class SigenergySettingsCard extends HTMLElement {
         <div class="section-title"><span>🔌 EV 2 / Charger</span></div>
         ${this._entityRow('Charger Power', 'ev2_charger_power', e)}
         ${this._entityRow('Charger State', 'ev2_charger_state', e)}
+        ${this._entityRow('Plugged In', 'ev2_plugged', e)}
         ${this._entityRow('EV SoC', 'ev2_soc', e)}
         ${this._entityRow('EV Range', 'ev2_range', e)}
         ${this._entityRow('Time to Full', 'ev2_time_to_full', e)}
@@ -7099,6 +7105,8 @@ return forecast.map(function(d) {
         ev_charger_state: e.ev_charger_state || '',
         ev2_charger_power: e.ev2_charger_power || '',
         ev2_charger_state: e.ev2_charger_state || '',
+        ev_plugged: e.ev_plugged || '',
+        ev2_plugged: e.ev2_plugged || '',
         ev_soc: e.ev_soc || '',
         ev_range: e.ev_range || '',
         ev2_soc: e.ev2_soc || '',
@@ -7188,6 +7196,7 @@ return forecast.map(function(d) {
       houseCardOrig.swap_battery_colors = !!cfg.display?.swap_battery_colors;
       houseCardOrig.battery_deadband_w = parseFloat(cfg.display?.battery_deadband_w) || 0;
       houseCardOrig.hp_image_style = cfg.display?.hp_image_style || 'outdoor';
+      houseCardOrig.ev_range_unit = cfg.display?.ev_range_unit || '';
       if (!houseCardOrig.card_mod) houseCardOrig.card_mod = {};
       houseCardOrig.card_mod.style = 'ha-card { overflow: hidden !important; }\n.house-container { width: 100% !important; overflow: hidden !important; }\n.house-container img:not(.heat-pump-img) { width: 100% !important; height: auto !important; }\n.house-container svg { width: 100% !important; height: auto !important; }';
       const houseStack = [houseCardOrig];
@@ -7213,8 +7222,18 @@ return forecast.map(function(d) {
         const _evSecondaryTpl = (d) => {
           const parts = [];
           if (d.power) parts.push(_powerTpl(d.power));
-          if (d.soc) parts.push("{{ states('" + d.soc + "') | round(0) }}%");
-          if (d.range) parts.push("{{ states('" + d.range + "') | round(0) }} {{ state_attr('" + d.range + "','unit_of_measurement') or 'km' }}");
+          // is_number guard: an unavailable SoC (car away) must not break the whole line
+          if (d.soc) parts.push("{{ (states('" + d.soc + "') | float | round(0) | int) ~ '%' if is_number(states('" + d.soc + "')) else '—' }}");
+          if (d.range) {
+            // Sensor's own unit, or converted to the Display "EV Range Unit" override
+            const _ru = cfg.display?.ev_range_unit || '';
+            parts.push("{% set v = states('" + d.range + "') | float(0) %}" +
+              "{% set u = (state_attr('" + d.range + "','unit_of_measurement') or 'km') | string | lower %}" +
+              "{% set src = 'mi' if u in ['mi','mile','miles'] else 'km' %}" +
+              (_ru ? "{% set t = '" + _ru + "' %}" : "{% set t = src %}") +
+              "{% set v = v * 0.621371 if src == 'km' and t == 'mi' else v * 1.609344 if src == 'mi' and t == 'km' else v %}" +
+              "{{ v | round(0) | int }} {{ t }}");
+          }
           // Status: derive from power so it never says "Charging" at ~0 W. Above the threshold
           // → "Charging"; otherwise "Connected" (the card only renders while connected). Falls
           // back to the raw charger-state entity only when no power entity is configured.
@@ -7229,8 +7248,8 @@ return forecast.map(function(d) {
           return parts.join('  ·  ');
         };
         const _evDefs = [
-          { power: e.ev_charger_power, state: e.ev_charger_state, soc: e.ev_soc, range: e.ev_range, label: (cfg.display?.ev_charger_label || 'EV 1') },
-          { power: e.ev2_charger_power, state: e.ev2_charger_state, soc: e.ev2_soc, range: e.ev2_range, label: (cfg.display?.ev2_charger_label || 'EV 2') },
+          { power: e.ev_charger_power, state: e.ev_charger_state, plugged: e.ev_plugged, soc: e.ev_soc, range: e.ev_range, label: (cfg.display?.ev_charger_label || 'EV 1') },
+          { power: e.ev2_charger_power, state: e.ev2_charger_state, plugged: e.ev2_plugged, soc: e.ev2_soc, range: e.ev2_range, label: (cfg.display?.ev2_charger_label || 'EV 2') },
         ];
         // States that mean "no vehicle / not plugged in / entity dead" — the card hides
         // for these. Kept conservative (does NOT include idle/standby) so a plugged-in
@@ -7253,8 +7272,10 @@ return forecast.map(function(d) {
             // "connected" gate: prefer the charger state entity; else fall back to the
             // anchor simply being available. HA removes a card from the stack when its
             // visibility conditions fail (2024.1+); older HA ignores the key (card shows).
-            card.visibility = d.state
-              ? [{ condition: 'state', entity: d.state, state_not: _evOffStates }]
+            // A dedicated plug sensor (if configured) is the most reliable connected signal.
+            const _gate = d.plugged || d.state;
+            card.visibility = _gate
+              ? [{ condition: 'state', entity: _gate, state_not: _evOffStates }]
               : [{ condition: 'state', entity: anchor, state_not: ['unavailable', 'unknown'] }];
             return card;
           });
@@ -7837,6 +7858,15 @@ return forecast.map(function(d) {
           <span class="row-state">e.g. HVAC, AirCon</span>
         </div>
         <div class="row">
+          <span class="row-label">EV Range Unit</span>
+          <select class="row-input" data-key="ev_range_unit">
+            <option value="" ${!d.ev_range_unit?'selected':''}>Auto (sensor's unit)</option>
+            <option value="km" ${d.ev_range_unit==='km'?'selected':''}>Kilometres (km)</option>
+            <option value="mi" ${d.ev_range_unit==='mi'?'selected':''}>Miles (mi)</option>
+          </select>
+          <span class="row-state">Unit for EV range on the house card and EV panel</span>
+        </div>
+        <div class="row">
           <span class="row-label">HP/AC Image Style</span>
           <select class="row-input" data-key="hp_image_style">
             <option value="outdoor" ${(d.hp_image_style||'outdoor')==='outdoor'?'selected':''}>Outdoor Heat Pump</option>
@@ -8063,7 +8093,7 @@ return forecast.map(function(d) {
         if (key === 'battery_deadband_w') {
           this._syncBatteryDeadbandToDashboard(val);
         }
-        if (key === 'chart_mode' || key === 'chart_range' || key === 'inverter_label') {
+        if (key === 'chart_mode' || key === 'chart_range' || key === 'inverter_label' || key === 'ev_range_unit') {
           this._buildDashboard();
         }
       });
