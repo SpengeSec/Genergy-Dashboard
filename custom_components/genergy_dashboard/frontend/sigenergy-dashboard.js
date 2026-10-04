@@ -8794,7 +8794,7 @@ class SigenergyEnergyFlowCard extends HTMLElement {
       if (h < 40) {
         return `<div class="node-panel ${alignCls} lbl-inline-wrap" style="background:${panelBg};">
           <span class="lbl-name">${this._escHtml(box.name)}</span>
-          <span class="lbl-inline">${fmt.v} ${fmt.u.charAt(0) === 'M' ? 'MWh' : 'kWh'}</span>
+          <span class="lbl-inline">${fmt.v}<span class="lbl-u"> ${fmt.u.charAt(0) === 'M' ? 'MWh' : 'kWh'}</span></span>
         </div>`;
       }
 
@@ -8829,7 +8829,7 @@ class SigenergyEnergyFlowCard extends HTMLElement {
 
       return `<div class="node-panel ${alignCls}" style="background:${panelBg};padding:${panelPadV}px ${panelPadH}px;">
         <span class="lbl-name" style="font-size:${nameSize}px;line-height:1.4;padding:${namePadV}px ${namePadH}px;margin-top:auto;margin-bottom:${nameMb}px;">${this._escHtml(box.name)}</span>
-        <span class="lbl-val" style="font-size:${valSize}px;line-height:${valLh};${lastEl === 'val' ? 'margin-bottom:auto;' : ''}">${fmt.v}</span>
+        <span class="lbl-val" style="font-size:${valSize}px;line-height:${valLh};${lastEl === 'val' ? 'margin-bottom:auto;' : ''}">${fmt.v}${showUnit ? '' : `<span class="lbl-u" style="font-size:${unitSize}px;font-weight:600;color:${txtSecondary};"> ${fmt.u}</span>`}</span>
         ${showUnit ? `<span class="lbl-unit" style="font-size:${unitSize}px;line-height:1.15;margin-top:0;${lastEl === 'unit' ? 'margin-bottom:auto;' : ''}">${fmt.u}</span>` : ''}
         ${showPct ? `<span class="lbl-pct" style="font-size:${pctSize}px;line-height:1.15;margin-top:2px;margin-bottom:auto;">${pct}%</span>` : ''}
       </div>`;
@@ -8889,6 +8889,7 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           cursor: pointer;
           overflow: hidden;
           transition: opacity 0.3s ease;
+          container-type: inline-size;
         }
 
         /* mySigen-style node panel (full-height bar) */
@@ -8970,6 +8971,16 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           text-overflow: ellipsis;
           flex: 1;
           min-width: 0;
+        }
+        /* Narrow label columns (phones): the value wins over the unit and the name chip */
+        @container (max-width: 100px) {
+          .lbl-u { display: none; }
+          .node-panel.lbl-inline-wrap { gap: 3px; padding: 2px 3px; }
+          .node-panel.lbl-inline-wrap .lbl-name {
+            font-size: 7px; letter-spacing: 0.4px; padding: 1px 3px;
+            flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+          }
+          .lbl-inline { flex: 0 0 auto; overflow: visible; font-size: 10px; }
         }
       </style>
       <ha-card class="efc-card">
