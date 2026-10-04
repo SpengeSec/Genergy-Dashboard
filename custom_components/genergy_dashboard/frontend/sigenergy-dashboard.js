@@ -7593,6 +7593,13 @@ return forecast.map(function(d) {
       // Preserve persistent config on the layout card — use current store state
       // (not the version from disk, which may be stale due to async save race)
       mainLayout.cards = newCards;
+
+      // A store.save() made during this build (path backup, auto-detected entities, daily
+      // meters) runs _saveToHA, which fetched the dashboard config BEFORE this save and
+      // writes it back AFTER — silently reverting the freshly built cards. Let it land first.
+      if (store._saveToHAPromise) {
+        try { await store._saveToHAPromise; } catch (e) { /* ignore */ }
+      }
       mainLayout._sigenergy_config = store.get();
 
       await this._hass.callWS({ type: 'lovelace/config/save', url_path: 'dashboard-sigenergy', config });
