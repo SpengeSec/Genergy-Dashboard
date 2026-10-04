@@ -209,6 +209,7 @@ const DEFAULT_CONFIG = {
     show_hp_in_sankey: false,
     third_party_pv_separate: false,
     show_losses_in_sankey: true,
+    home_includes_devices: true,
     ev_energy_is_cumulative: false,
     ev2_energy_is_cumulative: false,
     hp_energy_is_cumulative: false,
@@ -3071,6 +3072,16 @@ class SigenergySettingsCard extends HTMLElement {
           <div class="switch ${cfg.features?.show_losses_in_sankey ? 'on' : 'off'}" data-key="show_losses_in_sankey_toggle" style="flex-shrink:0;margin-left:12px;"></div>
         </div>
       </div>
+      ${(cfg.features?.show_hp_in_sankey || cfg.features?.show_ev_in_sankey || cfg.features?.show_ev2_in_sankey) ? `
+      <div class="section" style="border:1px solid #2d3451;border-radius:12px;padding:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:${cfg.features?.home_includes_devices !== false ? '#aaa' : '#8892a4'};">🏠 Home Total Includes EV / Heat Pump</div>
+            <div style="font-size:10px;color:#8892a4;margin-top:1px;">On: your Load Energy Today already contains the EV and heat pump (usual when it is the inverter's house load), so the Sankey subtracts them from Home instead of counting them twice. Turn off only if your load sensor excludes them.</div>
+          </div>
+          <div class="switch ${cfg.features?.home_includes_devices !== false ? 'on' : 'off'}" data-key="home_includes_devices_toggle" style="flex-shrink:0;margin-left:12px;"></div>
+        </div>
+      </div>` : ''}
       <div class="section" style="border:1px solid ${cfg.features?.solar_forecast ? '#FFA500' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${cfg.features?.solar_forecast ? '12' : '0'}px;">
           <div>
@@ -3380,6 +3391,19 @@ class SigenergySettingsCard extends HTMLElement {
             if (ok) console.log('Dashboard rebuilt after toggling HP Sankey');
             this._render();
           }).catch(() => this._render());
+        } else { this._render(); }
+      });
+    }
+
+    // Home-includes-devices toggle handler
+    const homeDevToggle = el.querySelector('[data-key="home_includes_devices_toggle"]');
+    if (homeDevToggle) {
+      homeDevToggle.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        cfg2.features.home_includes_devices = cfg2.features.home_includes_devices === false;
+        this._storeSave(cfg2);
+        if (this._hass) {
+          this._buildDashboard().then(() => this._render()).catch(() => this._render());
         } else { this._render(); }
       });
     }
@@ -7682,6 +7706,15 @@ return __pts;`;
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
       });
 
+      // The house load usually already contains the EV chargers and heat pump (it is the
+      // inverter's balance of everything behind the meter). Shown as separate nodes they
+      // would be counted twice, so Home becomes the remainder, like HA's Energy dashboard.
+      if (f.home_includes_devices !== false) {
+        const _devIds = [..._sankeyNodes].filter(n => ['ev', 'ev2', 'hp'].includes(n.id)).map(n => n.entity_id)
+          .filter(id => id && id !== e.load_energy_today);
+        if (_devIds.length) [..._sankeyNodes, ..._panelNodes].forEach(n => { if (n.id === 'load') n.subtract_entities = _devIds; });
+      }
+
       // A separate 3rd-party PV source feeds every destination solar can feed
       if (_tpSeparate) [..._sankeyNodes, ..._panelNodes].forEach(n => {
         if (n.type === 'dest' && (n.parents || []).includes(e.solar_energy_today)) n.parents = [...n.parents, e.third_party_pv_energy_today];
@@ -8293,7 +8326,7 @@ function _genergyKwhFactor(hass, eid) {
 
 async function _genergyFetchIntervalFlows(hass, nodes, dateStr) {
   const real = nodes.filter(n => n.entity_id && !n.entity_id.startsWith('_'));
-  const ids = [...new Set(real.flatMap(n => [n.entity_id, ...(n.add_entities || [])]))];
+  const ids = [...new Set(real.flatMap(n => [n.entity_id, ...(n.add_entities || []), ...(n.subtract_entities || [])]))];
   if (!ids.length) return null;
   const start = new Date(dateStr + 'T00:00:00'), end = new Date(start.getTime() + 86400000);
   const stats = await hass.connection.sendMessagePromise({
@@ -8312,7 +8345,16 @@ async function _genergyFetchIntervalFlows(hass, nodes, dateStr) {
         iv[n.entity_id] = (iv[n.entity_id] || 0) + Math.max(0, p.change * f);
       }
     }
+    for (const eid of n.subtract_entities || []) {
+      const f = _genergyKwhFactor(hass, eid);
+      for (const p of stats[eid]) {
+        if (p.start >= end.getTime() || p.change == null) continue;
+        const iv = byStart[p.start] = byStart[p.start] || {};
+        iv[n.entity_id] = (iv[n.entity_id] || 0) - Math.max(0, p.change * f);
+      }
+    }
   }
+  Object.values(byStart).forEach(iv => { for (const k in iv) if (iv[k] < 0) iv[k] = 0; });
   const intervals = Object.keys(byStart).sort((a, b) => a - b).map(k => byStart[k]);
   const statTotals = {};
   intervals.forEach(iv => Object.entries(iv).forEach(([k, v]) => { statTotals[k] = (statTotals[k] || 0) + v; }));
@@ -8328,7 +8370,7 @@ function _genergyIntervalMatrix(hass, nodes, sources, dests, dateStr, getKwh, on
   const isToday = dateStr === _genergyLocalDateStr(new Date());
   // Keyed on the real entities only, so the flow card and the Sankey panel share one fetch
   const key = dateStr + '|' + nodes.filter(n => n.entity_id && !n.entity_id.startsWith('_'))
-    .map(n => n.entity_id + '+' + (n.add_entities || []).join('+')).sort().join(',');
+    .map(n => n.entity_id + '+' + (n.add_entities || []).join('+') + '-' + (n.subtract_entities || []).join('-')).sort().join(',');
   let entry = _genergyIntervalCache[key];
   const stale = entry && isToday && Date.now() - entry.fetchedAt > _GENERGY_INTERVAL_TTL;
   if (!entry || stale) {
@@ -8352,7 +8394,7 @@ function _genergyIntervalMatrix(hass, nodes, sources, dests, dateStr, getKwh, on
     consumers: nodes.filter(n => n.type === 'dest' && !['bat_c', 'grid_e', 'losses'].includes(n.id)).map(n => n.entity_id),
   };
   const tail = {}, allNodes = nodes.filter(n => n.entity_id && !n.entity_id.startsWith('_'));
-  for (const n of allNodes) tail[n.entity_id] = Math.max(0, getKwh(n.entity_id, n.add_entities) - (res.statTotals[n.entity_id] || 0));
+  for (const n of allNodes) tail[n.entity_id] = Math.max(0, getKwh(n.entity_id, n.add_entities, n.subtract_entities) - (res.statTotals[n.entity_id] || 0));
   // Per-interval pass without losses, then one day-level pass that matches what sources
   // couldn't place against destinations still unfilled (counter-step noise across interval
   // boundaries), with the same priority rules; only true leftovers reach the losses node.
@@ -8363,7 +8405,7 @@ function _genergyIntervalMatrix(hass, nodes, sources, dests, dateStr, getKwh, on
     placedFrom[s] = (placedFrom[s] || 0) + v; placedTo[d] = (placedTo[d] || 0) + v; }));
   const residual = {};
   for (const n of allNodes) {
-    const total = getKwh(n.entity_id, n.add_entities);
+    const total = getKwh(n.entity_id, n.add_entities, n.subtract_entities);
     residual[n.entity_id] = Math.max(0, total - (n.type === 'source' ? placedFrom[n.entity_id] || 0 : placedTo[n.entity_id] || 0));
   }
   // Leftovers are timing noise, so share them proportionally (no priority) between the
@@ -8385,7 +8427,7 @@ function _genergyIntervalMatrix(hass, nodes, sources, dests, dateStr, getKwh, on
   for (const src of sources) {
     const row = matrix[src.entity_id] || {};
     // Historical overrides can sit slightly below the hourly sums: never exceed the shown total
-    const placed = Object.values(row).reduce((a, b) => a + b, 0), live = getKwh(src.entity_id, src.add_entities);
+    const placed = Object.values(row).reduce((a, b) => a + b, 0), live = getKwh(src.entity_id, src.add_entities, src.subtract_entities);
     const scale = placed > live && placed > 0 ? live / placed : 1;
     out[src.entity_id] = {};
     for (const [dst, v] of Object.entries(row)) if (dstIds.has(dst)) out[src.entity_id][dst] = v * scale;
@@ -8401,7 +8443,7 @@ function _genergyIntervalMatrix(hass, nodes, sources, dests, dateStr, getKwh, on
 function _computeFlowMatrix(sources, dests, getKwh, conservationEntities) {
   const ce = conservationEntities;
   const remaining = {};
-  dests.forEach(d => { remaining[d.entity_id] = getKwh(d.entity_id, d.add_entities); });
+  dests.forEach(d => { remaining[d.entity_id] = getKwh(d.entity_id, d.add_entities, d.subtract_entities); });
 
   const flowMatrix = {};
   const srcSeedUsed = {};
@@ -8411,8 +8453,8 @@ function _computeFlowMatrix(sources, dests, getKwh, conservationEntities) {
     const gridSrc = sources.find(s => s.entity_id === ce.grid_import);
     const batCKwh = remaining[ce.battery_charge] || 0;
     if (solarSrc && gridSrc && batCKwh > 0.005) {
-      const gridKwh = getKwh(gridSrc.entity_id, gridSrc.add_entities);
-      const solarKwh = getKwh(solarSrc.entity_id, solarSrc.add_entities);
+      const gridKwh = getKwh(gridSrc.entity_id, gridSrc.add_entities, gridSrc.subtract_entities);
+      const solarKwh = getKwh(solarSrc.entity_id, solarSrc.add_entities, solarSrc.subtract_entities);
       const gridToBat = Math.min(gridKwh, batCKwh);
       const solarToBat = Math.min(Math.max(0, batCKwh - gridKwh), solarKwh);
       if (gridToBat > 0.005) {
@@ -8431,7 +8473,7 @@ function _computeFlowMatrix(sources, dests, getKwh, conservationEntities) {
   }
 
   sources.forEach(src => {
-    const srcTotal = getKwh(src.entity_id, src.add_entities);
+    const srcTotal = getKwh(src.entity_id, src.add_entities, src.subtract_entities);
     const srcVal = srcTotal - (srcSeedUsed[src.entity_id] || 0);
     let srcRem = srcVal;
     if (!flowMatrix[src.entity_id]) flowMatrix[src.entity_id] = {};
@@ -8533,6 +8575,10 @@ class SigenergyEnergyFlowCard extends HTMLElement {
           raw += as ? parseFloat(as.state) || 0 : 0;
         }
       }
+      for (const se of n.subtract_entities || []) {
+        const ss = states[se];
+        raw -= ss ? parseFloat(ss.state) || 0 : 0;
+      }
       return Math.round(raw * 10);
     }).join(',');
     if (key === this._lastRenderKey) return false;
@@ -8551,7 +8597,7 @@ class SigenergyEnergyFlowCard extends HTMLElement {
   connectedCallback() { this._scheduleRender(); }
   disconnectedCallback() { if (this._renderRAF) { cancelAnimationFrame(this._renderRAF); this._renderRAF = null; } }
 
-  _getKwh(entityId, addEntities) {
+  _getKwh(entityId, addEntities, subtractEntities) {
     if (!entityId) return 0;
     const states = this._overriddenStates || (this._hass && this._hass.states) || {};
     const s = states[entityId];
@@ -8573,6 +8619,16 @@ class SigenergyEnergyFlowCard extends HTMLElement {
         else total += ar;
       }
     }
+    if (subtractEntities && subtractEntities.length) {
+      for (const se of subtractEntities) {
+        const ss = states[se];
+        if (!ss) continue;
+        const sr = parseFloat(ss.state) || 0;
+        const su = (ss.attributes && ss.attributes.unit_of_measurement) || 'kWh';
+        total -= su === 'MWh' ? sr * 1000 : su === 'Wh' ? sr / 1000 : sr;
+      }
+      total = Math.max(0, total);
+    }
     return total;
   }
 
@@ -8584,7 +8640,7 @@ class SigenergyEnergyFlowCard extends HTMLElement {
   }
 
   _computeFlowMatrix(sources, dests) {
-    const getKwh = (eid, add) => this._getKwh(eid, add);
+    const getKwh = (eid, add, sub) => this._getKwh(eid, add, sub);
     const dateStr = this._flowDate || _genergyLocalDateStr(new Date());
     const im = _genergyIntervalMatrix(this._hass, this._config.nodes, sources, dests, dateStr, getKwh,
       () => { this._lastRenderKey = ''; this._scheduleRender(); });
@@ -8595,8 +8651,8 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     if (!this.shadowRoot || !this._config.nodes) return;
     const nodes = this._config.nodes || [];
     const minKwh = this._config.min_flow || 0.1;
-    const sources = nodes.filter(n => n.type === 'source' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
-    const dests = nodes.filter(n => n.type === 'dest' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
+    const sources = nodes.filter(n => n.type === 'source' && this._getKwh(n.entity_id, n.add_entities, n.subtract_entities) >= minKwh);
+    const dests = nodes.filter(n => n.type === 'dest' && this._getKwh(n.entity_id, n.add_entities, n.subtract_entities) >= minKwh);
     if (sources.length === 0 && dests.length === 0) {
       this.shadowRoot.innerHTML = '<div style="padding:24px;text-align:center;color:#aaa;font-size:13px;">No energy data available</div>';
       return;
@@ -8607,8 +8663,8 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     const gap = 8;
 
     // Compute totals
-    const totalSrc = sources.reduce((s, n) => s + this._getKwh(n.entity_id, n.add_entities), 0);
-    const totalDst = dests.reduce((s, n) => s + this._getKwh(n.entity_id, n.add_entities), 0);
+    const totalSrc = sources.reduce((s, n) => s + this._getKwh(n.entity_id, n.add_entities, n.subtract_entities), 0);
+    const totalDst = dests.reduce((s, n) => s + this._getKwh(n.entity_id, n.add_entities, n.subtract_entities), 0);
 
     // Proportional box height allocation — bars scale with energy values
     const minBarH = 20;
@@ -8617,7 +8673,7 @@ class SigenergyEnergyFlowCard extends HTMLElement {
     const _allocateBoxes = (nodeList, totalKwh, avail) => {
       if (nodeList.length === 0) return [];
       const boxes = nodeList.map(n => {
-        const kwh = this._getKwh(n.entity_id, n.add_entities);
+        const kwh = this._getKwh(n.entity_id, n.add_entities, n.subtract_entities);
         return { ...n, kwh, h: totalKwh > 0 ? (kwh / totalKwh) * avail : avail / nodeList.length, cursor: 0 };
       });
       // Enforce minimum heights: bump small bars, shrink large bars proportionally
@@ -9570,7 +9626,7 @@ class SigenergySankeyPanel extends HTMLElement {
     return deepFind(document, 'sigenergy-energy-flow-card', 0) || deepFind(document, 'sankey-chart-base', 0);
   }
 
-  _getKwh(entityId, addEntities) {
+  _getKwh(entityId, addEntities, subtractEntities) {
     if (!entityId || !this._hass) return 0;
     // When viewing a historical date, read from the overridden states
     // so stats panel and detail panel show historical values, not live.
@@ -9594,11 +9650,21 @@ class SigenergySankeyPanel extends HTMLElement {
         else total += ar;
       }
     }
+    if (subtractEntities && subtractEntities.length) {
+      for (const se of subtractEntities) {
+        const ss = states[se];
+        if (!ss) continue;
+        const sr = parseFloat(ss.state) || 0;
+        const su = (ss.attributes && ss.attributes.unit_of_measurement) || 'kWh';
+        total -= su === 'MWh' ? sr * 1000 : su === 'Wh' ? sr / 1000 : sr;
+      }
+      total = Math.max(0, total);
+    }
     return total;
   }
 
   _computeFlowMatrix(sources, dests) {
-    const getKwh = (eid, add) => this._getKwh(eid, add);
+    const getKwh = (eid, add, sub) => this._getKwh(eid, add, sub);
     const dateStr = (this._dateNavActive && this._dateNavLastStr) || _genergyLocalDateStr(new Date());
     const im = _genergyIntervalMatrix(this._hass, this._config.nodes, sources, dests, dateStr, getKwh,
       () => this._updatePanel());
@@ -9816,8 +9882,8 @@ class SigenergySankeyPanel extends HTMLElement {
     const solarVal = solar ? this._getKwh(solar.entity_id) : 0;
     const loadVal = load ? this._getKwh(load.entity_id) : 0;
     const batCVal = batC ? this._getKwh(batC.entity_id) : 0;
-    const gridEVal = gridE ? this._getKwh(gridE.entity_id, gridE.add_entities) : 0;
-    const gridIVal = gridI ? this._getKwh(gridI.entity_id, gridI.add_entities) : 0;
+    const gridEVal = gridE ? this._getKwh(gridE.entity_id, gridE.add_entities, gridE.subtract_entities) : 0;
+    const gridIVal = gridI ? this._getKwh(gridI.entity_id, gridI.add_entities, gridI.subtract_entities) : 0;
     const evVal = ev ? this._getKwh(ev.entity_id) : 0;
     const ev2Val = ev2 ? this._getKwh(ev2.entity_id) : 0;
     const hpVal = hp ? this._getKwh(hp.entity_id) : 0;
@@ -9887,11 +9953,11 @@ class SigenergySankeyPanel extends HTMLElement {
   _openNodeModal(node) {
     if (!node) return;
     const meta = (this._config && this._config.nodes) || [];
-    const val = this._getKwh(node.entity_id, node.add_entities);
+    const val = this._getKwh(node.entity_id, node.add_entities, node.subtract_entities);
 
     const minKwh = this._config.min_flow || 0.1;
-    const allSources = meta.filter(n => n.type === 'source' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
-    const allDests = meta.filter(n => n.type === 'dest' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
+    const allSources = meta.filter(n => n.type === 'source' && this._getKwh(n.entity_id, n.add_entities, n.subtract_entities) >= minKwh);
+    const allDests = meta.filter(n => n.type === 'dest' && this._getKwh(n.entity_id, n.add_entities, n.subtract_entities) >= minKwh);
     const flowMatrix = this._computeFlowMatrix(allSources, allDests);
 
     const targets = node.type === 'source' ? (node.children || []) : (node.parents || []);
@@ -9950,7 +10016,7 @@ class SigenergySankeyPanel extends HTMLElement {
     panel.className = 'sankey-info-panel visible';
 
     // Get the value of the selected entity
-    const val = this._getKwh(node.entity_id, node.add_entities);
+    const val = this._getKwh(node.entity_id, node.add_entities, node.subtract_entities);
     infoMain.innerHTML = `
       <div class="value">${val.toFixed(2)} <span class="unit">kWh</span></div>
       <div class="label">${node.name}</div>
@@ -9971,8 +10037,8 @@ class SigenergySankeyPanel extends HTMLElement {
     expandBtn.className = this._expanded ? 'expand-btn expanded' : 'expand-btn';
 
     const minKwh = this._config.min_flow || 0.1;
-    const allSources = meta.filter(n => n.type === 'source' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
-    const allDests = meta.filter(n => n.type === 'dest' && this._getKwh(n.entity_id, n.add_entities) >= minKwh);
+    const allSources = meta.filter(n => n.type === 'source' && this._getKwh(n.entity_id, n.add_entities, n.subtract_entities) >= minKwh);
+    const allDests = meta.filter(n => n.type === 'dest' && this._getKwh(n.entity_id, n.add_entities, n.subtract_entities) >= minKwh);
     const flowMatrix = this._computeFlowMatrix(allSources, allDests);
 
     // Now extract flows for the selected node
