@@ -980,7 +980,7 @@
               "source": "nordpool",
               "cheap_threshold": 0.1,
               "expensive_threshold": 0.25,
-              "currency": "\u20ac",
+              "currency": "__currency__",
               "show_price_overlay": true,
               "show_price_badge": true,
               "show_color_coding": true
@@ -1032,7 +1032,7 @@
                 {
                   "type": "custom:mushroom-template-card",
                   "primary": "{{ states('__buy_price__') | float(0) | round(4) }}",
-                  "secondary": "Buy Price (\u20ac/kWh)",
+                  "secondary": "Buy Price (__currency__/kWh)",
                   "icon": "mdi:cash-plus",
                   "icon_color": "red",
                   "card_mod": {
@@ -1045,7 +1045,7 @@
                 {
                   "type": "custom:mushroom-template-card",
                   "primary": "{{ states('__sell_price__') | float(0) | round(4) }}",
-                  "secondary": "Sell Price (\u20ac/kWh)",
+                  "secondary": "Sell Price (__currency__/kWh)",
                   "icon": "mdi:cash-minus",
                   "icon_color": "green",
                   "card_mod": {
@@ -1057,7 +1057,7 @@
                 },
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_savings_today__') | float(0) | round(2) }}\u20ac",
+                  "primary": "{{ states('__emhass_savings_today__') | float(0) | round(2) }}__currency__",
                   "secondary": "Savings Today",
                   "icon": "mdi:piggy-bank",
                   "icon_color": "amber",
@@ -1078,9 +1078,9 @@
               "cards": [
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_net_cost_month__') | float(0) | round(2) }}\u20ac",
+                  "primary": "{{ states('__emhass_net_cost_month__') | float(0) | round(2) }}__currency__",
                   "secondary": "Net Cost This Month",
-                  "icon": "mdi:currency-eur",
+                  "icon": "mdi:cash",
                   "icon_color": "{% if states('__emhass_net_cost_month__') | float(0) < 0 %}green{% else %}red{% endif %}",
                   "card_mod": {
                     "style": {
@@ -1092,7 +1092,7 @@
                 },
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_savings_monthly__') | float(0) | round(2) }}\u20ac",
+                  "primary": "{{ states('__emhass_savings_monthly__') | float(0) | round(2) }}__currency__",
                   "secondary": "Savings This Month",
                   "icon": "mdi:cash-check",
                   "icon_color": "green",
@@ -1106,7 +1106,7 @@
                 },
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_projected_bill__') | float(0) | round(2) }}\u20ac",
+                  "primary": "{{ states('__emhass_projected_bill__') | float(0) | round(2) }}__currency__",
                   "secondary": "Projected Monthly Bill",
                   "icon": "mdi:receipt-text",
                   "icon_color": "blue",
@@ -1120,7 +1120,7 @@
                 },
                 {
                   "type": "custom:mushroom-template-card",
-                  "primary": "{{ states('__emhass_projected_savings__') | float(0) | round(2) }}\u20ac",
+                  "primary": "{{ states('__emhass_projected_savings__') | float(0) | round(2) }}__currency__",
                   "secondary": "Projected Monthly Savings",
                   "icon": "mdi:hand-coin",
                   "icon_color": "teal",
@@ -1213,8 +1213,8 @@
             },
             {
               "type": "custom:mushroom-template-card",
-              "primary": "Deye SUN-SG05LP1-EU",
-              "secondary": "Rated: {{ states('__inverter_rated_power__') | default('5000') }}W | Temp: {{ states('__inverter_temp__') | default('?') }}\u00b0C",
+              "primary": "Inverter",
+              "secondary": "Rated: {{ states('__inverter_rated_power__') }} W | Temp: {{ states('__inverter_temp__') }} \u00b0C",
               "icon": "mdi:solar-power-variant",
               "icon_color": "amber",
               "multiline_secondary": true,

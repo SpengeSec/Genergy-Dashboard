@@ -15,7 +15,7 @@ from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import HomeAssistantView
 
 from .const import DOMAIN, DASHBOARD_URL_PATH, DASHBOARD_TITLE
-from .dashboard_generator import generate_dashboard
+from .dashboard_generator import CURRENCY_SYMBOL_KEY, generate_dashboard
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -125,6 +125,18 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 PLATFORMS: list[str] = ["sensor"]
+
+_CURRENCY_SYMBOLS = {
+    "EUR": "€", "USD": "$", "AUD": "$", "NZD": "$", "CAD": "$", "GBP": "£",
+    "CHF": "CHF ", "SEK": "kr ", "NOK": "kr ", "DKK": "kr ", "PLN": "zł ", "CZK": "Kč ",
+    "JPY": "¥", "CNY": "¥", "INR": "₹", "ZAR": "R",
+}
+
+
+def _currency_symbol(hass: HomeAssistant) -> str:
+    """Symbol for the currency configured in Home Assistant (falls back to the ISO code)."""
+    code = (getattr(hass.config, "currency", None) or "EUR").upper()
+    return _CURRENCY_SYMBOLS.get(code, code + " ")
 
 
 async def _check_prerequisites(hass: HomeAssistant) -> None:
@@ -454,6 +466,7 @@ async def _create_or_update_dashboard(
         # Run generate_dashboard off the event loop (contains file I/O)
         entity_config = dict(entry.data)
         entity_config.update(dict(entry.options))
+        entity_config[CURRENCY_SYMBOL_KEY] = _currency_symbol(hass)
         dashboard_config = await hass.async_add_executor_job(
             generate_dashboard, entity_config
         )
@@ -472,6 +485,7 @@ async def _create_or_update_dashboard(
         try:
             entity_config = dict(entry.data)
             entity_config.update(dict(entry.options))
+            entity_config[CURRENCY_SYMBOL_KEY] = _currency_symbol(hass)
             dashboard_config = generate_dashboard(entity_config)
             await _send_yaml_notification(hass, dashboard_config)
         except Exception:
@@ -520,6 +534,7 @@ async def _regenerate_dashboard(
         # Generate fresh dashboard from the updated config entry
         entity_config = dict(entry.data)
         entity_config.update(dict(entry.options))
+        entity_config[CURRENCY_SYMBOL_KEY] = _currency_symbol(hass)
         dashboard_config = await hass.async_add_executor_job(
             generate_dashboard, entity_config
         )

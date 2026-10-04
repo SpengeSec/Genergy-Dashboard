@@ -16,6 +16,9 @@ from typing import Any
 
 from .const import PLACEHOLDER_MAP
 
+# Config key the integration sets to the HA currency symbol before generating
+CURRENCY_SYMBOL_KEY = "_currency_symbol"
+
 _TEMPLATE: dict | None = None
 _PLACEHOLDER_RE = re.compile(r"__[a-z0-9_]+__")
 
@@ -31,11 +34,19 @@ def _load_template() -> dict:
 
 
 def _build_substitution_map(config: dict[str, Any]) -> dict[str, str]:
-    """Build a mapping from placeholder strings to configured entity IDs."""
+    """Build a mapping from placeholder strings to configured entity IDs.
+
+    Unconfigured entities are left OUT so their placeholders survive and
+    _strip_unconfigured() can drop the cards that use them (substituting an
+    empty string produced broken tiles such as ``states('')`` and
+    ``states..last_updated``).
+    """
     subs: dict[str, str] = {}
     for conf_key, placeholder in PLACEHOLDER_MAP.items():
         entity_id = config.get(conf_key) or ""
-        subs[placeholder] = entity_id
+        if entity_id:
+            subs[placeholder] = entity_id
+    subs["__currency__"] = config.get(CURRENCY_SYMBOL_KEY) or "€"
     return subs
 
 
@@ -307,4 +318,19 @@ def generate_dashboard(config: dict[str, Any]) -> dict:
     # Step 4: remove empty containers
     dashboard = _remove_empty_containers(dashboard)
 
+    # Step 5: blank any placeholders left in content that was kept
+    # (e.g. inside card_mod style templates)
+    dashboard = _blank_leftover_placeholders(dashboard)
+
     return dashboard
+
+
+def _blank_leftover_placeholders(obj: Any) -> Any:
+    """Replace remaining __placeholder__ strings with an empty string."""
+    if isinstance(obj, str):
+        return _PLACEHOLDER_RE.sub("", obj)
+    if isinstance(obj, dict):
+        return {k: _blank_leftover_placeholders(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_blank_leftover_placeholders(v) for v in obj]
+    return obj

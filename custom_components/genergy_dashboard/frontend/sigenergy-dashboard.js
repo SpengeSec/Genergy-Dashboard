@@ -252,6 +252,7 @@ const DEFAULT_CONFIG = {
     solar_label: '',
     home_label: '',
     grid_label: '',
+    inverter_label: '',
     swap_battery_colors: false,
     battery_deadband_w: 0,
     hp_image_style: 'outdoor',
@@ -494,6 +495,105 @@ class SigConfigStore {
 }
 
 window.SigenergyConfig = new SigConfigStore();
+
+// ── Settings view quick-reference tiles (built from the Settings-card entity mapping) ──
+function _genergyQuickRefTiles(cfg, hass) {
+  const e = cfg.entities || {};
+  const cur = cfg.pricing?.currency || '€';
+  const has = (k) => !!e[k];
+  const st = (k) => "states('" + e[k] + "')";
+  const tileStyle = (primary, secondary) => ({ style: {
+    'ha-tile-info$': '.primary { ' + primary + ' } .secondary { ' + secondary + ' }',
+    '.': 'ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }',
+  } });
+  const bigWhite = 'font-size: 20px !important; font-weight: bold !important; color: white !important;';
+  const bigGreen = 'font-size: 20px !important; font-weight: bold !important; color: #00c875 !important;';
+  const small = 'color: #8892a4 !important; font-size: 10px !important;';
+  const money = (k, label, icon, iconColor, primaryCss) => ({
+    type: 'custom:mushroom-template-card',
+    primary: '{{ ' + st(k) + ' | float(0) | round(2) }}' + cur,
+    secondary: label, icon, icon_color: iconColor, multiline_secondary: true,
+    card_mod: tileStyle(primaryCss, small),
+  });
+  const grid = (columns, cards) => cards.length ? [{ type: 'grid', columns: Math.min(columns, cards.length), square: false, cards }] : [];
+  const tiles = [];
+
+  if (has('emhass_mode')) {
+    const mode = "{% set mode = " + st('emhass_mode') + " %}";
+    tiles.push({
+      type: 'custom:mushroom-template-card',
+      primary: '{{ ' + st('emhass_mode') + ' }}',
+      secondary: has('emhass_reason') ? '{{ ' + st('emhass_reason') + ' }}' : '',
+      icon: mode + "{% if 'CHARGE' in mode %}mdi:battery-charging{% elif 'DISCHARGE' in mode %}mdi:battery-arrow-down{% else %}mdi:battery-clock{% endif %}",
+      icon_color: mode + "{% if 'CHARGE' in mode %}green{% elif 'DISCHARGE' in mode %}orange{% else %}blue{% endif %}",
+      card_mod: tileStyle('font-size: 22px !important; font-weight: bold !important; color: #00d4b8 !important;', 'font-size: 12px !important; color: #8892a4 !important;'),
+    });
+  }
+
+  const priceRow = [];
+  if (has('buy_price')) priceRow.push({ type: 'custom:mushroom-template-card', primary: '{{ ' + st('buy_price') + ' | float(0) | round(4) }}',
+    secondary: 'Buy Price (' + cur + '/kWh)', icon: 'mdi:cash-plus', icon_color: 'red', card_mod: tileStyle(bigWhite, small) });
+  if (has('sell_price')) priceRow.push({ type: 'custom:mushroom-template-card', primary: '{{ ' + st('sell_price') + ' | float(0) | round(4) }}',
+    secondary: 'Sell Price (' + cur + '/kWh)', icon: 'mdi:cash-minus', icon_color: 'green', card_mod: tileStyle(bigWhite, small) });
+  if (has('emhass_savings_today')) priceRow.push(money('emhass_savings_today', 'Savings Today', 'mdi:piggy-bank', 'amber', bigGreen));
+  tiles.push(...grid(3, priceRow));
+
+  const monthRow = [];
+  if (has('emhass_net_cost_month')) monthRow.push(money('emhass_net_cost_month', 'Net Cost This Month', 'mdi:cash',
+    '{% if ' + st('emhass_net_cost_month') + ' | float(0) < 0 %}green{% else %}red{% endif %}', bigWhite));
+  if (has('emhass_savings_month')) monthRow.push(money('emhass_savings_month', 'Savings This Month', 'mdi:cash-check', 'green', bigGreen));
+  if (has('emhass_projected_bill')) monthRow.push(money('emhass_projected_bill', 'Projected Monthly Bill', 'mdi:receipt-text', 'blue', bigWhite));
+  if (has('emhass_projected_savings')) monthRow.push(money('emhass_projected_savings', 'Projected Monthly Savings', 'mdi:hand-coin', 'teal', bigGreen));
+  tiles.push(...grid(2, monthRow));
+
+  const textTile = (k, label, icon, iconColor, size) => has(k) && tiles.push({
+    type: 'custom:mushroom-template-card', primary: '{{ ' + st(k) + ' }}', secondary: label, icon, icon_color: iconColor,
+    card_mod: tileStyle('font-size: ' + size + 'px !important; color: white !important;', 'font-size: 11px !important; color: #8892a4 !important;'),
+  });
+  textTile('emhass_battery_action', 'Battery Action Summary', 'mdi:robot', 'teal', 14);
+  textTile('emhass_last_decision', 'Last MPC Decision', 'mdi:brain', 'purple', 12);
+
+  if (has('mpc_optim_status')) {
+    const lastRunEid = e.mpc_battery || e.mpc_optim_status;
+    tiles.push({
+      type: 'custom:mushroom-template-card',
+      primary: '{{ ' + st('mpc_optim_status') + ' }}',
+      secondary: "MPC Optimizer Status | Last run: {{ as_timestamp(states['" + lastRunEid + "'].last_updated, 0) | timestamp_custom('%H:%M') if states['" + lastRunEid + "'] is defined else '—' }}",
+      icon: 'mdi:chart-bell-curve-cumulative',
+      icon_color: "{% if " + st('mpc_optim_status') + " == 'Optimal' %}green{% else %}red{% endif %}",
+      multiline_secondary: true,
+      card_mod: tileStyle('font-size: 20px !important; font-weight: bold !important; color: #00d4b8 !important;', 'font-size: 11px !important; color: #8892a4 !important;'),
+    });
+  }
+
+  const autoRow = [];
+  const autoCard = (k, name, icon) => has(k) && autoRow.push({ type: 'custom:mushroom-entity-card', entity: e[k], name, icon,
+    tap_action: { action: 'toggle' }, multiline_secondary: true,
+    card_mod: { style: { '.': 'ha-card { background-color: #22273a !important; border: 1px solid #2d3451 !important; border-radius: 16px !important; }' } } });
+  autoCard('automation_mpc_optimizer', 'MPC Optimizer', 'mdi:robot');
+  autoCard('automation_battery_control', 'Battery Control', 'mdi:battery-sync');
+  tiles.push(...grid(2, autoRow));
+
+  if (has('inverter_rated_power') || has('inverter_temp')) {
+    // Title: user label → inverter device's manufacturer + model from the registry → generic
+    let title = cfg.display?.inverter_label || '';
+    if (!title && hass) {
+      const devId = hass.entities?.[e.inverter_rated_power || e.inverter_temp]?.device_id;
+      const dev = devId && hass.devices?.[devId];
+      if (dev) title = [dev.manufacturer, dev.model].filter(Boolean).join(' ');
+    }
+    const parts = [];
+    if (has('inverter_rated_power')) parts.push("Rated: {{ " + st('inverter_rated_power') + " | float(0) | round(0) | int }} {{ state_attr('" + e.inverter_rated_power + "', 'unit_of_measurement') or 'W' }}");
+    if (has('inverter_temp')) parts.push("Temp: {{ " + st('inverter_temp') + " | float(0) | round(1) }} {{ state_attr('" + e.inverter_temp + "', 'unit_of_measurement') or '°C' }}");
+    tiles.push({
+      type: 'custom:mushroom-template-card', primary: title || 'Inverter', secondary: parts.join(' | '),
+      icon: 'mdi:solar-power-variant', icon_color: 'amber', multiline_secondary: true,
+      card_mod: tileStyle('font-size: 16px !important; font-weight: bold !important; color: white !important;', 'font-size: 11px !important; color: #8892a4 !important;'),
+    });
+  }
+  return tiles;
+}
+
 
 // Shared theme resolver — used by all Genergy components
 window._sigenergyResolveTheme = function(hass) {
@@ -7596,6 +7696,16 @@ return forecast.map(function(d) {
       // (not the version from disk, which may be stale due to async save race)
       mainLayout.cards = newCards;
 
+      // Settings view quick-reference tiles: regenerate from the Settings-card entity mapping
+      // (the integration only fills them from the config-flow options at creation, so
+      // UI-mapped installs got states('') / hardcoded labels — issues #48 / #49).
+      const _settingsView = config.views?.find(v => v.path === 'settings');
+      const _settingsStack = _settingsView?.cards?.find(c => c?.type === 'vertical-stack'
+        && c.cards?.[0]?.type === 'custom:sigenergy-settings-card');
+      if (_settingsStack) {
+        _settingsStack.cards = [_settingsStack.cards[0], ..._genergyQuickRefTiles(cfg, this._hass)];
+      }
+
       // A store.save() made during this build (path backup, auto-detected entities, daily
       // meters) runs _saveToHA, which fetched the dashboard config BEFORE this save and
       // writes it back AFTER — silently reverting the freshly built cards. Let it land first.
@@ -7710,6 +7820,11 @@ return forecast.map(function(d) {
           <span class="row-label">Grid Label</span>
           <input class="row-input" type="text" value="${d.grid_label||''}" data-key="grid_label" placeholder="GRID" />
           <span class="row-state">Name shown on house card</span>
+        </div>
+        <div class="row">
+          <span class="row-label">Inverter Name</span>
+          <input class="row-input" type="text" value="${d.inverter_label||''}" data-key="inverter_label" placeholder="Auto (device registry)" />
+          <span class="row-state">Title of the inverter tile on the Settings view</span>
         </div>
         <div class="row">
           <span class="row-label">Battery Label</span>
@@ -7948,7 +8063,7 @@ return forecast.map(function(d) {
         if (key === 'battery_deadband_w') {
           this._syncBatteryDeadbandToDashboard(val);
         }
-        if (key === 'chart_mode' || key === 'chart_range') {
+        if (key === 'chart_mode' || key === 'chart_range' || key === 'inverter_label') {
           this._buildDashboard();
         }
       });
