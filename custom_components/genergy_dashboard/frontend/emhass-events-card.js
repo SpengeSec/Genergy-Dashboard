@@ -1,3 +1,8 @@
+// ── GENERGY LOCAL PATCHES (re-apply after syncing from Roving-Ronin/EMS-Events-Card) ──
+//   #41 `bess_batt_invert: true` config flag negates Past (BESS) battery power (+ve=discharge inverters).
+//   #42 _showResolvedSensors(): empty override fields show the resolved entity + source; brand
+//       auto-fill (_applyInverterPreset) only fills empty fields with entities that exist.
+// ─────────────────────────────────────────────────────────────────────────────────────────
 // EMHASS Events Card v2.6.7
 // Combines Future Decisions (forecast) and Past Events (history) in one card
 // MODIFICATIONS: 

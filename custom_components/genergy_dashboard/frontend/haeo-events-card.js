@@ -1,3 +1,10 @@
+// ── GENERGY LOCAL PATCHES (re-apply after syncing from Roving-Ronin/EMS-Events-Card) ──
+//   #52 Past power sensors resolve config → saved "historical" → default in _eid (_HAEO_PAST_KIND),
+//       and _loadPast fetches through _eid, so fetch and read use the same entity.
+//   #41 `past_battery_invert: true` config flag negates Past battery power (+ve=discharge inverters).
+//   #42 _showResolvedSensors(): settings form shows the entity in use when the card config overrides
+//       a field; Future tab resolves via _fcEid (config → saved "forecast" → default).
+// ─────────────────────────────────────────────────────────────────────────────────────────
 // HAEO Events Card
 // Combines Future Decisions (forecast) and Past Events (history) in one card
 // Enhanced with: Smart Alert Pills, single-pass day totals, improved formatting
