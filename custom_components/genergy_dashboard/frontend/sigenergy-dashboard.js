@@ -6566,6 +6566,26 @@ return forecast.map(function(d) {
       }
     }
 
+    // Close the gap between "now" and the first forecast slot. EMS plans round their first
+    // timestamp to the nearest slot, so a dashed plan could start up to one slot after the
+    // actual lines ended (visible when zoomed in). Plans get a bridging point at "now" with
+    // their first value; history series are extended to "now" (bucketed prices otherwise
+    // stop at the start of the current bucket).
+    series.forEach(s => {
+      if (s.show && s.show.in_chart === false) return;
+      if (s.data_generator) {
+        if (!/\(plan\)$/.test(s.name || '')) return;
+        s.data_generator = `var __pts = await (async function () {\n${s.data_generator}\n})();
+if (!Array.isArray(__pts) || !__pts.length) return __pts || [];
+var __now = Date.now(), __first = null;
+__pts.forEach(function (p) { if (p && (__first === null || p[0] < __first[0])) __first = p; });
+if (__first && __first[0] > __now && __first[0] - __now <= 3600000) __pts.unshift([__now, __first[1]]);
+return __pts;`;
+      } else if (s.group_by && s.extend_to === false) {
+        s.extend_to = 'now';
+      }
+    });
+
     return series.filter(s => !s.entity || entityOk(s.entity));
   }
 
