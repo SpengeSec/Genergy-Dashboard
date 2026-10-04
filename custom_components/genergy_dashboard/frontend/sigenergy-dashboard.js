@@ -207,6 +207,7 @@ const DEFAULT_CONFIG = {
     show_ev_in_sankey: false,
     show_ev2_in_sankey: false,
     show_hp_in_sankey: false,
+    third_party_pv_separate: false,
     show_losses_in_sankey: true,
     ev_energy_is_cumulative: false,
     ev2_energy_is_cumulative: false,
@@ -272,8 +273,8 @@ const DEFAULT_CONFIG = {
 };
 
 const SANKEY_THEMES = {
-  modern:  { solar: '#D4C850', battery: '#4ECDC4', grid_import: '#6B8FD4', home: '#9B7AB8', grid_export: '#7B8FD4', ev: '#E8705A', ev2: '#D4605A', hp: '#E8A799', losses: '#444444' },
-  vibrant: { solar: '#c8b84a', battery: '#00d4b8', grid_import: '#6b7fd4', home: '#e8337f', grid_export: '#7c5cbf', ev: '#ff69b4', ev2: '#e05580', hp: '#e67e22', losses: '#444444' },
+  modern:  { solar: '#D4C850', battery: '#4ECDC4', grid_import: '#6B8FD4', home: '#9B7AB8', grid_export: '#7B8FD4', ev: '#E8705A', ev2: '#D4605A', hp: '#E8A799', solar3p: '#A8C46A', losses: '#444444' },
+  vibrant: { solar: '#c8b84a', battery: '#00d4b8', grid_import: '#6b7fd4', home: '#e8337f', grid_export: '#7c5cbf', ev: '#ff69b4', ev2: '#e05580', hp: '#e67e22', solar3p: '#8fbf4a', losses: '#444444' },
 };
 
 class SigConfigStore {
@@ -2775,7 +2776,12 @@ class SigenergySettingsCard extends HTMLElement {
         <div style="font-size:10px;color:#666;margin-bottom:6px;">Daily energy counters in <b>kWh</b>. These drive the daily Sankey. Do <b>not</b> use live W/kW power sensors here — they will fluctuate and produce incorrect totals.</div>
         ${this._entityRow('Solar Energy Today (kWh)', 'solar_energy_today', e)}
         ${this._entityRow('3rd-Party PV Energy Today (kWh)', 'third_party_pv_energy_today', e)}
-        <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">Optional: combined with Solar in Sankey (e.g. sensor.sigen_plant_daily_third_party_inverter_energy)</div>
+        <div style="font-size:9px;color:#666;padding:0 0 4px 4px;">Optional: added to Solar in the Sankey (e.g. sensor.sigen_plant_daily_third_party_inverter_energy), or shown as its own node below.</div>
+        ${e.third_party_pv_energy_today ? `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px 8px 4px;">
+          <div style="font-size:11px;color:#8892a4;">Show 3rd-party PV as a separate Sankey node</div>
+          <div class="switch ${cfg.features?.third_party_pv_separate ? 'on' : 'off'}" data-key="third_party_pv_separate_toggle" style="flex-shrink:0;margin-left:12px;"></div>
+        </div>` : ''}
         ${this._entityRow('Load Energy Today (kWh)', 'load_energy_today', e)}
         ${this._entityRow('Battery Charge Today (kWh)', 'battery_charge_today', e)}
         ${this._entityRow('Battery Discharge Today (kWh)', 'battery_discharge_today', e)}
@@ -3343,6 +3349,18 @@ class SigenergySettingsCard extends HTMLElement {
             this._render();
           }).catch(() => this._render());
         } else { this._render(); }
+      });
+    }
+
+    // 3rd-party PV as separate Sankey node toggle handler
+    const tpSankeyToggle = el.querySelector('[data-key="third_party_pv_separate_toggle"]');
+    if (tpSankeyToggle) {
+      tpSankeyToggle.addEventListener('click', () => {
+        const cfg2 = this._storeGet();
+        cfg2.features.third_party_pv_separate = !cfg2.features.third_party_pv_separate;
+        this._storeSave(cfg2);
+        if (this._hass) this._buildDashboard().then(() => this._render()).catch(() => this._render());
+        else this._render();
       });
     }
 
@@ -7507,15 +7525,21 @@ return forecast.map(function(d) {
 
       // Build node metadata for the custom energy flow card AND the interactive info panel
       const _sankeyNodes = [];
+      const _tpSeparate = !!(f.third_party_pv_separate && e.third_party_pv_energy_today && e.solar_energy_today);
       // Source nodes
       if (e.solar_energy_today) {
         const _solarNode = {
           id: 'solar', name: 'Solar', color: _sTheme.solar, entity_id: e.solar_energy_today, type: 'source',
           children: solarChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
         };
-        if (e.third_party_pv_energy_today) _solarNode.add_entities = [e.third_party_pv_energy_today];
+        if (e.third_party_pv_energy_today && !_tpSeparate) _solarNode.add_entities = [e.third_party_pv_energy_today];
         _sankeyNodes.push(_solarNode);
       }
+      // 3rd-party PV (e.g. Sigenergy "3rd inv") as its own source, like the mySigen app
+      if (_tpSeparate) _sankeyNodes.push({
+        id: 'solar3p', name: '3rd Inv', color: _sTheme.solar3p, entity_id: e.third_party_pv_energy_today, type: 'source',
+        children: solarChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
+      });
       if (e.battery_discharge_today) _sankeyNodes.push({
         id: 'bat_d', name: 'Battery', color: _sTheme.battery, entity_id: e.battery_discharge_today, type: 'source',
         children: battDischargeChildren.map(x => typeof x === 'string' ? x : x?.entity_id).filter(Boolean), parents: []
@@ -7584,6 +7608,11 @@ return forecast.map(function(d) {
       // Source nodes
       if (e.solar_energy_today) _panelNodes.push({
         id: 'solar', name: 'Solar', color: _sTheme.solar, entity_id: e.solar_energy_today, type: 'source',
+        children: solarChildren.map(eid => eid), parents: [],
+        ...(e.third_party_pv_energy_today && !_tpSeparate ? { add_entities: [e.third_party_pv_energy_today] } : {})
+      });
+      if (_tpSeparate) _panelNodes.push({
+        id: 'solar3p', name: '3rd-Party PV', color: _sTheme.solar3p, entity_id: e.third_party_pv_energy_today, type: 'source',
         children: solarChildren.map(eid => eid), parents: []
       });
       if (e.battery_discharge_today) _panelNodes.push({
@@ -7627,6 +7656,11 @@ return forecast.map(function(d) {
       if (f.show_hp_in_sankey && hpSankeyEntity) _panelNodes.push({
         id: 'hp', name: 'Heat Pump', color: _sTheme.hp, entity_id: hpSankeyEntity, type: 'dest',
         children: [], parents: [e.solar_energy_today, e.battery_discharge_today, _gridImportId].filter(Boolean)
+      });
+
+      // A separate 3rd-party PV source feeds every destination solar can feed
+      if (_tpSeparate) [..._sankeyNodes, ..._panelNodes].forEach(n => {
+        if (n.type === 'dest' && (n.parents || []).includes(e.solar_energy_today)) n.parents = [...n.parents, e.third_party_pv_energy_today];
       });
 
       // Sankey info panel card
@@ -8152,6 +8186,182 @@ return forecast.map(function(d) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Interval-based flow allocation (issues #36 / #45 / #51)
+// The daily totals alone can't say WHICH source fed WHICH destination: an EV that charged
+// overnight from the grid and a sunny afternoon look identical in day sums. So allocate per
+// recorder-statistics interval (5-minute, or hourly for older days) with the same physical
+// priority Home Assistant's energy dashboard uses, then sum the intervals:
+//   solar → consumers, then → battery charge, then → grid export
+//   battery discharge → consumers, then → grid export
+//   grid import → consumers, then → battery charge
+// Within a step, consumers (home / EV / heat pump …) share in proportion to their demand in
+// that interval. Energy a source can't place (sensor totals that don't conserve) goes to the
+// losses node when it exists.
+// `intervals`: [{ <entity_id>: kWh, … }, …]; `roles`: { solar, batteryCharge, batteryDischarge,
+// gridImport, gridExport, consumers: [eid…], losses }. Returns { [srcEid]: { [dstEid]: kWh } }.
+// ═══════════════════════════════════════════════════════════
+
+function _genergyAllocateIntervals(intervals, roles) {
+  const m = {};
+  let pvSplit = null;   // per interval: [[eid, share], …] when 3rd-party PV is a separate node
+  const add = (src, dst, v) => {
+    if (!src || !dst || v <= 1e-9) return;
+    const parts = src === roles.solar && pvSplit ? pvSplit : [[src, 1]];
+    for (const [eid, share] of parts) if (share > 0) (m[eid] = m[eid] || {})[dst] = (m[eid][dst] || 0) + v * share;
+  };
+  const val = (iv, eid) => (eid && iv[eid] > 0 ? iv[eid] : 0);
+  const consumers = roles.consumers || [];
+  const solarExtra = roles.solarExtra || [];
+  for (const iv of intervals) {
+    // All PV sources follow the same priority; flows are split by each one's share
+    const pvParts = [roles.solar, ...solarExtra].filter(Boolean).map(eid => [eid, val(iv, eid)]);
+    const pvTotal = pvParts.reduce((a, [, v]) => a + v, 0);
+    pvSplit = solarExtra.length && pvTotal > 0 ? pvParts.map(([eid, v]) => [eid, v / pvTotal]) : null;
+    let solar = solarExtra.length ? pvTotal : val(iv, roles.solar), batD = val(iv, roles.batteryDischarge), gridI = val(iv, roles.gridImport);
+    let batC = val(iv, roles.batteryCharge), gridE = val(iv, roles.gridExport);
+    const need = {}; consumers.forEach(c => { need[c] = val(iv, c); });
+    // Feed consumers from one source, proportionally to their remaining demand
+    const feed = (src, avail) => {
+      const total = consumers.reduce((s, c) => s + need[c], 0);
+      if (avail <= 0 || total <= 0) return avail;
+      const give = Math.min(avail, total);
+      consumers.forEach(c => { const v = give * need[c] / total; add(src, c, v); need[c] -= v; });
+      return avail - give;
+    };
+    solar = feed(roles.solar, solar);
+    let v = Math.min(solar, batC); add(roles.solar, roles.batteryCharge, v); solar -= v; batC -= v;
+    v = Math.min(solar, gridE); add(roles.solar, roles.gridExport, v); solar -= v; gridE -= v;
+    batD = feed(roles.batteryDischarge, batD);
+    v = Math.min(batD, gridE); add(roles.batteryDischarge, roles.gridExport, v); batD -= v; gridE -= v;
+    gridI = feed(roles.gridImport, gridI);
+    v = Math.min(gridI, batC); add(roles.gridImport, roles.batteryCharge, v); gridI -= v; batC -= v;
+    if (roles.losses) { add(roles.solar, roles.losses, solar); add(roles.batteryDischarge, roles.losses, batD); add(roles.gridImport, roles.losses, gridI); }
+  }
+  return m;
+}
+
+// Hourly statistics → flow matrix, cached per day (today refreshes every 5 min). Hourly
+// rather than 5-minute: many inverters count energy in 0.1 kWh steps, and at 5 minutes a
+// source's step and the matching destination's step often land in different bins (only
+// ~85-90% of the energy could be placed on a Deye); hourly places ~93-99% and still
+// separates night from day. Long-term hourly statistics also exist for any past date.
+// Falls back (returns null) when any Sankey entity lacks recorder statistics, so the
+// daily-proportional algorithm below still covers sensors without a state_class.
+const _genergyIntervalCache = {};
+const _GENERGY_INTERVAL_TTL = 5 * 60 * 1000;
+
+function _genergyLocalDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function _genergyKwhFactor(hass, eid) {
+  const u = hass?.states?.[eid]?.attributes?.unit_of_measurement || 'kWh';
+  return u === 'MWh' ? 1000 : u === 'Wh' ? 0.001 : 1;
+}
+
+async function _genergyFetchIntervalFlows(hass, nodes, dateStr) {
+  const real = nodes.filter(n => n.entity_id && !n.entity_id.startsWith('_'));
+  const ids = [...new Set(real.flatMap(n => [n.entity_id, ...(n.add_entities || [])]))];
+  if (!ids.length) return null;
+  const start = new Date(dateStr + 'T00:00:00'), end = new Date(start.getTime() + 86400000);
+  const stats = await hass.connection.sendMessagePromise({
+    type: 'recorder/statistics_during_period', start_time: start.toISOString(), end_time: end.toISOString(),
+    statistic_ids: ids, period: 'hour', types: ['change'],
+  });
+  // Every entity needs statistics (state_class); otherwise use the daily algorithm
+  if (!stats || !ids.every(id => Array.isArray(stats[id]))) return null;
+  const byStart = {};
+  for (const n of real) {
+    for (const eid of [n.entity_id, ...(n.add_entities || [])]) {
+      const f = _genergyKwhFactor(hass, eid);
+      for (const p of stats[eid]) {
+        if (p.start >= end.getTime() || p.change == null) continue;
+        const iv = byStart[p.start] = byStart[p.start] || {};
+        iv[n.entity_id] = (iv[n.entity_id] || 0) + Math.max(0, p.change * f);
+      }
+    }
+  }
+  const intervals = Object.keys(byStart).sort((a, b) => a - b).map(k => byStart[k]);
+  const statTotals = {};
+  intervals.forEach(iv => Object.entries(iv).forEach(([k, v]) => { statTotals[k] = (statTotals[k] || 0) + v; }));
+  return { intervals, statTotals };
+}
+
+// Synchronous accessor used by the Sankey renderers. Returns a flow matrix restricted to the
+// visible nodes, or null while the statistics are loading / unavailable (caller then uses the
+// daily algorithm). Energy not yet in the statistics (the current hour) is allocated as one
+// extra interval, so the result always matches the live day totals.
+function _genergyIntervalMatrix(hass, nodes, sources, dests, dateStr, getKwh, onReady) {
+  if (!hass?.connection || !nodes?.length || !dateStr) return null;
+  const isToday = dateStr === _genergyLocalDateStr(new Date());
+  // Keyed on the real entities only, so the flow card and the Sankey panel share one fetch
+  const key = dateStr + '|' + nodes.filter(n => n.entity_id && !n.entity_id.startsWith('_'))
+    .map(n => n.entity_id + '+' + (n.add_entities || []).join('+')).sort().join(',');
+  let entry = _genergyIntervalCache[key];
+  const stale = entry && isToday && Date.now() - entry.fetchedAt > _GENERGY_INTERVAL_TTL;
+  if (!entry || stale) {
+    if (!entry?.pending) {
+      const prev = entry;
+      entry = _genergyIntervalCache[key] = { ...(prev || {}), pending: true, fetchedAt: Date.now(), listeners: new Set(prev?.listeners || []) };
+      _genergyFetchIntervalFlows(hass, nodes, dateStr)
+        .then(res => { entry.result = res; })
+        .catch(err => { console.warn('Genergy: interval Sankey statistics unavailable, using daily allocation', err); entry.result = null; })
+        .finally(() => { entry.pending = false; entry.fetchedAt = Date.now(); entry.listeners.forEach(fn => { try { fn(); } catch (e) {} }); entry.listeners.clear(); });
+    }
+    if (onReady) entry.listeners.add(onReady);
+  }
+  const res = entry.result;
+  if (!res) return null;
+  const byId = (id) => nodes.find(n => n.id === id)?.entity_id;
+  const roles = {
+    solar: byId('solar'), batteryDischarge: byId('bat_d'), gridImport: byId('grid_i'),
+    batteryCharge: byId('bat_c'), gridExport: byId('grid_e'), losses: byId('losses'),
+    solarExtra: [byId('solar3p')].filter(Boolean),
+    consumers: nodes.filter(n => n.type === 'dest' && !['bat_c', 'grid_e', 'losses'].includes(n.id)).map(n => n.entity_id),
+  };
+  const tail = {}, allNodes = nodes.filter(n => n.entity_id && !n.entity_id.startsWith('_'));
+  for (const n of allNodes) tail[n.entity_id] = Math.max(0, getKwh(n.entity_id, n.add_entities) - (res.statTotals[n.entity_id] || 0));
+  // Per-interval pass without losses, then one day-level pass that matches what sources
+  // couldn't place against destinations still unfilled (counter-step noise across interval
+  // boundaries), with the same priority rules; only true leftovers reach the losses node.
+  const { losses, ...rolesNoLoss } = roles;
+  const matrix = _genergyAllocateIntervals([...res.intervals, tail], rolesNoLoss);
+  const placedFrom = {}, placedTo = {};
+  Object.entries(matrix).forEach(([s, row]) => Object.entries(row).forEach(([d, v]) => {
+    placedFrom[s] = (placedFrom[s] || 0) + v; placedTo[d] = (placedTo[d] || 0) + v; }));
+  const residual = {};
+  for (const n of allNodes) {
+    const total = getKwh(n.entity_id, n.add_entities);
+    residual[n.entity_id] = Math.max(0, total - (n.type === 'source' ? placedFrom[n.entity_id] || 0 : placedTo[n.entity_id] || 0));
+  }
+  // Leftovers are timing noise, so share them proportionally (no priority) between the
+  // sources allowed to feed each still-unfilled destination.
+  const r = roles, addM = (s, d, v) => { if (s && d && v > 1e-9) (matrix[s] = matrix[s] || {})[d] = (matrix[s][d] || 0) + v; };
+  const pv = [r.solar, ...(r.solarExtra || [])];
+  const feeders = (d) => d === r.batteryCharge ? [...pv, r.gridImport]
+    : d === r.gridExport ? [...pv, r.batteryDischarge] : [...pv, r.batteryDischarge, r.gridImport];
+  for (const d of [...(r.consumers || []), r.batteryCharge, r.gridExport].filter(Boolean)) {
+    const fs = feeders(d).filter(x => x && residual[x] > 0), avail = fs.reduce((a, x) => a + residual[x], 0);
+    const give = Math.min(residual[d] || 0, avail);
+    if (give <= 0) continue;
+    fs.forEach(x => { const v = give * residual[x] / avail; addM(x, d, v); residual[x] -= v; });
+    residual[d] -= give;
+  }
+  if (r.losses) [...pv, r.batteryDischarge, r.gridImport].forEach(x => addM(x, r.losses, residual[x] || 0));
+  const dstIds = new Set(dests.map(n => n.entity_id));
+  const out = {};
+  for (const src of sources) {
+    const row = matrix[src.entity_id] || {};
+    // Historical overrides can sit slightly below the hourly sums: never exceed the shown total
+    const placed = Object.values(row).reduce((a, b) => a + b, 0), live = getKwh(src.entity_id, src.add_entities);
+    const scale = placed > live && placed > 0 ? live / placed : 1;
+    out[src.entity_id] = {};
+    for (const [dst, v] of Object.entries(row)) if (dstIds.has(dst)) out[src.entity_id][dst] = v * scale;
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════
 // Shared flow allocation: seed + greedy proportional distribution
 // Used by both SigenergyEnergyFlowCard and SigenergySankeyPanel
 // ═══════════════════════════════════════════════════════════
@@ -8342,7 +8552,11 @@ class SigenergyEnergyFlowCard extends HTMLElement {
   }
 
   _computeFlowMatrix(sources, dests) {
-    return _computeFlowMatrix(sources, dests, (eid, add) => this._getKwh(eid, add), this._config.conservation_entities);
+    const getKwh = (eid, add) => this._getKwh(eid, add);
+    const dateStr = this._flowDate || _genergyLocalDateStr(new Date());
+    const im = _genergyIntervalMatrix(this._hass, this._config.nodes, sources, dests, dateStr, getKwh,
+      () => { this._lastRenderKey = ''; this._scheduleRender(); });
+    return im || _computeFlowMatrix(sources, dests, getKwh, this._config.conservation_entities);
   }
 
   _render() {
@@ -9069,6 +9283,7 @@ class SigenergySankeyPanel extends HTMLElement {
       if (this._dateNavActive) {
         this._dateNavActive = false;
         this._historicalStates = null;
+        const _sb = this._findSankeyBase(); if (_sb) _sb._flowDate = null;
         this._dateNavLastStr = selectedStr;
         // Clear quantization cache so next _stabilizeLiveValues picks up fresh data
         this._quantStatesCache = null;
@@ -9242,6 +9457,8 @@ class SigenergySankeyPanel extends HTMLElement {
       if (this._dateNavActive) {
         // Cache the historical states for re-application every tick
         this._historicalStates = newStates;
+        // Tell the flow card which day it shows, so it allocates from that day's intervals
+        sankeyBase._flowDate = dateStr;
 
         // Apply via SANKEY-CHART.states (parent, Lit reactive) so it flows through the render template
         this._setSankeyChartStates(newStates);
@@ -9326,7 +9543,11 @@ class SigenergySankeyPanel extends HTMLElement {
   }
 
   _computeFlowMatrix(sources, dests) {
-    return _computeFlowMatrix(sources, dests, (eid, add) => this._getKwh(eid, add), this._config.conservation_entities);
+    const getKwh = (eid, add) => this._getKwh(eid, add);
+    const dateStr = (this._dateNavActive && this._dateNavLastStr) || _genergyLocalDateStr(new Date());
+    const im = _genergyIntervalMatrix(this._hass, this._config.nodes, sources, dests, dateStr, getKwh,
+      () => this._updatePanel());
+    return im || _computeFlowMatrix(sources, dests, getKwh, this._config.conservation_entities);
   }
 
   _toggleExpand() {
