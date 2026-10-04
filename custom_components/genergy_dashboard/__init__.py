@@ -19,12 +19,18 @@ from .dashboard_generator import generate_dashboard
 
 _LOGGER = logging.getLogger(__name__)
 
-# Required HACS frontend cards: (keyword to match in Lovelace resource URL, display name, HACS search term)
-REQUIRED_HACS_CARDS: list[tuple[str, str, str, str, str]] = [
-    ("layout-card", "Layout Card", "layout-card", "thomasloven", "lovelace-layout-card"),
-    ("apexcharts-card", "ApexCharts Card", "apexcharts-card", "RomRider", "apexcharts-card"),
-    ("mushroom", "Mushroom Cards", "mushroom", "piitaya", "lovelace-mushroom"),
-    ("card-mod", "Card Mod", "card-mod", "thomasloven", "lovelace-card-mod"),
+# Required HACS frontend cards:
+# (keywords to match in Lovelace resource URL, display name, HACS search term, owner, repo)
+# A requirement is met if *any* of its keywords matches a loaded resource URL.
+REQUIRED_HACS_CARDS: list[tuple[tuple[str, ...], str, str, str, str]] = [
+    (("layout-card",), "Layout Card", "layout-card", "thomasloven", "lovelace-layout-card"),
+    (("apexcharts-card",), "ApexCharts Card", "apexcharts-card", "RomRider", "apexcharts-card"),
+    (("mushroom",), "Mushroom Cards", "mushroom", "piitaya", "lovelace-mushroom"),
+    # card-mod OR its successor UIX (Lint-Free-Technology/uix), which is a documented
+    # drop-in replacement and honours the same card_mod: config keys we emit. The two
+    # are mutually exclusive: UIX refuses to set up if card-mod is registered, so a
+    # UIX user cannot satisfy a card-mod-only check.
+    (("card-mod", "/uix/uix.js"), "Card Mod", "card-mod", "thomasloven", "lovelace-card-mod"),
 ]
 
 
@@ -158,8 +164,8 @@ async def _check_prerequisites(hass: HomeAssistant) -> None:
                 )
                 return
 
-            for keyword, display_name, _, owner, repository in REQUIRED_HACS_CARDS:
-                if not any(keyword in url for url in loaded_urls):
+            for keywords, display_name, _, owner, repository in REQUIRED_HACS_CARDS:
+                if not any(kw in url for kw in keywords for url in loaded_urls):
                     missing.append((display_name, owner, repository))
 
     except Exception as err:
