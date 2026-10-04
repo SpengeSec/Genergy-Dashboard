@@ -2262,7 +2262,10 @@ class SigenergySettingsCard extends HTMLElement {
         @media (max-width: 500px) {
           .row { flex-wrap: wrap; }
           .row-label { min-width: 100%; margin-bottom: 4px; }
-          .row-state { min-width: 100%; text-align: left; margin-top: 4px; }
+          .row-state { min-width: 100%; text-align: left; margin-top: 4px; white-space: normal; overflow-wrap: anywhere; }
+          .row-warn { margin-left: 0 !important; }
+          .tabs { gap: 0; }
+          .tab { flex: 1 1 auto; padding: 10px 6px; font-size: 12px; text-align: center; }
         }
         .prereq-banner {
           background: rgba(231,76,60,0.12);
@@ -2459,7 +2462,7 @@ class SigenergySettingsCard extends HTMLElement {
     }
     const kindWarning = this._entityKindWarning(key, id);
     const warningHTML = kindWarning
-      ? `<div style="margin:-2px 0 4px 110px;padding:6px 10px;background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.28);border-radius:6px;font-size:11px;color:#ff8a80;">${kindWarning}</div>`
+      ? `<div class="row-warn" style="margin:-2px 0 4px 110px;padding:6px 10px;background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.28);border-radius:6px;font-size:11px;color:#ff8a80;">${kindWarning}</div>`
       : '';
     return `
       <div class="row">
