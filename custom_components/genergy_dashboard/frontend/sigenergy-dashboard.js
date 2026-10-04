@@ -1078,8 +1078,10 @@ function _genergyFormat(value, unit = '') {
   if (unit === 'W') return Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(1)} kW` : `${Math.round(n)} W`;
   if (unit === 'kWh') return `${n.toFixed(n >= 10 ? 1 : 2)} kWh`;
   if (unit === '%') return `${Math.round(n)}%`;
-  if (unit === '€') return `€${n.toFixed(2)}`;
-  if (unit === '€/kWh') return `€${n.toFixed(3)}/kWh`;
+  // '€' / '€/kWh' are placeholder fallback units: show the currency from Pricing settings
+  const cur = (window.SigenergyConfig && window.SigenergyConfig.get().pricing?.currency) || '€';
+  if (unit === '€') return `${cur}${n.toFixed(2)}`;
+  if (unit === '€/kWh') return `${cur}${n.toFixed(3)}/kWh`;
   return `${n.toFixed(Math.abs(n) >= 10 ? 1 : 2)}${unit ? ' ' + unit : ''}`;
 }
 
