@@ -70,6 +70,14 @@ const _HAEO_DEFAULTS = {
   past_battery_discharge_energy: 'sensor.sigen_plant_daily_battery_discharge_energy', // Daily reset
 };
 
+// Past power keys → their slot in the card's saved load-entities config (see _eid)
+const _HAEO_PAST_KIND = {
+  past_battery_power: 'battery',
+  past_load_power:    'base',
+  past_solar_power:   'pv',
+  past_grid_power:    'grid',
+};
+
 // ── Colour scheme ─────────────────────────────────────────────────────────────
 // Colors mapped to event types for clear semantics
 const _HAEO_COLOURS = {
@@ -1639,6 +1647,17 @@ class HaeoEventsCard extends HTMLElement {
 
   // Resolve a sensor entity ID: config override → default → fallback (for EV1)
   _eid(key) {
+    // PAST power sensors: card config → the card's own saved "historical" setting → default.
+    // _loadPast fetches and reads through this same resolution, so they can't disagree
+    // (previously fetch used the saved setting first while reads used config/default →
+    // "No sensor data" whenever a dashboard passed entity_past_* that differed from it).
+    const _pastKind = _HAEO_PAST_KIND[key];
+    if (_pastKind && !this._config['entity_' + key]) {
+      let raw = null; try { raw = localStorage.getItem('haeo-events-card-load-entities'); } catch (e) {}
+      if (raw === null || raw !== this._pastCfgRaw) { this._pastCfg = this._loadLoadEntitiesConfig(); this._pastCfgRaw = raw; }
+      const h = this._pastCfg?.[_pastKind]?.historical;
+      if (h) return h;
+    }
     let eid = this._config['entity_' + key] || _HAEO_DEFAULTS[key];
     // EV1 fallback: try haeo_ev_power first, fall back to haeo_ev1_power if needed
     if (key === 'haeo_ev_power') {
@@ -3246,10 +3265,10 @@ class HaeoEventsCard extends HTMLElement {
 
       // Past power sensors — actual inverter measurements (with saved entity overrides)
       const powerSensors = [
-        loadEntityConfig.battery.historical || this._eid('past_battery_power'),
-        loadEntityConfig.base.historical || this._eid('past_load_power'),
-        loadEntityConfig.pv.historical || this._eid('past_solar_power'),
-        loadEntityConfig.grid.historical || this._eid('past_grid_power'),
+        this._eid('past_battery_power'),
+        this._eid('past_load_power'),
+        this._eid('past_solar_power'),
+        this._eid('past_grid_power'),
         this._eid('haeo_soc'),
         this._eid('haeo_buy_price'),
         this._eid('haeo_sell_price'),
