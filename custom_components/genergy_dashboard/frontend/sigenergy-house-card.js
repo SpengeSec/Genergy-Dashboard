@@ -161,6 +161,9 @@ const LABELS = {
 };
 
 // ─── Card Class ──────────────────────────────────────────────────────────────
+// Container width (px) at which heat-pump perspective values are interpreted
+const HP_PERSPECTIVE_REF_W = 800;
+
 class SigenergyHouseCard extends LitElement {
 
   static get properties() {
@@ -1061,6 +1064,17 @@ class SigenergyHouseCard extends LitElement {
 
   updated(changedProps) {
     super.updated(changedProps);
+    // Track the house container width so the heat-pump perspective scales with it
+    const hcEl = this.shadowRoot?.querySelector('.house-container:not(.modal-house)') || this.shadowRoot?.querySelector('.house-container');
+    if (hcEl && hcEl !== this._hpObserved) {
+      this._hpRO?.disconnect();
+      this._hpObserved = hcEl;
+      this._hpRO = new ResizeObserver(([entry]) => {
+        const w = Math.round(entry.contentRect.width);
+        if (w && Math.abs(w - (this._hpContainerW || 0)) > 2) { this._hpContainerW = w; this.requestUpdate(); }
+      });
+      this._hpRO.observe(hcEl);
+    }
     const shouldListen = this._isEditMode;
     if (shouldListen && !this._boundWheel) {
       this._boundWheel = (e) => {
@@ -1426,9 +1440,25 @@ class SigenergyHouseCard extends LitElement {
 
   // ── Heat pump asset position editor ──────────────────────────────────────
 
+  // Perspective is a px length but the image width is a % of the card, so a fixed
+  // perspective distorts more the wider the card gets — on wide cards the image's near
+  // edge can reach the "camera" and the projection blows up to many times the card size.
+  // Scale perspective with the container (values are interpreted at HP_PERSPECTIVE_REF_W)
+  // and keep it safely beyond the image's maximum depth.
+  _hpPerspective(p, widthPct, ry, rx) {
+    const cw = this._hpContainerW || HP_PERSPECTIVE_REF_W;
+    const scaled = p * cw / HP_PERSPECTIVE_REF_W;
+    const wPx = (parseFloat(widthPct) || 10) / 100 * cw;
+    const depth = wPx * Math.abs(Math.sin(ry * Math.PI / 180)) + wPx * Math.abs(Math.sin(rx * Math.PI / 180));
+    return Math.max(scaled, depth * 2).toFixed(0);
+  }
+
   _getHpInlineStyle() {
     const pos = this._config.heat_pump_position;
-    if (!pos) return '';
+    if (!pos) {
+      // Class defaults (see .heat-pump-img), with the perspective scaled to the card
+      return `transform:perspective(${this._hpPerspective(700, 8.5, -24, 4)}px) rotateY(-24deg) rotateX(4deg) rotateZ(-2deg) skewY(-8deg);`;
+    }
     const top = pos.top ?? '53%';
     const right = pos.right ?? '9%';
     const width = pos.width ?? '10%';
@@ -1436,7 +1466,7 @@ class SigenergyHouseCard extends LitElement {
     const ry = pos.rotateY ?? -42;
     const rx = pos.rotateX ?? 10;
     const rz = pos.rotateZ ?? -1;
-    return `top:${top};right:${right};width:${width};transform:perspective(${p}px) rotateY(${ry}deg) rotateX(${rx}deg) rotateZ(${rz}deg);transform-origin:bottom left;`;
+    return `top:${top};right:${right};width:${width};transform:perspective(${this._hpPerspective(p, width, ry, rx)}px) rotateY(${ry}deg) rotateX(${rx}deg) rotateZ(${rz}deg);transform-origin:bottom left;`;
   }
 
   _onHpDragStart(e) {
