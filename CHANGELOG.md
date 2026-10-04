@@ -5,7 +5,7 @@ All notable changes to the Genergy Dashboard are documented here.
 ## [Unreleased]
 
 ### Fixed
-- **Gap between the actual and forecast lines when zoomed in** -- EMS plans round their first point to the next slot, so the dashed forecast started up to 15 minutes after the actual lines ended, and the actual price line stopped at the start of the current hour. Forecasts now connect at "Now" and actual series run up to "Now". Click **Apply Settings to Dashboard** once to update an existing chart.
+- **Gap between the actual and forecast lines when zoomed in** -- EMS plans round their first point to the next slot, so the dashed forecast started up to 15 minutes after the actual lines ended, and the actual price line stopped at the start of the current hour. Forecasts now connect at "Now" and actual series run up to "Now".
 - **EV and heat pump energy counted twice in the Sankey** -- Home used the house load total, which normally already includes the EV chargers and heat pump, and those were then added again as their own destinations. Home is now the remainder (like the device breakdown in HA's Energy dashboard). New option **Home Total Includes EV / Heat Pump** (on by default; Settings -> Entities, shown when an EV or heat pump node is enabled): turn it off if your load sensor already excludes them.
 - **Tapping a Sankey node often did nothing** -- The click handlers were lost every time the Sankey re-rendered with live values. The detail modal now opens on every tap; its headline is labelled "Total today" (or the selected date), and energy sensors reported in MWh or Wh are shown in kWh.
 - **Phones: small Sankey values cut to "0..."** and the unit dropped on medium bars; the value now always fits.
@@ -16,6 +16,9 @@ All notable changes to the Genergy Dashboard are documented here.
 ### Changed
 - **System Insights on phones** uses two compact columns instead of six full-width tiles.
 - **Solar forecast chips** are hidden while their sensor is unavailable instead of showing "Unavailable".
+
+### Upgrade note
+- Click **Settings -> Apply Settings to Dashboard** once after updating. The chart gap fix, the EV / heat pump double-count fix and the hidden unavailable forecast chips are stored in your dashboard layout, so they only take effect after Apply.
 
 ## [2.27.0] - 2026-10-04
 
