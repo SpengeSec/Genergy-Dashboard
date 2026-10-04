@@ -1078,7 +1078,7 @@ function _genergyFormat(value, unit = '') {
   if (!Number.isFinite(n)) return _genergyEsc(value);
   if (unit === 'W') return Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(1)} kW` : `${Math.round(n)} W`;
   if (unit === 'kWh') return `${n.toFixed(n >= 10 ? 1 : 2)} kWh`;
-  if (unit === 'MWh') return _genergyFormat(n * 1000, 'kWh');
+  if (unit === 'MWh' && Math.abs(n) < 1) return _genergyFormat(n * 1000, 'kWh');
   if (unit === 'Wh') return _genergyFormat(n / 1000, 'kWh');
   if (unit === '%') return `${Math.round(n)}%`;
   // '€' / '€/kWh' are placeholder fallback units: show the currency from Pricing settings
