@@ -7188,9 +7188,10 @@ return forecast.map(function(d) {
           // so the user's live inverter sensors (Genergy entity settings) work directly. Only
           // set when configured; unset keys fall back to the card's Sigenergy Modbus defaults.
           // Sign conventions the card expects: battery +ve=charge, grid +ve=import — matches
-          // Sigenergy/`battery_positive_charging:true`; inverters that report the opposite
-          // (Deye/Goodwe, battery_positive_charging:false) will show an inverted Past battery.
+          // Sigenergy/`battery_positive_charging:true`; for inverters that report the opposite
+          // (Deye/Goodwe, battery_positive_charging:false) the card negates the Past battery.
           if (e.battery_power) haeoConfig.entity_past_battery_power = e.battery_power;
+          if (f.battery_positive_charging === false) haeoConfig.past_battery_invert = true;
           if (e.load_power) haeoConfig.entity_past_load_power = e.load_power;
           if (e.solar_power) haeoConfig.entity_past_solar_power = e.solar_power;
           if (e.grid_power || e.grid_active_power) haeoConfig.entity_past_grid_power = e.grid_power || e.grid_active_power;
@@ -7221,10 +7222,11 @@ return forecast.map(function(d) {
           // of falling back to the card's Sigenergy-only defaults (sensor.sigen_plant_*), which
           // are absent on Deye/SolaX/Goodwe/etc. → an empty "No BESS sensor data" Past tab.
           // Only set when configured (blank → card default, so Sigenergy users are unaffected).
-          // Sign note: the card expects battery +ve=charge / grid +ve=import; inverters that
-          // report the opposite (Deye/Goodwe, battery_positive_charging:false) show an inverted
-          // Past battery — a card limitation (no per-entity sign flip), documented for follow-up.
+          // Sign note: the card expects battery +ve=charge / grid +ve=import; for inverters that
+          // report the opposite (Deye/Goodwe, battery_positive_charging:false) the card negates
+          // the Past battery via bess_batt_invert.
           if (e.battery_power) emhassConfig.bess_batt_power = e.battery_power;
+          if (f.battery_positive_charging === false) emhassConfig.bess_batt_invert = true;
           if (e.load_power) emhassConfig.bess_load_power = e.load_power;
           if (e.solar_power) emhassConfig.bess_pv_power = e.solar_power;
           if (e.grid_power || e.grid_active_power) emhassConfig.bess_grid_power = e.grid_power || e.grid_active_power;

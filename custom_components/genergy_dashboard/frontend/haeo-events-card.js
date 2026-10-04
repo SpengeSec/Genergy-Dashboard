@@ -3348,7 +3348,8 @@ class HaeoEventsCard extends HTMLElement {
       if (_invertConfig.base?.invert)     this._pwrMult.load     *= -1;
       if (_invertConfig.pv?.invert)       this._pwrMult.solar    *= -1;
       if (_invertConfig.grid?.invert)     this._pwrMult.grid     *= -1;
-      if (_invertConfig.battery?.invert)  this._pwrMult.battery  *= -1;
+      // past_battery_invert (config): for inverters reporting battery +ve=discharge (Deye, Goodwe)
+      if (_invertConfig.battery?.invert || this._config.past_battery_invert === true) this._pwrMult.battery *= -1;
       if (_invertConfig.ev?.invert)       this._pwrMult.ev       *= -1;
       if (_invertConfig.ev2?.invert)      this._pwrMult.ev2      *= -1;
       if (_invertConfig.deferLoad?.invert) this._pwrMult.deferLoad *= -1;

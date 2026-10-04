@@ -1922,6 +1922,15 @@ class EmhassEventsCard extends HTMLElement {
         energy_defer:          _emhass_energyMult(this._hass, this._eid('energy_defer')),
       };
 
+      // bess_batt_invert (config): for inverters reporting battery +ve=discharge (Deye, Goodwe),
+      // negate the recorded battery power so the Past tab uses the card's +ve=charge convention.
+      if (useBess && this._config.bess_batt_invert === true && lookup[battEid]) {
+        lookup[battEid] = lookup[battEid].map(x => {
+          const v = parseFloat(x.s);
+          return isNaN(v) ? x : { t: x.t, s: String(-v) };
+        });
+      }
+
       if (!lookup[loadEid]?.length && !lookup[pvEid]?.length) {
         const sel = this.shadowRoot.getElementById('range-past');
         const modeStr = useBess ? 'BESS' : 'EMHASS';
