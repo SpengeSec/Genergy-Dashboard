@@ -905,6 +905,7 @@ class EmhassEventsCard extends HTMLElement {
 
   setConfig(config) {
     this._config = config || {};
+    this._baseConfig = { ...(config || {}) };  // config as supplied (before settings overrides)
     // Set currency symbol from card YAML or HA config
     _EMHASS_CUR = config?.currency_symbol
       || _emhass_curSymbol(this._hass?.config?.currency)
@@ -1240,6 +1241,7 @@ class EmhassEventsCard extends HTMLElement {
       const el = sr.getElementById(id);
       if (el) el.value = val ?? '';
     }
+    this._showResolvedSensors();
     const decimals = sr.getElementById('t-price-decimals');
     if (decimals) decimals.value = s.t_price_decimals || 4;
     const modal = sr.getElementById('settings-modal');
@@ -1310,6 +1312,46 @@ class EmhassEventsCard extends HTMLElement {
     reader.readAsText(file);
   }
 
+  // Settings field id → config key (sensor overrides)
+  static get _SENSOR_FIELDS() {
+    return {
+      's-p-load': 'p_load_forecast', 's-p-pv': 'p_pv_forecast', 's-p-grid': 'p_grid_forecast',
+      's-p-batt': 'p_batt_forecast', 's-p-soc': 'soc_forecast',
+      's-b-load': 'bess_load_power', 's-b-pv': 'bess_pv_power', 's-b-grid': 'bess_grid_power',
+      's-b-batt': 'bess_batt_power', 's-b-soc': 'bess_soc',
+      's-buy': 'buy_price', 's-sell': 'sell_price', 's-net-cost': 'net_cost',
+      's-past-buy': 'past_buy_price', 's-past-sell': 'past_sell_price',
+      's-e-load': 'energy_load', 's-e-solar': 'energy_solar',
+      's-e-gimp': 'energy_grid_import', 's-e-gexp': 'energy_grid_export',
+      's-e-bc': 'energy_batt_charge', 's-e-bd': 'energy_batt_discharge', 's-e-cap': 'energy_capacity',
+    };
+  }
+
+  // Where a sensor key resolves from when no override is saved: card config or built-in default
+  _sensorSource(key) {
+    const fromConfig = this._baseConfig?.[key];
+    if (fromConfig) return { eid: fromConfig, src: 'card config' };
+    const def = _EMHASS_MPC[key] || _EMHASS_STD[key] || null;
+    return { eid: def, src: 'default' };
+  }
+
+  // Show the entity actually in use for every empty override field (placeholder + tooltip),
+  // flagging ones that don't exist in HA, so users can verify what the card reads.
+  _showResolvedSensors() {
+    const sr = this.shadowRoot;
+    for (const [id, key] of Object.entries(this.constructor._SENSOR_FIELDS)) {
+      const el = sr.getElementById(id);
+      if (!el) continue;
+      if (el.dataset.origPh === undefined) el.dataset.origPh = el.placeholder || '';
+      const { eid, src } = this._sensorSource(key);
+      if (!eid) { el.placeholder = el.dataset.origPh; el.title = ''; continue; }
+      const missing = this._hass && !this._hass.states[eid];
+      el.placeholder = 'Using ' + eid + ' (' + src + (missing ? ', not found' : '') + ')';
+      el.title = el.value ? 'Override: ' + el.value + ' (blank = ' + eid + ' from ' + src + ')'
+                          : 'Using ' + eid + ' from ' + src + (missing ? ' (entity not found in HA)' : '');
+    }
+  }
+
   _applyInverterPreset(brand) {
     const presets = {
       sigenergy: { load: 'sensor.sigen_plant_consumed_power', pv: 'sensor.sigen_plant_pv_power', grid: 'sensor.sigen_plant_grid_active_power', batt: 'sensor.sigen_plant_battery_power', soc: 'sensor.sigen_plant_battery_state_of_charge' },
@@ -1323,11 +1365,29 @@ class EmhassEventsCard extends HTMLElement {
     const p = presets[brand];
     if (!p) return;
     const sr = this.shadowRoot;
-    if (sr.getElementById('s-b-load'))  sr.getElementById('s-b-load').value  = p.load;
-    if (sr.getElementById('s-b-pv'))    sr.getElementById('s-b-pv').value    = p.pv;
-    if (sr.getElementById('s-b-grid'))  sr.getElementById('s-b-grid').value  = p.grid;
-    if (sr.getElementById('s-b-batt'))  sr.getElementById('s-b-batt').value  = p.batt;
-    if (sr.getElementById('s-b-soc'))   sr.getElementById('s-b-soc').value   = p.soc;
+    // Only fill EMPTY fields, and only with entities that exist — never replace a working
+    // config-supplied sensor with a brand guess. Report what changed.
+    const filled = [], skipped = [];
+    for (const [id, k] of [['s-b-load', 'load'], ['s-b-pv', 'pv'], ['s-b-grid', 'grid'], ['s-b-batt', 'batt'], ['s-b-soc', 'soc']]) {
+      const el = sr.getElementById(id);
+      if (!el) continue;
+      const fieldKey = this.constructor._SENSOR_FIELDS[id];
+      const { eid: current } = this._sensorSource(fieldKey);
+      if (el.value) { skipped.push(k + ' (override set)'); continue; }
+      if (current && this._hass?.states[current]) { skipped.push(k + ' (using ' + current + ')'); continue; }
+      if (!this._hass?.states[p[k]]) { skipped.push(k + ' (' + p[k] + ' not found)'); continue; }
+      el.value = p[k]; filled.push(p[k]);
+    }
+    this._showResolvedSensors();
+    let note = sr.getElementById('inverter-brand-note');
+    const sel = sr.getElementById('inverter-brand');
+    if (!note && sel?.parentElement) {
+      note = document.createElement('div'); note.id = 'inverter-brand-note';
+      note.style.cssText = 'font-size:11px;color:var(--secondary-text-color);margin:-6px 0 10px 0;text-align:right;';
+      sel.parentElement.parentElement.insertAdjacentElement('afterend', note);
+    }
+    if (note) note.textContent = (filled.length ? 'Filled: ' + filled.join(', ') : 'Nothing filled') +
+      (skipped.length ? ' · Kept: ' + skipped.join(', ') : '');
   }
 
   _renderLegend() {

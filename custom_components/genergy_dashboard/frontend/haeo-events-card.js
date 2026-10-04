@@ -1674,6 +1674,47 @@ class HaeoEventsCard extends HTMLElement {
     return eid;
   }
 
+  // FUTURE tab sensor: card config → the card's own saved "forecast" setting → default
+  // (same precedence as the Past-tab sensors in _eid, so a dashboard-supplied entity
+  // isn't silently replaced by the card's auto-saved defaults)
+  _fcEid(loadEntityConfig, kind, key) {
+    if (this._config['entity_' + key]) return this._eid(key);
+    return loadEntityConfig?.[kind]?.forecast || this._eid(key);
+  }
+
+  // Annotate the settings form with the entity actually in use when the card config
+  // (e.g. from a dashboard) overrides a field, so what's shown matches what's read.
+  _showResolvedSensors() {
+    const sr = this.shadowRoot;
+    const rows = [
+      ['load-forecast', 'haeo_load'], ['pv-forecast', 'haeo_solar'], ['grid-forecast', 'haeo_grid'], ['battery-forecast', 'haeo_battery'],
+      ['load-historical', 'past_load_power'], ['pv-historical', 'past_solar_power'], ['grid-historical', 'past_grid_power'], ['battery-historical', 'past_battery_power'],
+    ];
+    for (const [id, key] of rows) {
+      const el = sr.getElementById(id);
+      if (!el) continue;
+      let note = sr.getElementById(id + '-resolved');
+      const cfgEid = this._config['entity_' + key];
+      if (!cfgEid) { if (note) note.remove(); el.style.opacity = ''; el.title = ''; continue; }
+      if (!note) {
+        // Wrap input + note in one element so the form's grid columns stay intact
+        let wrap = el.parentElement;
+        if (!wrap || !wrap.classList.contains('resolved-wrap')) {
+          wrap = document.createElement('div'); wrap.className = 'resolved-wrap';
+          wrap.style.cssText = 'display:flex;flex-direction:column;min-width:0;';
+          el.insertAdjacentElement('beforebegin', wrap); wrap.appendChild(el);
+        }
+        note = document.createElement('div'); note.id = id + '-resolved';
+        note.style.cssText = 'font-size:10px;color:var(--secondary-text-color);margin-top:2px;word-break:break-all;';
+        wrap.appendChild(note);
+      }
+      const missing = this._hass && !this._hass.states[cfgEid];
+      note.textContent = '→ in use: ' + cfgEid + ' (from card config' + (missing ? ', not found in HA' : '') + ')';
+      el.style.opacity = '0.55';
+      el.title = 'The card config sets ' + cfgEid + ', which takes precedence over this field';
+    }
+  }
+
   // Check if an EV sensor entity exists in hass
   _evSensorExists(key) {
     const eid = this._eid(key);
@@ -2527,15 +2568,15 @@ class HaeoEventsCard extends HTMLElement {
     const _inv = (key) => loadEntityConfig[key]?.invert ? -1 : 1;
 
     // Build forecast maps using saved or default entities
-    const battMap     = buildMap(loadEntityConfig.battery.forecast || this._eid('haeo_battery'),             _inv('battery'));
-    const gridMap     = buildMap(loadEntityConfig.grid.forecast || this._eid('haeo_grid'),                   _inv('grid'));
-    const loadMap     = buildMap(loadEntityConfig.base.forecast || this._eid('haeo_load'),                   _inv('base'));
-    const deferLoadMap= buildMap(loadEntityConfig.deferrable?.forecast || this._eid('haeo_deferrable_load'), _inv('deferLoad'));
-    const solarMap    = buildMap(loadEntityConfig.pv.forecast || this._eid('haeo_solar'),                    _inv('pv'));
+    const battMap     = buildMap(this._fcEid(loadEntityConfig, 'battery', 'haeo_battery'),             _inv('battery'));
+    const gridMap     = buildMap(this._fcEid(loadEntityConfig, 'grid', 'haeo_grid'),                   _inv('grid'));
+    const loadMap     = buildMap(this._fcEid(loadEntityConfig, 'base', 'haeo_load'),                   _inv('base'));
+    const deferLoadMap= buildMap(this._fcEid(loadEntityConfig, 'deferrable', 'haeo_deferrable_load'), _inv('deferLoad'));
+    const solarMap    = buildMap(this._fcEid(loadEntityConfig, 'pv', 'haeo_solar'),                    _inv('pv'));
     const socMap      = buildMap(this._eid('haeo_soc'),            1);
-    const evPowerMap  = buildMap(loadEntityConfig.ev.forecast || this._eid('haeo_ev_power'),                 _inv('ev'));
+    const evPowerMap  = buildMap(this._fcEid(loadEntityConfig, 'ev', 'haeo_ev_power'),                 _inv('ev'));
     const evSocMap    = buildMap(this._eid('haeo_ev_soc'),       1);
-    const ev2PowerMap = buildMap(loadEntityConfig.ev2.forecast || this._eid('haeo_ev2_power'),               _inv('ev2'));
+    const ev2PowerMap = buildMap(this._fcEid(loadEntityConfig, 'ev2', 'haeo_ev2_power'),               _inv('ev2'));
     const ev2SocMap   = buildMap(this._eid('haeo_ev2_soc'),      1);
     const buyMap      = buildMap(this._eid('haeo_buy_price'),      1);
     const sellMap     = buildMap(this._eid('haeo_sell_price'),     1);
@@ -2543,7 +2584,7 @@ class HaeoEventsCard extends HTMLElement {
     // Build forecast maps for each configured deferrable load
     // Build deferrable loads map using entity-based config
     const deferLoadMaps = [];
-    const deferLoadForecastEntity = loadEntityConfig.deferrable?.forecast || this._eid('haeo_deferrable_load');
+    const deferLoadForecastEntity = this._fcEid(loadEntityConfig, 'deferrable', 'haeo_deferrable_load');
     if (deferLoadForecastEntity) {
       deferLoadMaps[0] = buildMap(deferLoadForecastEntity, 1);
     } else {
@@ -3873,6 +3914,7 @@ class HaeoEventsCard extends HTMLElement {
     this._populateLoadEntitiesForm();
     this._populateOptionalLoadsForm();
     this._populateEntitiesForm();
+    this._showResolvedSensors();
     
     // CRITICAL FIX: Delay color picker setup to ensure DOM elements exist
     requestAnimationFrame(() => {
