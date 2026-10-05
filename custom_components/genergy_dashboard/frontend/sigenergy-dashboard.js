@@ -2435,6 +2435,54 @@ class SigenergySettingsCard extends HTMLElement {
     }
   }
 
+  // Per-device "is this already inside Load Energy Today?" switch (Sankey double-count guard).
+  // Unset devices follow the pre-2.28.1 global home_includes_devices option (default on).
+  _inLoadRow(dev, cfg) {
+    const on = _genergyDeviceInLoad(cfg.features || {}, dev);
+    return `
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:${on ? '#aaa' : '#8892a4'};">🏠 Included in Load Energy Today</div>
+                  <div style="font-size:10px;color:#8892a4;margin-top:1px;">On: your load sensor already counts this device (usual for an inverter's house load), so the Sankey subtracts it from Home instead of counting it twice. Turn off if it is wired outside what the load sensor measures.</div>
+                  <div class="inload-warn" data-dev="${dev}" style="display:none;font-size:10px;color:#f39c12;margin-top:4px;"></div>
+                </div>
+                <div class="switch ${on ? 'on' : 'off'}" data-inload="${dev}" style="flex-shrink:0;margin-left:12px;"></div>
+              </div>`;
+  }
+
+  // Warn when a device used more energy on some day than the whole load sensor: then the
+  // load cannot include it. Only that direction can be detected from the numbers.
+  async _checkInLoad(el) {
+    const cfg = this._storeGet(), f = cfg.features || {}, e = cfg.entities || {};
+    const devs = _genergyDeviceEntities(f, e).filter(d => d.entity && _genergyDeviceInLoad(f, d.dev));
+    const warns = el.querySelectorAll('.inload-warn');
+    if (!this._hass || !e.load_energy_today || !devs.length || !warns.length) return;
+    const ids = [e.load_energy_today, ...devs.map(d => d.entity)], key = ids.join(',');
+    if (!this._inLoadCheck || this._inLoadCheck.key !== key || Date.now() - this._inLoadCheck.at > 3600000) {
+      this._inLoadCheck = { key, at: Date.now(), res: (async () => {
+        const end = new Date(); end.setHours(0, 0, 0, 0);
+        const stats = await this._hass.connection.sendMessagePromise({
+          type: 'recorder/statistics_during_period', start_time: new Date(end.getTime() - 7 * 86400000).toISOString(),
+          end_time: end.toISOString(), statistic_ids: ids, period: 'day', types: ['change'],
+        });
+        const day = (id) => { const k = _genergyKwhFactor(this._hass, id), o = {}; (stats[id] || []).forEach(p => { if (p.change != null) o[p.start] = p.change * k; }); return o; };
+        const load = day(e.load_energy_today), out = {};
+        for (const d of devs) {
+          const dv = day(d.entity);
+          const bad = Object.keys(dv).filter(t => load[t] != null && dv[t] >= 0.5 && dv[t] > load[t] + 0.1);
+          if (bad.length) out[d.dev] = bad.length;
+        }
+        return out;
+      })().catch(() => ({})) };
+    }
+    const res = await this._inLoadCheck.res;
+    warns.forEach(w => {
+      const n = res[w.dataset.dev];
+      w.style.display = n ? '' : 'none';
+      if (n) w.textContent = `⚠ On ${n} of the last 7 days this device used more energy than Load Energy Today in total, so your load sensor probably does not include it. Consider turning this off.`;
+    });
+  }
+
   _entityRow(label, key, entities) {
     const id = entities[key] || '';
     const state = this._getState(id);
@@ -2996,6 +3044,7 @@ class SigenergySettingsCard extends HTMLElement {
                 </div>
               ` : ''}
               <div class="toggle-desc" style="color:#8892a4;font-size:10px;">Daily EV charging energy (kWh). Click Detect to scan your HA Energy Dashboard — if a cumulative sensor is found, a daily utility meter will be auto-created.</div>
+              ${this._inLoadRow('ev', cfg)}
             </div>
           ` : ''}
         </div>
@@ -3031,6 +3080,7 @@ class SigenergySettingsCard extends HTMLElement {
                 </div>
               ` : ''}
               <div class="toggle-desc" style="color:#8892a4;font-size:10px;">Daily EV 2 charging energy (kWh). Set the daily energy sensor for EV 2 to show it in the Sankey.</div>
+              ${this._inLoadRow('ev2', cfg)}
             </div>
           ` : ''}
         </div>
@@ -3062,6 +3112,7 @@ class SigenergySettingsCard extends HTMLElement {
                 </div>
               ` : ''}
               <div class="toggle-desc" style="color:#8892a4;font-size:10px;">Daily heat pump energy (kWh). Click Detect to scan your HA Energy Dashboard — if a cumulative sensor is found, a daily utility meter will be auto-created.</div>
+              ${this._inLoadRow('hp', cfg)}
             </div>
           ` : ''}
         </div>
@@ -3075,16 +3126,6 @@ class SigenergySettingsCard extends HTMLElement {
           <div class="switch ${cfg.features?.show_losses_in_sankey ? 'on' : 'off'}" data-key="show_losses_in_sankey_toggle" style="flex-shrink:0;margin-left:12px;"></div>
         </div>
       </div>
-      ${(cfg.features?.show_hp_in_sankey || cfg.features?.show_ev_in_sankey || cfg.features?.show_ev2_in_sankey) ? `
-      <div class="section" style="border:1px solid #2d3451;border-radius:12px;padding:12px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <div>
-            <div style="font-size:12px;font-weight:600;color:${cfg.features?.home_includes_devices !== false ? '#aaa' : '#8892a4'};">🏠 Home Total Includes EV / Heat Pump</div>
-            <div style="font-size:10px;color:#8892a4;margin-top:1px;">On: your Load Energy Today already contains the EV and heat pump (usual when it is the inverter's house load), so the Sankey subtracts them from Home instead of counting them twice. Turn off only if your load sensor excludes them.</div>
-          </div>
-          <div class="switch ${cfg.features?.home_includes_devices !== false ? 'on' : 'off'}" data-key="home_includes_devices_toggle" style="flex-shrink:0;margin-left:12px;"></div>
-        </div>
-      </div>` : ''}
       <div class="section" style="border:1px solid ${cfg.features?.solar_forecast ? '#FFA500' : '#2d3451'};border-radius:12px;padding:12px;transition:all 0.3s;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${cfg.features?.solar_forecast ? '12' : '0'}px;">
           <div>
@@ -3398,18 +3439,16 @@ class SigenergySettingsCard extends HTMLElement {
       });
     }
 
-    // Home-includes-devices toggle handler
-    const homeDevToggle = el.querySelector('[data-key="home_includes_devices_toggle"]');
-    if (homeDevToggle) {
-      homeDevToggle.addEventListener('click', () => {
-        const cfg2 = this._storeGet();
-        cfg2.features.home_includes_devices = cfg2.features.home_includes_devices === false;
-        this._storeSave(cfg2);
-        if (this._hass) {
-          this._buildDashboard().then(() => this._render()).catch(() => this._render());
-        } else { this._render(); }
-      });
-    }
+    // Per-device "Included in Load Energy Today" switches
+    el.querySelectorAll('[data-inload]').forEach(sw => sw.addEventListener('click', () => {
+      const cfg2 = this._storeGet(), dev = sw.dataset.inload;
+      cfg2.features[dev + '_in_load'] = !_genergyDeviceInLoad(cfg2.features, dev);
+      this._storeSave(cfg2);
+      if (this._hass) {
+        this._buildDashboard().then(() => this._render()).catch(() => this._render());
+      } else { this._render(); }
+    }));
+    this._checkInLoad(el);
 
     // Losses in Sankey toggle handler
     const lossesSankeyToggle = el.querySelector('[data-key="show_losses_in_sankey_toggle"]');
@@ -7717,11 +7756,10 @@ return __pts;`;
       // The house load usually already contains the EV chargers and heat pump (it is the
       // inverter's balance of everything behind the meter). Shown as separate nodes they
       // would be counted twice, so Home becomes the remainder, like HA's Energy dashboard.
-      if (f.home_includes_devices !== false) {
-        const _devIds = [..._sankeyNodes].filter(n => ['ev', 'ev2', 'hp'].includes(n.id)).map(n => n.entity_id)
-          .filter(id => id && id !== e.load_energy_today);
-        if (_devIds.length) [..._sankeyNodes, ..._panelNodes].forEach(n => { if (n.id === 'load') n.subtract_entities = _devIds; });
-      }
+      // Each device has its own switch: one may sit on a circuit the load sensor does not see.
+      const _devIds = [..._sankeyNodes].filter(n => ['ev', 'ev2', 'hp'].includes(n.id) && _genergyDeviceInLoad(f, n.id))
+        .map(n => n.entity_id).filter(id => id && id !== e.load_energy_today);
+      if (_devIds.length) [..._sankeyNodes, ..._panelNodes].forEach(n => { if (n.id === 'load') n.subtract_entities = _devIds; });
 
       // A separate 3rd-party PV source feeds every destination solar can feed
       if (_tpSeparate) [..._sankeyNodes, ..._panelNodes].forEach(n => {
@@ -8325,6 +8363,23 @@ const _GENERGY_INTERVAL_TTL = 5 * 60 * 1000;
 
 function _genergyLocalDateStr(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Is this EV / heat pump already counted inside Load Energy Today? Per device; unset devices
+// follow the older global home_includes_devices option, which defaults to on.
+function _genergyDeviceInLoad(features, dev) {
+  const v = features[dev + '_in_load'];
+  return typeof v === 'boolean' ? v : features.home_includes_devices !== false;
+}
+
+// The daily energy entity each Sankey device node uses (daily meter for cumulative sensors)
+function _genergyDeviceEntities(f, e) {
+  const pick = (cum, meter, raw) => (cum && meter) ? meter : raw;
+  return [
+    f.show_ev_in_sankey && { dev: 'ev', entity: pick(f.ev_energy_is_cumulative, e.ev_energy_daily_meter, e.ev_energy_today) },
+    f.show_ev2_in_sankey && { dev: 'ev2', entity: pick(f.ev2_energy_is_cumulative, e.ev2_energy_daily_meter, e.ev2_energy_today) },
+    f.show_hp_in_sankey && { dev: 'hp', entity: pick(f.hp_energy_is_cumulative, e.hp_energy_daily_meter, e.heat_pump_energy_today) },
+  ].filter(Boolean);
 }
 
 function _genergyKwhFactor(hass, eid) {

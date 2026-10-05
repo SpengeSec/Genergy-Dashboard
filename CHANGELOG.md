@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [Unreleased]
+
+### Changed
+- **"Included in Load Energy Today" is now a switch per device** -- The single **Home Total Includes EV / Heat Pump** option is replaced by a switch in each EV, EV 2 and heat pump Sankey section (Settings -> Entities), so a device on a circuit your load sensor does not measure can be excluded on its own. Existing settings carry over. If a device used more energy on some day of the last week than the whole load sensor, the switch shows a warning that it is probably not included.
+
 ## [2.28.0] - 2026-10-05
 
 Post-2.27.0 review: chart gap at "Now", EV and heat pump no longer counted twice in the Sankey, Sankey node taps, and phone / tablet layout fixes.
