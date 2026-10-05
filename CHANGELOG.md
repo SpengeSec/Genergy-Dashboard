@@ -2,7 +2,9 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
-## [Unreleased]
+## [2.28.0] - 2026-10-05
+
+Post-2.27.0 review: chart gap at "Now", EV and heat pump no longer counted twice in the Sankey, Sankey node taps, and phone / tablet layout fixes.
 
 ### Fixed
 - **Gap between the actual and forecast lines when zoomed in** -- EMS plans round their first point to the next slot, so the dashed forecast started up to 15 minutes after the actual lines ended, and the actual price line stopped at the start of the current hour. Forecasts now connect at "Now" and actual series run up to "Now".
