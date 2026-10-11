@@ -2,7 +2,9 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
-## [Unreleased]
+## [2.29.0] - 2026-10-11
+
+Battery SoC on the energy chart without an EMS, chart fixes around the EMS provider and price overlay, a Sankey fix, and a per-device "Included in Load Energy Today" switch. After updating, click **Apply Settings to Dashboard** once (Settings) so the chart is rebuilt.
 
 ### Fixed
 - **Sankey drew a Battery node with no flow into it** -- Energy counters that step in 0.1 kWh could leave the destinations needing slightly more than the sources supplied, and the whole shortfall landed on battery charge or export. It is now spread over all destinations in proportion to their totals.
