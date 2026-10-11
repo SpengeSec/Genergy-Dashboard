@@ -6,6 +6,11 @@ All notable changes to the Genergy Dashboard are documented here.
 
 ### Fixed
 - **Sankey drew a Battery node with no flow into it** -- Energy counters that step in 0.1 kWh could leave the destinations needing slightly more than the sources supplied, and the whole shortfall landed on battery charge or export. It is now spread over all destinations in proportion to their totals.
+- **Battery SoC missing from the energy chart without an EMS** -- The actual SoC line was only drawn when EMHASS forecasts or HAEO were on. It now shows whenever a Battery SoC entity is set (detailed chart mode); only "SOC (plan)" still needs an EMS.
+- **EMHASS forecast lines missing after auto-detect** -- Auto-detect set the EMS provider but not the older EMHASS switch the chart still read, so the title said "Energy + EMHASS Forecast" with no forecast lines (and HAEO users who had used EMHASS before got both). The chart now follows the EMS provider, and auto-detect keeps both in sync.
+- **Older configs showed EMS "None" while EMHASS was on** -- Configs saved before the EMS provider selector now pick EMHASS correctly.
+- **"Price on Charts" switch had no effect** -- Turning it off now hides the price lines and price axis.
+- **Forecast.Solar users got an empty 48-hour forecast chart** -- Only Solcast provides chart data, so Forecast.Solar alone no longer switches the chart to the forecast layout.
 - **Solar Forecast legend showed 0 kW** -- The legend showed the forecast's last point (end of day) instead of a current value, so it is no longer shown there.
 
 ### Changed

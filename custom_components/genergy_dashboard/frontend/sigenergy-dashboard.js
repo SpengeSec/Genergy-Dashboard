@@ -486,7 +486,7 @@ class SigConfigStore {
     if (overrides._version !== undefined) result._version = overrides._version;
     if (overrides._saved !== undefined) result._saved = overrides._saved;
     // Backward compat: migrate old boolean emhass flag to ems_provider
-    if (result.features && result.features.ems_provider === undefined) {
+    if (result.features && (overrides.features || {}).ems_provider === undefined) {
       result.features.ems_provider = result.features.emhass === true ? 'emhass' : 'none';
     }
     return result;
@@ -4513,6 +4513,7 @@ class SigenergySettingsCard extends HTMLElement {
               if (haeoExpPrice.length > 0 && !cfg2.entities.haeo_export_price) { cfg2.entities.haeo_export_price = haeoExpPrice[0]; found.push('HAEO export price: ' + haeoExpPrice[0]); }
               // Auto-enable HAEO as EMS provider
               cfg2.features.ems_provider = 'haeo';
+              cfg2.features.emhass = false;
               cfg2.features.haeo_forecasts = true;
               found.push('✓ HAEO detected — EMS provider set to HAEO');
             }
@@ -5040,7 +5041,7 @@ class SigenergySettingsCard extends HTMLElement {
       ], { domainFilter: 'number' });
       this._assignCandidate('haeo_export_price', expPriceC, cfg2, found);
 
-      cfg2.features.ems_provider = 'haeo'; cfg2.features.haeo_forecasts = true;
+      cfg2.features.ems_provider = 'haeo'; cfg2.features.emhass = false; cfg2.features.haeo_forecasts = true;
       found.push('✓ HAEO detected');
     }
     // EMHASS detection fallback — require sensor.emhass_ prefix AND confirmatory evidence
@@ -5066,6 +5067,7 @@ class SigenergySettingsCard extends HTMLElement {
         this._assignCandidate('emhass_mode', emhassC, cfg2, found);
         if (cfg2.entities.emhass_mode) {
           cfg2.features.ems_provider = 'emhass';
+          cfg2.features.emhass = true;
         }
       }
     }
@@ -5079,6 +5081,7 @@ class SigenergySettingsCard extends HTMLElement {
         if (allKeys.includes('sensor.nodered_buyprice')) { cfg2.entities.em_buy_price = 'sensor.nodered_buyprice'; found.push('EM buy price: sensor.nodered_buyprice'); }
         if (allKeys.includes('sensor.nodered_sellprice')) { cfg2.entities.em_sell_price = 'sensor.nodered_sellprice'; found.push('EM sell price: sensor.nodered_sellprice'); }
         cfg2.features.ems_provider = 'energy_manager';
+        cfg2.features.emhass = false;
         found.push('✓ Energy Manager detected');
       }
     }
@@ -6226,6 +6229,8 @@ class SigenergySettingsCard extends HTMLElement {
   _buildApexSeries(e, features, cfg) {
     const series = [];
     const chartMode = cfg.display?.chart_mode || 'detailed';
+    const emsProvider = features.ems_provider || (features.emhass === true ? 'emhass' : 'none');
+    const showPrice = cfg.pricing?.show_price_overlay !== false;
     // Unit-aware power transform: only divide by 1000 if sensor reports in W (not kW)
     // Also rejects energy units (Wh/kWh/MWh) to prevent cumulative counters from breaking the axis
     const powerTransform = "const u = (entity?.attributes?.unit_of_measurement || '').trim(); if (/wh$/i.test(u)) return null; return u === 'MW' ? x * 1000 : u === 'kW' ? x : x / 1000;";
@@ -6297,7 +6302,7 @@ class SigenergySettingsCard extends HTMLElement {
     });
 
     // EMHASS Forecast overlays (conditional) — power forecasts shown in both modes, SOC only in detailed
-    if (features.emhass && features.emhass_forecasts && entityOk(e.mpc_pv)) {
+    if (emsProvider === 'emhass' && features.emhass_forecasts && entityOk(e.mpc_pv)) {
       // PV forecast
       series.push({
         entity: e.mpc_pv, name: 'Solar (plan)', color: '#FFF59D',
@@ -6351,21 +6356,9 @@ class SigenergySettingsCard extends HTMLElement {
           yaxis_id: 'soc', float_precision: 1
         });
       }
-      // Actual SOC — detailed only
-      if (chartMode === 'detailed' && entityOk(e.battery_soc)) {
-        series.push({
-          entity: e.battery_soc, name: 'SOC', color: '#2196F3',
-          type: 'area', opacity: 0.2, stroke_width: 2.5,
-          extend_to: false, unit: ' %',
-          group_by: { func: 'last', duration: '1min' },
-          show: { in_header: true, legend_value: true },
-          yaxis_id: 'soc', float_precision: 1
-        });
-      }
     }
 
     // HAEO Forecast overlays (conditional) — power forecasts in both modes, SOC only in detailed
-    const emsProvider = features.ems_provider || (features.emhass === true ? 'emhass' : 'none');
     if (emsProvider === 'haeo' && features.haeo_forecasts) {
       // HAEO Battery charge forecast
       if (e.haeo_battery_charge) {
@@ -6433,17 +6426,6 @@ class SigenergySettingsCard extends HTMLElement {
           yaxis_id: 'soc', float_precision: 1
         });
       }
-      // Actual SOC — detailed only
-      if (chartMode === 'detailed' && e.battery_soc) {
-        series.push({
-          entity: e.battery_soc, name: 'SOC', color: '#2196F3',
-          type: 'area', opacity: 0.2, stroke_width: 2.5,
-          extend_to: false, unit: ' %',
-          group_by: { func: 'last', duration: '1min' },
-          show: { in_header: true, legend_value: true },
-          yaxis_id: 'soc', float_precision: 1
-        });
-      }
       // HAEO optimization cost in header
       if (features.financial_tracking && e.haeo_optim_cost) {
         series.push({
@@ -6454,8 +6436,20 @@ class SigenergySettingsCard extends HTMLElement {
       }
     }
 
+    // Actual SOC — independent of EMS provider (works with EMHASS, HAEO, or none), detailed only
+    if (chartMode === 'detailed' && entityOk(e.battery_soc)) {
+      series.push({
+        entity: e.battery_soc, name: 'SOC', color: '#2196F3',
+        type: 'area', opacity: 0.2, stroke_width: 2.5,
+        extend_to: false, unit: ' %',
+        group_by: { func: 'last', duration: '1min' },
+        show: { in_header: true, legend_value: true },
+        yaxis_id: 'soc', float_precision: 1
+      });
+    }
+
     // Price overlays — independent of EMS provider (works with EMHASS, HAEO, or standalone)
-    if (chartMode === 'detailed') {
+    if (chartMode === 'detailed' && showPrice) {
       const priceUnit = ' ' + (cfg.pricing?.currency || '€') + '/kWh';
       if (e.buy_price) {
         // Universal data_generator: tries EMHASS attributes, then Amber/generic forecast, then returns empty for state-tracked fallback
@@ -6582,7 +6576,7 @@ return forecast.map(function(d) {
     }
 
     // Deferrable loads (conditional)
-    if (features.emhass && features.deferrable_loads) {
+    if (emsProvider === 'emhass' && features.deferrable_loads) {
       if (e.mpc_deferrable0) {
         series.push({
           entity: e.mpc_deferrable0, name: (e.deferrable0_label || 'Deferrable 0') + ' (plan)',
@@ -6617,7 +6611,7 @@ return forecast.map(function(d) {
     }
 
     // EMHASS financial header (in chart header)
-    if (features.emhass && features.financial_tracking) {
+    if (emsProvider === 'emhass' && features.financial_tracking) {
       if (e.emhass_net_cost_today) {
         series.push({
           entity: e.emhass_net_cost_today, name: 'Cost Today', unit: ' ' + (cfg.pricing?.currency || '€'),
@@ -6672,14 +6666,16 @@ return __pts;`;
       }
     ];
     if (chartMode === 'simplified') return yaxis;
-    if (features.emhass && features.emhass_forecasts) {
+    const showPrice = cfg?.pricing?.show_price_overlay !== false;
+    const emsP = features.ems_provider || (features.emhass === true ? 'emhass' : 'none');
+    if (emsP === 'emhass' && features.emhass_forecasts) {
       yaxis.push({
         id: 'soc', min: 0, max: 100, decimals: 0, show: false,
         apex_config: {
           title: { text: 'SOC (%)' }, opposite: true
         }
       });
-      yaxis.push({
+      if (showPrice) yaxis.push({
         id: 'price', min: 'auto', max: 'auto', decimals: 2,
         opposite: true,
         apex_config: {
@@ -6689,7 +6685,6 @@ return __pts;`;
         }
       });
     }
-    const emsP = features.ems_provider || (features.emhass === true ? 'emhass' : 'none');
     if (emsP === 'haeo' && features.haeo_forecasts) {
       // Add SOC and price axes for HAEO (only if not already added by EMHASS block above)
       if (!yaxis.find(y => y.id === 'soc')) {
@@ -6698,7 +6693,7 @@ return __pts;`;
           apex_config: { title: { text: 'SOC (%)' }, opposite: true }
         });
       }
-      if (!yaxis.find(y => y.id === 'price')) {
+      if (showPrice && !yaxis.find(y => y.id === 'price')) {
         yaxis.push({
           id: 'price', min: 'auto', max: 'auto', decimals: 2,
           opposite: true,
@@ -6712,7 +6707,14 @@ return __pts;`;
     }
     // Always add price axis if price entities are configured (standalone price without forecasts)
     const ent = cfg?.entities || {};
-    if (!yaxis.find(y => y.id === 'price') && (ent.buy_price || ent.sell_price || ent.current_import_price || ent.current_export_price)) {
+    // Always add SOC axis if a battery SoC entity is configured (actual SOC is shown without an EMS)
+    if (!yaxis.find(y => y.id === 'soc') && ent.battery_soc) {
+      yaxis.push({
+        id: 'soc', min: 0, max: 100, decimals: 0, show: false,
+        apex_config: { title: { text: 'SOC (%)' }, opposite: true }
+      });
+    }
+    if (showPrice && !yaxis.find(y => y.id === 'price') && (ent.buy_price || ent.sell_price || ent.current_import_price || ent.current_export_price)) {
       yaxis.push({
         id: 'price', min: 'auto', max: 'auto', decimals: 2,
         opposite: true,
@@ -6773,7 +6775,7 @@ return __pts;`;
       const hasEmhassForecasts = emsP === 'emhass' && f.emhass_forecasts;
       const hasHaeoForecasts = emsP === 'haeo' && f.haeo_forecasts;
       const hasForecasts = hasEmhassForecasts || hasHaeoForecasts;
-      const hasSolarForecast = f.solar_forecast && (e.solcast_today || e.solcast_remaining || e.forecast_solar_today);
+      const hasSolarForecast = f.solar_forecast && (e.solcast_today || e.solcast_remaining);
       const hasPriceOverlay = (e.buy_price || e.sell_price) && cfg.pricing?.show_price_overlay;
       const _chartMode = cfg.display?.chart_mode || 'detailed';
       const hasForecastData = hasForecasts || hasSolarForecast;
