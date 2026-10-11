@@ -4,6 +4,10 @@ All notable changes to the Genergy Dashboard are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Sankey drew a Battery node with no flow into it** -- Energy counters that step in 0.1 kWh could leave the destinations needing slightly more than the sources supplied, and the whole shortfall landed on battery charge or export. It is now spread over all destinations in proportion to their totals.
+- **Solar Forecast legend showed 0 kW** -- The legend showed the forecast's last point (end of day) instead of a current value, so it is no longer shown there.
+
 ### Changed
 - **"Included in Load Energy Today" is now a switch per device** -- The single **Home Total Includes EV / Heat Pump** option is replaced by a switch in each EV, EV 2 and heat pump Sankey section (Settings -> Entities), so a device on a circuit your load sensor does not measure can be excluded on its own. Existing settings carry over. If a device used more energy on some day of the last week than the whole load sensor, the switch shows a warning that it is probably not included.
 

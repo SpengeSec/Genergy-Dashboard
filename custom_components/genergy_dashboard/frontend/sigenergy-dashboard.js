@@ -6545,7 +6545,8 @@ return [];`;
           type: 'area', opacity: 0.12, curve: 'smooth',
           extend_to: false, unit: ' kW', float_precision: 1,
           stroke_width: 1.5, stroke_dash: 5,
-          show: { in_header: false, legend_value: true },
+          // apexcharts-card legend_value shows the series' LAST point (end of day = 0 kW), not the current value
+          show: { in_header: false, legend_value: false },
           data_generator: `var forecast = entity.attributes.detailedForecast || entity.attributes.detailed_forecast || [];
 if (!forecast || !forecast.length) return [];
 return forecast.map(function(d) {
@@ -8483,6 +8484,26 @@ function _genergyIntervalMatrix(hass, nodes, sources, dests, dateStr, getKwh, on
     if (give <= 0) continue;
     fs.forEach(x => { const v = give * residual[x] / avail; addM(x, d, v); residual[x] -= v; });
     residual[d] -= give;
+  }
+  // 0.1 kWh counter steps can leave the destinations needing more than the sources supplied.
+  // Consumers are fed first, so the whole shortfall would land on battery charge / export,
+  // drawing e.g. a 0.10 kWh Battery node with no flow into it. Spread the shortfall over all
+  // destinations in proportion to their totals instead, moving energy from consumer flows.
+  const destIds = allNodes.filter(n => n.type === 'dest').map(n => n.entity_id);
+  const destTotal = (d) => { const n = allNodes.find(x => x.entity_id === d); return getKwh(n.entity_id, n.add_entities, n.subtract_entities); };
+  const destSum = destIds.reduce((a, d) => a + destTotal(d), 0);
+  const shortfall = destIds.reduce((a, d) => a + (residual[d] || 0), 0);
+  if (shortfall > 1e-6 && destSum > 0) {
+    for (const d of [r.batteryCharge, r.gridExport].filter(Boolean)) {
+      const want = (residual[d] || 0) - shortfall * destTotal(d) / destSum;
+      if (want <= 1e-9) continue;
+      const pool = [];
+      feeders(d).filter(Boolean).forEach(s => (r.consumers || []).forEach(c => { const v = matrix[s]?.[c] || 0; if (v > 0) pool.push([s, c, v]); }));
+      const poolSum = pool.reduce((a, [, , v]) => a + v, 0), take = Math.min(want, poolSum);
+      if (take <= 1e-9) continue;
+      pool.forEach(([s, c, v]) => { const x = take * v / poolSum; matrix[s][c] -= x; addM(s, d, x); residual[c] = (residual[c] || 0) + x; });
+      residual[d] -= take;
+    }
   }
   if (r.losses) [...pv, r.batteryDischarge, r.gridImport].forEach(x => addM(x, r.losses, residual[x] || 0));
   const dstIds = new Set(dests.map(n => n.entity_id));
