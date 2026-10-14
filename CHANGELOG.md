@@ -2,6 +2,13 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.29.1] - 2026-10-14
+
+Price lines on the energy chart now follow 15-minute prices. After updating, click **Apply Settings to Dashboard** once (Settings) so the chart is rebuilt.
+
+### Fixed
+- **Price line jumped at "Now"** -- The actual import and export price lines were averaged per hour (30 minutes when the plan and actual price come from the same sensor). With 15-minute prices, a rising hour was drawn as one flat average, so the line jumped to the plan's current price at "Now" (for example 0.40 to 0.43). The lines now use 15-minute steps and meet the plan line. Hourly prices look the same as before, since each hour simply repeats its price four times.
+
 ## [2.29.0] - 2026-10-11
 
 Battery SoC on the energy chart without an EMS, chart fixes around the EMS provider and price overlay, a Sankey fix, and a per-device "Included in Load Energy Today" switch. After updating, click **Apply Settings to Dashboard** once (Settings) so the chart is rebuilt.

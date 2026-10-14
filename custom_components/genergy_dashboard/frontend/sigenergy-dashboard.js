@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.29.0 — Bundled Distribution
+ * Genergy Dashboard v2.29.1 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -6472,7 +6472,7 @@ return [];`;
             entity: e.buy_price, name: 'Import Price', color: '#FFB300',
             type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
             unit: priceUnit, float_precision: 2,
-            group_by: { func: 'avg', duration: '30min' },
+            group_by: { func: 'avg', duration: '15min' },
             show: { in_header: false, legend_value: true },
             yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
           });
@@ -6498,7 +6498,7 @@ return [];`;
             entity: e.sell_price, name: 'Export Price', color: '#43A047',
             type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
             unit: priceUnit, float_precision: 2,
-            group_by: { func: 'avg', duration: '30min' },
+            group_by: { func: 'avg', duration: '15min' },
             show: { in_header: false, legend_value: true },
             yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
           });
@@ -6510,7 +6510,7 @@ return [];`;
           entity: e.current_import_price, name: 'Import Price', color: '#FFB300',
           type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
           unit: priceUnit, float_precision: 2,
-          group_by: { func: 'avg', duration: '1h' },
+          group_by: { func: 'avg', duration: '15min' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
         });
@@ -6520,7 +6520,7 @@ return [];`;
           entity: e.current_export_price, name: 'Export Price', color: '#43A047',
           type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
           unit: priceUnit, float_precision: 2,
-          group_by: { func: 'avg', duration: '1h' },
+          group_by: { func: 'avg', duration: '15min' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
         });
@@ -11828,7 +11828,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.29.0 ',
+  '%c GENERGY-DASHBOARD %c v2.29.1 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
