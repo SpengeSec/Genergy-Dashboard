@@ -2,6 +2,11 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.29.2] - 2026-10-15
+
+### Fixed
+- **Error in the log after installing or reloading, and no "Missing HACS Cards" notice** ([#54](https://github.com/SpengeSec/Genergy-Dashboard/issues/54)) -- When the integration was added or reloaded while Home Assistant was already running, the check for missing HACS cards was started from a background thread. Current Home Assistant versions block that, logging "calls hass.async_create_task from a thread other than the event loop", so the check never ran. New installs therefore got no notification about missing cards, and those cards showed "Configuration error" on the dashboard. The check now runs correctly and is cancelled if the integration is unloaded first.
+
 ## [2.29.1] - 2026-10-14
 
 Price lines on the energy chart now follow 15-minute prices. After updating, click **Apply Settings to Dashboard** once (Settings) so the chart is rebuilt.

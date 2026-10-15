@@ -294,13 +294,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Check for missing HACS frontend prerequisites after HA is fully started
     # (Lovelace resources aren't loaded yet during async_setup_entry)
+    # Must stay a coroutine function: HA runs a plain callable (e.g. a lambda) in an
+    # executor thread, where hass.async_create_task is not allowed (issue #54).
     async def _delayed_prereq_check(_event=None) -> None:
         await _check_prerequisites(hass)
 
     if hass.is_running:
-        # HA already started (e.g. config entry reloaded) — check after short delay
+        # HA already started (fresh install or config entry reloaded) — check after short delay
         from homeassistant.helpers.event import async_call_later
-        async_call_later(hass, 5, lambda _now: hass.async_create_task(_delayed_prereq_check()))
+        entry.async_on_unload(async_call_later(hass, 5, _delayed_prereq_check))
     else:
         from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _delayed_prereq_check)
