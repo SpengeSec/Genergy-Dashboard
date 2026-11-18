@@ -1753,13 +1753,15 @@ if (!customElements.get('sigenergy-forecast-modal-button')) {
 // Battery Value card: what the energy stored in the battery is worth
 // Quantity = live SoC × capacity (optionally only above a reserve SoC).
 // Price per kWh, by pricing.battery_value_mode:
-//   auto    weighted-average cost of the energy that went in, from hourly recorder
-//           statistics over the last 7 days: each hour's battery charge is split into
-//           grid and solar parts with the same allocator as the Sankey; grid kWh cost that
-//           hour's import price, solar kWh cost that hour's export price (the feed-in you
-//           gave up) or nothing (battery_value_solar 'free'). Discharge removes energy at
-//           the running average; the running total is clamped to the stored energy each
-//           hour (hourly mean SoC), so losses and old charges fade out.
+//   auto    average cost of the energy that went in, from the last 7 days of hourly
+//           recorder statistics. Per hour, solar left after the house charges the battery
+//           first; the rest of the charge came from the grid. Grid kWh cost that hour's
+//           import price, solar kWh that hour's export price (the feed-in given up) or
+//           nothing. Discharge removes energy at the running average, and the running
+//           total is held to the stored energy (hourly mean SoC). Every input except the
+//           battery charge counter and an import price is optional; a missing one only
+//           makes the split rougher (see _genergyBvInputs), and when automatic can't run
+//           it falls back to the current import price and says why.
 //   import  current import price (what buying the same energy now would cost)
 //   export  current export price (what selling it now would earn)
 //   manual  fixed price (battery_value_fixed)
@@ -1769,6 +1771,10 @@ if (!customElements.get('sigenergy-forecast-modal-button')) {
 const _GENERGY_BV_DAYS = 7;
 const _GENERGY_BV_TTL = 10 * 60 * 1000;
 const _genergyBvCache = {};
+// Where the import / export price can come from, in order (same entities the chart and
+// EMS cards use; HAEO and Energy Manager last since those are often forecast sensors)
+const _GENERGY_BV_IMPORT_KEYS = ['current_import_price', 'buy_price', 'nordpool', 'haeo_import_price', 'em_buy_price'];
+const _GENERGY_BV_EXPORT_KEYS = ['current_export_price', 'sell_price', 'haeo_export_price', 'em_sell_price'];
 
 function _genergyBvNum(hass, eid) {
   const st = eid && hass?.states?.[eid];
@@ -1777,12 +1783,16 @@ function _genergyBvNum(hass, eid) {
   return isFinite(v) ? v : null;
 }
 
-// Price units → currency per kWh (€/MWh, c/kWh, ct/kWh, p/kWh)
-function _genergyPriceFactor(hass, eid) {
-  const u = String(hass?.states?.[eid]?.attributes?.unit_of_measurement || '').toLowerCase();
-  if (/\/\s*mwh/.test(u)) return 0.001;
-  if (/^(c|ct|cent|cents|p|pence)\s*\/\s*kwh/.test(u) || /^(c|ct|p)\b/.test(u)) return 0.01;
+// Price unit → factor to currency per kWh (€/MWh, c/kWh, ct/kWh, p/kWh, öre/kWh, øre/kWh)
+function _genergyPriceFactorFromUnit(unit) {
+  const u = String(unit || '').trim().toLowerCase();
+  if (/\/\s*mwh$/.test(u)) return 0.001;
+  if (/^(c|ct|cts|cent|cents|p|pence|öre|ore|øre|rp|gr)\s*\/\s*kwh$/.test(u)) return 0.01;
   return 1;
+}
+
+function _genergyPriceFactor(hass, eid) {
+  return _genergyPriceFactorFromUnit(hass?.states?.[eid]?.attributes?.unit_of_measurement);
 }
 
 function _genergyPriceNow(hass, eid) {
@@ -1790,42 +1800,85 @@ function _genergyPriceNow(hass, eid) {
   return v == null ? null : v * _genergyPriceFactor(hass, eid);
 }
 
-// Battery capacity in kWh: the manual number wins, else the capacity entity (Wh/kWh/MWh)
+// Battery capacity in kWh, resolved like the house card's runtime estimate: Manual
+// Capacity (kWh) first, else the Battery Capacity entity (Wh / kWh / MWh, Ah at 51.2 V)
 function _genergyBatteryKwh(hass, e) {
   const manual = parseFloat(e.battery_capacity_kwh);
   if (manual > 0) return manual;
   const eid = e.battery_capacity;
   const v = _genergyBvNum(hass, eid);
   if (v == null || v <= 0) return null;
-  const u = String(hass.states[eid].attributes?.unit_of_measurement || 'kWh');
-  if (!/wh$/i.test(u)) return null;   // Ah or unitless: can't turn into energy
-  return v * _genergyKwhFactor(hass, eid);
+  const u = String(hass.states[eid].attributes?.unit_of_measurement || '').trim();
+  if (u === 'Ah') return v * 51.2 / 1000;
+  if (u === 'Wh') return v / 1000;
+  if (u === 'MWh') return v * 1000;
+  return v;   // kWh or no unit
+}
+
+function _genergyBvFirst(e, keys) {
+  for (const k of keys) if (e[k]) return { key: k, eid: e[k] };
+  return null;
 }
 
 function _genergyBvEntities(cfg) {
   const e = cfg.entities || {}, f = cfg.features || {};
-  const gridI = e.grid_import_today ? [e.grid_import_today]
-    : (f.dual_tariff ? [e.grid_import_high_tariff, e.grid_import_low_tariff].filter(Boolean) : []);
-  const gridE = e.grid_export_today ? [e.grid_export_today]
-    : (f.dual_tariff ? [e.grid_export_high_tariff, e.grid_export_low_tariff].filter(Boolean) : []);
   // Same inputs as the Sankey: 3rd-party PV is solar too; an EV / heat pump not already
   // inside Load Energy Today is extra consumption
   const solar = [e.solar_energy_today, e.third_party_pv_energy_today].filter(Boolean);
   const load = [e.load_energy_today, ..._genergyDeviceEntities(f, e)
     .filter(d => d.entity && !_genergyDeviceInLoad(f, d.dev)).map(d => d.entity)].filter(Boolean);
+  const imp = _genergyBvFirst(e, _GENERGY_BV_IMPORT_KEYS), exp = _genergyBvFirst(e, _GENERGY_BV_EXPORT_KEYS);
   return {
-    soc: e.battery_soc, charge: e.battery_charge_today, discharge: e.battery_discharge_today,
-    solar, load, gridI, gridE,
-    importPrice: e.current_import_price || e.buy_price,
-    exportPrice: e.current_export_price || e.sell_price,
+    soc: e.battery_soc || '', charge: e.battery_charge_today || '', discharge: e.battery_discharge_today || '',
+    solar, load,
+    importPrice: imp?.eid || '', importKey: imp?.key || '',
+    exportPrice: exp?.eid || '', exportKey: exp?.key || '',
   };
 }
 
-// Pure: replay hourly statistics → { avg, gridShare, solarShare, hours }.
-// `hours`: [{ t, solar, charge, discharge, gridI, gridE, load, pImp, pExp, storedKwh }]
+// The automatic mode's inputs with their state, for the card and the settings view.
+// `checked` (a finished statistics fetch: { change: Set, mean: Set }) replaces the
+// state_class hint once available. status: ok | missing | no_history | unavailable.
+function _genergyBvInputs(hass, cfg, checked) {
+  const ids = _genergyBvEntities(cfg);
+  const solarFree = cfg.pricing?.battery_value_solar === 'free';
+  const st = (eid) => hass?.states?.[eid];
+  const status = (eids, kind) => {
+    if (!eids.length) return 'missing';
+    if (eids.some(id => !st(id))) return 'unavailable';
+    const ok = (id) => checked
+      ? (kind === 'energy' ? checked.change.has(id) : checked.mean.has(id))
+      : (kind === 'energy' ? ['total', 'total_increasing'].includes(st(id).attributes?.state_class) : st(id).attributes?.state_class === 'measurement');
+    return eids.every(ok) ? 'ok' : 'no_history';
+  };
+  const row = (id, label, eids, kind, required, ifMissing, ifNoHistory) => {
+    const s = status(eids, kind);
+    return { id, label, entities: eids, kind, required, status: s, verified: !!checked, effect: s === 'ok' ? '' : (s === 'no_history' ? ifNoHistory : ifMissing) };
+  };
+  const energyHint = 'has no energy statistics (needs state_class total or total_increasing)';
+  return [
+    row('charge', 'Battery charge energy', [ids.charge].filter(Boolean), 'energy', true,
+      'Required: without it the card uses the current import price', energyHint + ': the card uses the current import price'),
+    row('import', 'Import price', [ids.importPrice].filter(Boolean), 'price', true,
+      'Required: set an import price entity in Settings → Entities, or pick Fixed price above', 'no price history: its current value is used for every hour'),
+    row('solar', 'Solar energy', ids.solar, 'energy', false,
+      'All battery charge counts as grid charge', energyHint + ': all battery charge counts as grid charge'),
+    row('load', 'Home load energy', ids.load, 'energy', false,
+      'Solar is assumed to charge the battery before the house, which overstates the solar share', energyHint + ': solar is assumed to charge the battery before the house'),
+    ...(solarFree ? [] : [row('export', 'Export price', [ids.exportPrice].filter(Boolean), 'price', false,
+      'Solar charge counts as free', 'no price history: its current value is used for every hour')]),
+    row('soc', 'Battery SoC history', [ids.soc].filter(Boolean), 'price', false,
+      'The average is not held to what is stored', 'no SoC statistics: the average is not held to what is stored'),
+    row('discharge', 'Battery discharge energy', [ids.discharge].filter(Boolean), 'energy', false,
+      'Discharge is followed through the SoC only', energyHint + ': discharge is followed through the SoC only'),
+  ];
+}
+
+// Pure: replay hourly totals → { avg, gridShare, solarShare, chargeHours } or null.
+// `hours`: [{ solar, charge, discharge, load, pImp, pExp, storedKwh }] oldest first;
+// pImp is required per hour, pExp null counts solar as free.
 function _genergyBatteryCostReplay(hours, solarFree) {
   let E = 0, V = 0, Eg = 0, Es = 0, used = 0, seeded = false;
-  const roles = { solar: 's', batteryCharge: 'c', batteryDischarge: 'd', gridImport: 'gi', gridExport: 'ge', consumers: ['l'] };
   for (const h of hours) {
     if (h.pImp == null) continue;
     if (!seeded && h.storedKwh != null) {
@@ -1840,11 +1893,12 @@ function _genergyBatteryCostReplay(hours, solarFree) {
       V -= V * k; Eg -= Eg * k; Es -= Es * k; E -= E * k;
     }
     if (h.charge > 0) {
-      const m = _genergyAllocateIntervals([{ s: h.solar, c: h.charge, d: h.discharge, gi: h.gridI, ge: h.gridE, l: h.load }], roles);
-      const fromSolar = Math.min(h.charge, m.s?.c || 0);
-      const fromGrid = h.charge - fromSolar;   // grid share, plus anything the counters can't place
-      const pSolar = solarFree ? 0 : (h.pExp ?? 0);
-      V += fromGrid * h.pImp + fromSolar * Math.max(0, pSolar);
+      // Solar serves the house first, then the battery (the Sankey's priority); grid
+      // import / export never change that split, so they aren't needed here
+      const fromSolar = Math.min(h.charge, Math.max(0, (h.solar || 0) - (h.load || 0)));
+      const fromGrid = h.charge - fromSolar;
+      const pSolar = solarFree || h.pExp == null ? 0 : Math.max(0, h.pExp);
+      V += fromGrid * h.pImp + fromSolar * pSolar;
       E += h.charge; Eg += fromGrid; Es += fromSolar;
       used++;
     }
@@ -1854,49 +1908,68 @@ function _genergyBatteryCostReplay(hours, solarFree) {
       V -= V * k; Eg -= Eg * k; Es -= Es * k; E = h.storedKwh;
     }
   }
-  if (E <= 1e-6) return null;
+  if (E <= 1e-6 || !used) return null;
   return { avg: V / E, gridShare: Eg / E, solarShare: Es / E, chargeHours: used };
+}
+
+// Pure: recorder statistics → replay input. `factors`: { [eid]: kWh or price factor }.
+function _genergyBvHours(stats, ids, factors, capKwh, nowPrices) {
+  const byT = {};
+  const slot = (t) => (byT[t] = byT[t] || { t, solar: 0, charge: 0, discharge: 0, load: 0, pImp: null, pExp: null, storedKwh: null });
+  const change = { has: new Set() }, mean = { has: new Set() };
+  const addChange = (eid, field) => (stats[eid] || []).forEach(p => {
+    if (p.change == null) return;
+    change.has.add(eid); slot(p.start)[field] += Math.max(0, p.change * (factors[eid] ?? 1));
+  });
+  const addMean = (eid, field, factor) => (stats[eid] || []).forEach(p => {
+    if (p.mean == null) return;
+    mean.has.add(eid); slot(p.start)[field] = p.mean * factor;
+  });
+  if (ids.charge) addChange(ids.charge, 'charge');
+  if (ids.discharge) addChange(ids.discharge, 'discharge');
+  ids.solar.forEach(id => addChange(id, 'solar'));
+  ids.load.forEach(id => addChange(id, 'load'));
+  if (ids.importPrice) addMean(ids.importPrice, 'pImp', factors[ids.importPrice] ?? 1);
+  if (ids.exportPrice) addMean(ids.exportPrice, 'pExp', factors[ids.exportPrice] ?? 1);
+  if (ids.soc && capKwh) addMean(ids.soc, 'storedKwh', capKwh / 100);
+  // An energy input only counts when every one of its entities has statistics
+  const solarOk = ids.solar.length && ids.solar.every(id => change.has.has(id));
+  const loadOk = ids.load.length && ids.load.every(id => change.has.has(id));
+  const hours = Object.values(byT).sort((a, b) => a.t - b.t);
+  hours.forEach(h => { if (!solarOk) h.solar = 0; if (!loadOk) h.load = 0; });
+  // Price without history: its current value for every hour; otherwise carry the last
+  // known price over hours without a mean (sensor briefly unavailable)
+  const impHist = mean.has.has(ids.importPrice), expHist = mean.has.has(ids.exportPrice);
+  let li = null, le = null;
+  hours.forEach(h => {
+    if (!impHist) h.pImp = nowPrices.imp; else if (h.pImp == null) h.pImp = li; else li = h.pImp;
+    if (!expHist) h.pExp = nowPrices.exp; else if (h.pExp == null) h.pExp = le; else le = h.pExp;
+  });
+  return { hours, checked: { change: change.has, mean: mean.has } };
 }
 
 async function _genergyFetchBatteryCost(hass, cfg) {
   const ids = _genergyBvEntities(cfg);
-  if (!ids.charge || !ids.gridI.length || !ids.importPrice) return { error: 'Needs Battery Charge Today, Grid Import Today and an import price entity' };
   const capKwh = _genergyBatteryKwh(hass, cfg.entities || {});
-  const energyIds = [ids.charge, ids.discharge, ...ids.solar, ...ids.load, ...ids.gridI, ...ids.gridE].filter(Boolean);
+  const energyIds = [ids.charge, ids.discharge, ...ids.solar, ...ids.load].filter(Boolean);
   const meanIds = [ids.importPrice, ids.exportPrice, ids.soc].filter(Boolean);
+  const all = [...new Set([...energyIds, ...meanIds])];
   const end = new Date(), start = new Date(end.getTime() - _GENERGY_BV_DAYS * 86400000);
-  const stats = await hass.connection.sendMessagePromise({
+  const stats = all.length ? await hass.connection.sendMessagePromise({
     type: 'recorder/statistics_during_period', start_time: start.toISOString(), end_time: end.toISOString(),
-    statistic_ids: [...new Set([...energyIds, ...meanIds])], period: 'hour', types: ['change', 'mean'],
-  });
-  if (!stats || !Array.isArray(stats[ids.charge]) || !ids.gridI.every(id => Array.isArray(stats[id])) || !Array.isArray(stats[ids.importPrice])) {
-    return { error: 'No recorder statistics for the battery charge, grid import or import price entity' };
-  }
-  const byT = {};
-  const slot = (t) => (byT[t] = byT[t] || { t, solar: 0, charge: 0, discharge: 0, gridI: 0, gridE: 0, load: 0, pImp: null, pExp: null, storedKwh: null });
-  const addChange = (eid, field) => {
-    const f = _genergyKwhFactor(hass, eid);
-    (stats[eid] || []).forEach(p => { if (p.change != null) slot(p.start)[field] += Math.max(0, p.change * f); });
-  };
-  addChange(ids.charge, 'charge');
-  if (ids.discharge) addChange(ids.discharge, 'discharge');
-  ids.solar.forEach(id => addChange(id, 'solar'));
-  ids.load.forEach(id => addChange(id, 'load'));
-  ids.gridI.forEach(id => addChange(id, 'gridI'));
-  ids.gridE.forEach(id => addChange(id, 'gridE'));
-  const addMean = (eid, field, factor) => (stats[eid] || []).forEach(p => { if (p.mean != null) slot(p.start)[field] = p.mean * factor; });
-  addMean(ids.importPrice, 'pImp', _genergyPriceFactor(hass, ids.importPrice));
-  if (ids.exportPrice) addMean(ids.exportPrice, 'pExp', _genergyPriceFactor(hass, ids.exportPrice));
-  if (ids.soc && capKwh) addMean(ids.soc, 'storedKwh', capKwh / 100);
-  const hours = Object.values(byT).sort((a, b) => a.t - b.t);
-  // Carry the last known price over hours without a mean (price sensor briefly unavailable)
-  let li = null, le = null;
-  hours.forEach(h => { if (h.pImp == null) h.pImp = li; else li = h.pImp; if (h.pExp == null) h.pExp = le; else le = h.pExp; });
-  const res = _genergyBatteryCostReplay(hours, cfg.pricing?.battery_value_solar === 'free');
-  return res || { error: 'Not enough battery charge history yet' };
+    statistic_ids: all, period: 'hour', types: ['change', 'mean'],
+  }) : {};
+  const factors = {};
+  energyIds.forEach(id => { factors[id] = _genergyKwhFactor(hass, id); });
+  [ids.importPrice, ids.exportPrice].filter(Boolean).forEach(id => { factors[id] = _genergyPriceFactor(hass, id); });
+  const nowPrices = { imp: _genergyPriceNow(hass, ids.importPrice), exp: _genergyPriceNow(hass, ids.exportPrice) };
+  const { hours, checked } = _genergyBvHours(stats || {}, ids, factors, capKwh, nowPrices);
+  const replay = checked.change.has(ids.charge)
+    ? _genergyBatteryCostReplay(hours, cfg.pricing?.battery_value_solar === 'free') : null;
+  return { replay, checked };
 }
 
-// Cached accessor: returns the last result (or null while loading); calls onReady after a fetch
+// Cached accessor: the last fetch result (or null while loading); onReady fires after a fetch
 function _genergyBatteryCost(hass, cfg, onReady) {
   const ids = _genergyBvEntities(cfg);
   const key = JSON.stringify([ids, cfg.pricing?.battery_value_solar || 'export', cfg.entities?.battery_capacity_kwh || '', cfg.entities?.battery_capacity || '']);
@@ -1905,47 +1978,65 @@ function _genergyBatteryCost(hass, cfg, onReady) {
     entry = _genergyBvCache[key] = { ...(entry || {}), pending: true, fetchedAt: Date.now(), listeners: new Set(entry?.listeners || []) };
     _genergyFetchBatteryCost(hass, cfg)
       .then(r => { entry.result = r; })
-      .catch(err => { console.warn('Genergy: battery value statistics unavailable', err); entry.result = { error: 'Statistics request failed' }; })
+      .catch(err => { console.warn('Genergy: battery value statistics unavailable', err); entry.result = { replay: null, checked: null, failed: true }; })
       .finally(() => { entry.pending = false; entry.fetchedAt = Date.now(); entry.listeners.forEach(fn => { try { fn(); } catch (e) {} }); entry.listeners.clear(); });
   }
   if (onReady && entry.pending) entry.listeners.add(onReady);
   return entry.result || null;
 }
 
-// Everything the card shows, for the current config + live states
+// Everything the card and the settings preview show, for the current config + live states
 function _genergyBatteryValue(hass, cfg, onReady) {
   const e = cfg.entities || {}, p = cfg.pricing || {};
   const mode = p.battery_value_mode || 'auto';
   const capKwh = _genergyBatteryKwh(hass, e);
   const soc = _genergyBvNum(hass, e.battery_soc);
   const reserveSet = p.battery_value_reserve !== '' && p.battery_value_reserve != null && isFinite(parseFloat(p.battery_value_reserve));
-  const reserve = reserveSet ? parseFloat(p.battery_value_reserve) : 0;
-  const out = { mode, capKwh, soc, reserve, kwh: null, price: null, value: null, note: '', shares: null, error: '' };
-  if (capKwh == null) { out.error = 'Set the battery capacity (kWh) in Settings → Entities'; return out; }
-  if (soc == null) { out.error = 'Battery SoC entity unavailable'; return out; }
-  out.kwh = Math.max(0, (soc - reserve) / 100) * capKwh;
+  const reserve = reserveSet ? Math.min(100, Math.max(0, parseFloat(p.battery_value_reserve))) : 0;
+  const out = { mode, capKwh, soc, reserve, kwh: null, price: null, value: null, note: '', notes: [], shares: null, error: '', inputs: null };
   const ids = _genergyBvEntities(cfg);
+  const importNow = () => {
+    out.price = _genergyPriceNow(hass, ids.importPrice);
+    if (out.price == null) out.error = ids.importPrice ? `Import price ${ids.importPrice} is unavailable` : 'No import price entity: set one in Settings → Entities, or choose Fixed price';
+  };
   if (mode === 'manual') {
     const v = parseFloat(p.battery_value_fixed);
     if (isFinite(v)) { out.price = v; out.note = 'fixed price'; } else out.error = 'Enter a fixed price in Settings → Pricing';
   } else if (mode === 'entity') {
     out.price = _genergyPriceNow(hass, p.battery_value_entity);
     out.note = 'price entity';
-    if (out.price == null) out.error = p.battery_value_entity ? 'Price entity unavailable' : 'Pick a price entity in Settings → Pricing';
+    if (out.price == null) out.error = p.battery_value_entity ? `Price entity ${p.battery_value_entity} is unavailable` : 'Pick a price entity in Settings → Pricing';
   } else if (mode === 'import') {
-    out.price = _genergyPriceNow(hass, ids.importPrice); out.note = 'at the current import price';
-    if (out.price == null) out.error = 'Import price entity unavailable';
+    importNow(); out.note = 'at the current import price';
   } else if (mode === 'export') {
     out.price = _genergyPriceNow(hass, ids.exportPrice); out.note = 'at the current export price';
-    if (out.price == null) out.error = 'Export price entity unavailable';
+    if (out.price == null) out.error = ids.exportPrice ? `Export price ${ids.exportPrice} is unavailable` : 'No export price entity: set one in Settings → Entities';
   } else {
-    const r = hass?.connection ? _genergyBatteryCost(hass, cfg, onReady) : null;
-    if (!r) { out.note = 'calculating…'; return out; }
-    if (r.error) { out.error = r.error; return out; }
-    out.price = r.avg; out.shares = { grid: r.gridShare, solar: r.solarShare };
-    out.note = `average cost, last ${_GENERGY_BV_DAYS} days`;
+    const r = hass?.connection && ids.importPrice && ids.charge ? _genergyBatteryCost(hass, cfg, onReady) : null;
+    out.inputs = _genergyBvInputs(hass, cfg, r?.checked || null);
+    const missing = out.inputs.filter(i => i.status !== 'ok');
+    if (!ids.importPrice) { importNow(); }
+    else if (ids.charge && !r) { out.note = 'calculating…'; }
+    else if (r?.replay) {
+      out.price = r.replay.avg; out.shares = { grid: r.replay.gridShare, solar: r.replay.solarShare };
+      out.note = `average cost, last ${_GENERGY_BV_DAYS} days`;
+      out.notes = missing.filter(i => !i.required || i.id === 'import').map(i => `${i.label}: ${i.effect}`);
+    } else {
+      // Automatic can't run: be explicit about why, use the current import price
+      importNow();
+      const why = !ids.charge ? 'no Battery Charge Today entity'
+        : r?.failed ? 'statistics request failed'
+        : r?.checked && !r.checked.change.has(ids.charge) ? `${ids.charge} has no energy statistics`
+        : `no battery charge in the last ${_GENERGY_BV_DAYS} days`;
+      out.note = `current import price (automatic: ${why})`;
+    }
   }
-  if (out.price != null) out.value = out.kwh * out.price;
+  if (capKwh == null) out.error = 'Battery capacity unknown: set Battery Capacity in Settings → Entities, or Manual Capacity (kWh) in Settings → Features → Battery';
+  else if (soc == null) out.error = e.battery_soc ? `Battery SoC ${e.battery_soc} is unavailable` : 'Set the Battery SoC entity in Settings → Entities';
+  if (!out.error) {
+    out.kwh = Math.max(0, (soc - reserve) / 100) * capKwh;
+    if (out.price != null) out.value = out.kwh * out.price;
+  }
   return out;
 }
 
@@ -1980,7 +2071,7 @@ class SigenergyBatteryValueCard extends HTMLElement {
     const sub = d.error ? d.error
       : (d.kwh != null && d.price != null ? `${d.kwh.toFixed(1)} kWh × ${money(d.price, 3)}/kWh` : d.note);
     const shares = d.shares ? `${Math.round(d.shares.solar * 100)}% solar · ${Math.round(d.shares.grid * 100)}% grid` : '';
-    const detail = d.error ? '' : [d.note, shares, d.reserve > 0 ? `above ${d.reserve}% reserve` : ''].filter(Boolean).join(' · ');
+    const detail = d.error ? '' : [[d.note, shares, d.reserve > 0 ? `above ${d.reserve}% reserve` : ''].filter(Boolean).join(' · '), ...(d.notes || [])].filter(Boolean).join('. ');
     const sig = [main, sub, detail, dark, this._expanded].join('|');
     if (sig === this._lastSig) return;
     this._lastSig = sig;
@@ -6487,7 +6578,8 @@ class SigenergySettingsCard extends HTMLElement {
             <option value="free" ${p.battery_value_solar === 'free' ? 'selected' : ''}>Free</option>
           </select>
         </div>
-        <div style="font-size:10px;color:#666;margin:-2px 0 8px;line-height:1.5;">Replays the last ${_GENERGY_BV_DAYS} days of hourly statistics: battery charge from the grid costs that hour's import price, charge from solar costs that hour's export price (or nothing), and discharge takes energy out at the running average. Updates every 10 minutes.<br>Uses ${name(ids.charge)}, ${name(ids.discharge)}, ${ids.solar.length ? ids.solar.map(name).join(' + ') : name('')}, ${ids.load.length ? ids.load.map(name).join(' + ') : name('')}, ${ids.gridI.length ? ids.gridI.map(name).join(' + ') : name('')}, ${ids.gridE.length ? ids.gridE.map(name).join(' + ') : name('')}, import price ${name(ids.importPrice)}, export price ${name(ids.exportPrice)} (from Settings → Entities).</div>` : ''}
+        <div style="font-size:10px;color:#666;margin:-2px 0 8px;line-height:1.5;">Works out what the energy now in the battery cost, from the last ${_GENERGY_BV_DAYS} days of hourly history: charge from the grid at that hour's import price, charge from solar at that hour's export price (or free), discharge at the running average. Uses the entities from Settings → Entities; only the battery charge counter and an import price are required, the rest make the solar/grid split more accurate. Updates every 10 minutes.</div>
+        ${this._renderBatteryValueInputs(preview)}` : ''}
         ${mode === 'manual' ? `
         <div class="row">
           <span class="row-label">Fixed price (${cur}/kWh)</span>
@@ -6499,14 +6591,31 @@ class SigenergySettingsCard extends HTMLElement {
           <input class="row-input" type="text" list="bv-price-list" value="${this._esc(p.battery_value_entity || '')}" data-key="battery_value_entity" placeholder="sensor.…" style="width:190px;" />
           <datalist id="bv-price-list">${priceSensors.map(k => `<option value="${this._esc(k)}"></option>`).join('')}</datalist>
         </div>` : ''}
-        ${mode === 'import' || mode === 'export' ? `<div style="font-size:10px;color:#666;margin:-2px 0 8px;">Uses ${name(mode === 'import' ? ids.importPrice : ids.exportPrice)} (from Settings → Entities).</div>` : ''}
+        ${mode === 'import' || mode === 'export' ? `<div style="font-size:10px;color:#666;margin:-2px 0 8px;overflow-wrap:anywhere;">Uses ${name(mode === 'import' ? ids.importPrice : ids.exportPrice)}${(mode === 'import' ? ids.importKey : ids.exportKey) ? ` (Entities → ${this._esc(mode === 'import' ? ids.importKey : ids.exportKey)})` : ` (set ${mode === 'import' ? 'Import Price' : 'Export Price'} in Settings → Entities)`}.</div>` : ''}
         <div class="row">
           <span class="row-label">Reserve SoC not counted (%)</span>
           <input class="row-input" type="number" step="1" min="0" max="100" value="${p.battery_value_reserve ?? ''}" data-key="battery_value_reserve" placeholder="${this._esc(reservePh)}" style="width:70px;" />
         </div>
-        <div style="font-size:10px;color:#666;margin:-2px 0 8px;">Stored energy = SoC ${name(e.battery_soc)} × capacity ${cap != null ? `<b>${cap.toFixed(2)} kWh</b>` : '<span style="color:#e57373;">unknown: set Battery Capacity (kWh) in Entities</span>'}.</div>
-        <div style="font-size:12px;padding:8px 10px;border-radius:8px;background:rgba(127,179,255,0.08);border:1px solid rgba(127,179,255,0.2);">Now: ${prevTxt}</div>
+        <div style="font-size:10px;color:#666;margin:-2px 0 8px;overflow-wrap:anywhere;">Stored energy = SoC ${name(e.battery_soc)} × capacity ${cap != null ? `<b>${cap.toFixed(2)} kWh</b> (${parseFloat(e.battery_capacity_kwh) > 0 ? 'Features → Battery → Manual Capacity' : this._esc(e.battery_capacity)})` : '<span style="color:#e57373;">unknown: set Battery Capacity in Entities, or Manual Capacity (kWh) in Features → Battery</span>'}.</div>
+        <div style="font-size:12px;padding:8px 10px;border-radius:8px;background:rgba(127,179,255,0.08);border:1px solid rgba(127,179,255,0.2);overflow-wrap:anywhere;">Now: ${prevTxt}${preview && !preview.error && preview.note ? `<div style="font-size:10px;color:#8892a4;margin-top:2px;">${this._esc(preview.note)}</div>` : ''}</div>
       </div>`;
+  }
+
+  // Automatic mode inputs: which entity each one uses, whether it has history, and what a
+  // missing one means. Same data the card uses (_genergyBvInputs), so they always agree.
+  _renderBatteryValueInputs(preview) {
+    const inputs = preview?.inputs;
+    if (!inputs) return '';
+    const badge = (i) => i.status === 'ok' ? `<span style="color:#00d4b8;">✓${i.verified ? '' : ' (checking history…)'}</span>`
+      : i.status === 'missing' ? `<span style="color:${i.required ? '#e57373' : '#8892a4'};">not set</span>`
+      : i.status === 'unavailable' ? '<span style="color:#e57373;">entity not found</span>'
+      : '<span style="color:#ffb74d;">no history</span>';
+    return `<div style="margin:0 0 8px;border:1px solid var(--divider-color,#2d3451);border-radius:8px;">${inputs.map((i, n) => `
+      <div style="padding:6px 10px;font-size:11px;line-height:1.4;overflow-wrap:anywhere;${n ? 'border-top:1px solid var(--divider-color,#2d3451);' : ''}">
+        <div style="display:flex;justify-content:space-between;gap:8px;"><span style="color:var(--primary-text-color,#e0e4ec);">${i.label}${i.required ? ' <span style="color:#8892a4;">(required)</span>' : ''}</span>${badge(i)}</div>
+        ${i.entities.length ? `<div style="color:#8892a4;font-family:monospace;font-size:10px;">${i.entities.map(x => this._esc(x)).join(' + ')}</div>` : ''}
+        ${i.effect ? `<div style="color:#8892a4;font-size:10px;">${this._esc(i.effect)}</div>` : ''}
+      </div>`).join('')}</div>`;
   }
 
   _renderPricing(el, cfg) {

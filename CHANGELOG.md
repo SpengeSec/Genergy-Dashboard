@@ -2,6 +2,17 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **Battery Value card: works with more setups** -- The automatic price only worked when every energy counter and both price sensors had recorder history, and stopped with an error otherwise. Now:
+  - Only the battery charge counter and an import price are required. Solar, home load, export price, SoC history and the discharge counter are optional and only make the solar/grid split more accurate. The grid import/export counters are no longer used (they never changed the split).
+  - The import price is taken from Import Price, then Buy Price, Nordpool, HAEO or Energy Manager, whichever is set first (export: Export Price, Sell Price, HAEO, Energy Manager).
+  - A price sensor without history uses its current value for every hour, and a counter without energy statistics (state_class total or total_increasing) is skipped.
+  - When the automatic price can't be calculated (no battery charge counter, no statistics, or no charging in the last 7 days), the card uses the current import price and says why instead of showing an error.
+  - Settings > Pricing lists every input with the entity it uses, whether it has history, and what happens when it is missing, so you can see exactly how the value is worked out for your setup.
+  - Battery capacity is read the same way as the runtime estimate (also Ah at 51.2 V), and price units in c/kWh, ct/kWh, p/kWh, öre/kWh, øre/kWh and per MWh are converted.
+
 ## [2.30.0] - 2026-11-18
 
 A new optional Battery Value card, a fix for Smart Loads being cut off on phones, and exact price steps on the energy chart. After updating, restart Home Assistant, then **fully reload every open dashboard** (hard refresh in the browser; in the Companion app force-close and reopen it, or use Settings > Companion app > Debugging > Reset frontend cache). Then click **Apply Settings to Dashboard** once (Settings). Clicking Apply in a tab that still runs the old version rebuilds the old dashboard.
