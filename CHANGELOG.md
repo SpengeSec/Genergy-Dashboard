@@ -2,7 +2,9 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
-## [Unreleased]
+## [2.30.1] - 2026-11-18
+
+The Battery Value card now works with any setup. No Apply needed; fully reload open dashboards (and the Companion app) after updating.
 
 ### Fixed
 - **Battery Value card: works with more setups** -- The automatic price only worked when every energy counter and both price sensors had recorder history, and stopped with an error otherwise. Now:
