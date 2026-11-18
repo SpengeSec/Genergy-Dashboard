@@ -274,7 +274,7 @@ class SigenergySmartLoadCard extends HTMLElement {
           ${rankHtml}
           ${toggleHtml}
           <img class="tile-icon" src="${IMG_BASE}${item.type}_mid.png" alt="${item.typeInfo?.label || item.type}" loading="lazy" onerror="this.src='${IMG_BASE}plug_socket_mid.png'">
-          <div class="tile-label">${item.label || item.typeInfo?.label || 'Load'}</div>
+          <div class="tile-label" title="${item.label || item.typeInfo?.label || 'Load'}">${item.label || item.typeInfo?.label || 'Load'}</div>
           <div class="tile-power ${cls}">${_formatPower(w)}</div>
           ${energyHtml}
         </div>`;
@@ -350,6 +350,8 @@ class SigenergySmartLoadCard extends HTMLElement {
       <style>
         :host {
           display: block;
+          min-width: 0;
+          max-width: 100%;
           --text-primary: ${isDark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)'};
           --text-secondary: ${isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'};
           --accent: #00d4b8;
@@ -360,6 +362,9 @@ class SigenergySmartLoadCard extends HTMLElement {
           border: 1px solid var(--border);
           border-radius: 16px;
           padding: 16px;
+          box-sizing: border-box;
+          max-width: 100%;
+          overflow: hidden;
           box-shadow: ${isDark ? '0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)' : '0 2px 12px rgba(0,0,0,0.06)'};
         }
         .header {
@@ -380,15 +385,15 @@ class SigenergySmartLoadCard extends HTMLElement {
         }
         .grid {
           display: grid;
-          grid-template-columns: repeat(${cols}, 1fr);
+          grid-template-columns: repeat(${cols}, minmax(0, 1fr));
           gap: 8px;
           margin-top: 4px;
         }
         @media (max-width: 768px) {
-          .grid { grid-template-columns: repeat(${Math.min(cols, 3)}, 1fr); }
+          .grid { grid-template-columns: repeat(${Math.min(cols, 3)}, minmax(0, 1fr)); }
         }
         @media (max-width: 480px) {
-          .grid { grid-template-columns: repeat(2, 1fr); }
+          .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         .tile {
           position: relative;
@@ -400,6 +405,8 @@ class SigenergySmartLoadCard extends HTMLElement {
           cursor: pointer;
           transition: transform 0.2s, background 0.2s, border-color 0.2s, box-shadow 0.3s, opacity 0.3s;
           min-height: 90px;
+          min-width: 0;
+          box-sizing: border-box;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -453,10 +460,13 @@ class SigenergySmartLoadCard extends HTMLElement {
         }
         .tile-label {
           font-size: 10px;
+          line-height: 1.25;
           color: var(--text-secondary);
-          white-space: nowrap;
           overflow: hidden;
-          text-overflow: ellipsis;
+          overflow-wrap: anywhere;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
           max-width: 100%;
         }
         .tile-power {
@@ -474,6 +484,8 @@ class SigenergySmartLoadCard extends HTMLElement {
         }
         .total-row {
           display: flex;
+          flex-wrap: wrap;
+          gap: 4px 8px;
           justify-content: space-between;
           align-items: center;
           margin-top: 10px;
@@ -488,6 +500,7 @@ class SigenergySmartLoadCard extends HTMLElement {
         }
         .total-value {
           font-size: 13px;
+          white-space: nowrap;
           font-weight: 600;
           color: var(--accent);
         }
@@ -531,7 +544,7 @@ class SigenergySmartLoadCard extends HTMLElement {
         }
         .section-grid {
           display: grid;
-          grid-template-columns: repeat(${cols}, 1fr);
+          grid-template-columns: repeat(${cols}, minmax(0, 1fr));
           gap: 8px;
           margin-top: 8px;
           overflow: hidden;
@@ -539,10 +552,10 @@ class SigenergySmartLoadCard extends HTMLElement {
         }
         .section-grid.collapsed { display: none; }
         @media (max-width: 768px) {
-          .section-grid { grid-template-columns: repeat(${Math.min(cols, 3)}, 1fr); }
+          .section-grid { grid-template-columns: repeat(${Math.min(cols, 3)}, minmax(0, 1fr)); }
         }
         @media (max-width: 480px) {
-          .section-grid { grid-template-columns: repeat(2, 1fr); }
+          .section-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         .tile-toggle {
           position: absolute;
@@ -574,6 +587,13 @@ class SigenergySmartLoadCard extends HTMLElement {
         .tile.active .tile-toggle::after, .tile.high .tile-toggle::after {
           transform: translateX(9px);
           background: #00d4b8;
+        }
+        .card { container-type: inline-size; }
+        @container (max-width: 600px) {
+          .grid, .section-grid { grid-template-columns: repeat(${Math.min(cols, 3)}, minmax(0, 1fr)); }
+        }
+        @container (max-width: 420px) {
+          .grid, .section-grid { grid-template-columns: repeat(${Math.min(cols, 2)}, minmax(0, 1fr)); }
         }
       </style>
       <div class="card">

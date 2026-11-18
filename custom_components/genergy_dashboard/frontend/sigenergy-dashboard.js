@@ -1,5 +1,5 @@
 /**
- * Genergy Dashboard v2.29.2 — Bundled Distribution
+ * Genergy Dashboard v2.30.0 — Bundled Distribution
  * 
  * Self-contained Lit Element cards for Home Assistant.
  * No build step required — loads directly as an ES module.
@@ -239,6 +239,11 @@ const DEFAULT_CONFIG = {
     show_price_overlay: true,
     show_price_badge: true,
     show_color_coding: true,
+    battery_value_mode: 'auto',
+    battery_value_solar: 'export',
+    battery_value_fixed: '',
+    battery_value_entity: '',
+    battery_value_reserve: '',
   },
   display: {
     theme: 'dark',
@@ -270,6 +275,7 @@ const DEFAULT_CONFIG = {
     show_chart: true,
     show_smart_loads: true,
     show_insights: true,
+    show_battery_value: false,
   },
 };
 
@@ -1741,6 +1747,288 @@ class SigenergyForecastModalButton extends HTMLElement {
 
 if (!customElements.get('sigenergy-forecast-modal-button')) {
   customElements.define('sigenergy-forecast-modal-button', SigenergyForecastModalButton);
+}
+
+// ═══════════════════════════════════════════════════════════
+// Battery Value card: what the energy stored in the battery is worth
+// Quantity = live SoC × capacity (optionally only above a reserve SoC).
+// Price per kWh, by pricing.battery_value_mode:
+//   auto    weighted-average cost of the energy that went in, from hourly recorder
+//           statistics over the last 7 days: each hour's battery charge is split into
+//           grid and solar parts with the same allocator as the Sankey; grid kWh cost that
+//           hour's import price, solar kWh cost that hour's export price (the feed-in you
+//           gave up) or nothing (battery_value_solar 'free'). Discharge removes energy at
+//           the running average; the running total is clamped to the stored energy each
+//           hour (hourly mean SoC), so losses and old charges fade out.
+//   import  current import price (what buying the same energy now would cost)
+//   export  current export price (what selling it now would earn)
+//   manual  fixed price (battery_value_fixed)
+//   entity  any sensor giving a price per kWh (battery_value_entity)
+// ═══════════════════════════════════════════════════════════
+
+const _GENERGY_BV_DAYS = 7;
+const _GENERGY_BV_TTL = 10 * 60 * 1000;
+const _genergyBvCache = {};
+
+function _genergyBvNum(hass, eid) {
+  const st = eid && hass?.states?.[eid];
+  if (!st) return null;
+  const v = parseFloat(st.state);
+  return isFinite(v) ? v : null;
+}
+
+// Price units → currency per kWh (€/MWh, c/kWh, ct/kWh, p/kWh)
+function _genergyPriceFactor(hass, eid) {
+  const u = String(hass?.states?.[eid]?.attributes?.unit_of_measurement || '').toLowerCase();
+  if (/\/\s*mwh/.test(u)) return 0.001;
+  if (/^(c|ct|cent|cents|p|pence)\s*\/\s*kwh/.test(u) || /^(c|ct|p)\b/.test(u)) return 0.01;
+  return 1;
+}
+
+function _genergyPriceNow(hass, eid) {
+  const v = _genergyBvNum(hass, eid);
+  return v == null ? null : v * _genergyPriceFactor(hass, eid);
+}
+
+// Battery capacity in kWh: the manual number wins, else the capacity entity (Wh/kWh/MWh)
+function _genergyBatteryKwh(hass, e) {
+  const manual = parseFloat(e.battery_capacity_kwh);
+  if (manual > 0) return manual;
+  const eid = e.battery_capacity;
+  const v = _genergyBvNum(hass, eid);
+  if (v == null || v <= 0) return null;
+  const u = String(hass.states[eid].attributes?.unit_of_measurement || 'kWh');
+  if (!/wh$/i.test(u)) return null;   // Ah or unitless: can't turn into energy
+  return v * _genergyKwhFactor(hass, eid);
+}
+
+function _genergyBvEntities(cfg) {
+  const e = cfg.entities || {}, f = cfg.features || {};
+  const gridI = e.grid_import_today ? [e.grid_import_today]
+    : (f.dual_tariff ? [e.grid_import_high_tariff, e.grid_import_low_tariff].filter(Boolean) : []);
+  const gridE = e.grid_export_today ? [e.grid_export_today]
+    : (f.dual_tariff ? [e.grid_export_high_tariff, e.grid_export_low_tariff].filter(Boolean) : []);
+  // Same inputs as the Sankey: 3rd-party PV is solar too; an EV / heat pump not already
+  // inside Load Energy Today is extra consumption
+  const solar = [e.solar_energy_today, e.third_party_pv_energy_today].filter(Boolean);
+  const load = [e.load_energy_today, ..._genergyDeviceEntities(f, e)
+    .filter(d => d.entity && !_genergyDeviceInLoad(f, d.dev)).map(d => d.entity)].filter(Boolean);
+  return {
+    soc: e.battery_soc, charge: e.battery_charge_today, discharge: e.battery_discharge_today,
+    solar, load, gridI, gridE,
+    importPrice: e.current_import_price || e.buy_price,
+    exportPrice: e.current_export_price || e.sell_price,
+  };
+}
+
+// Pure: replay hourly statistics → { avg, gridShare, solarShare, hours }.
+// `hours`: [{ t, solar, charge, discharge, gridI, gridE, load, pImp, pExp, storedKwh }]
+function _genergyBatteryCostReplay(hours, solarFree) {
+  let E = 0, V = 0, Eg = 0, Es = 0, used = 0, seeded = false;
+  const roles = { solar: 's', batteryCharge: 'c', batteryDischarge: 'd', gridImport: 'gi', gridExport: 'ge', consumers: ['l'] };
+  for (const h of hours) {
+    if (h.pImp == null) continue;
+    if (!seeded && h.storedKwh != null) {
+      // Seed what was already in the battery at the start of the window (valued at that
+      // hour's import price; it fades out as the battery cycles)
+      seeded = true;
+      if (h.storedKwh > 0) { E = h.storedKwh; V = E * h.pImp; Eg = E; }
+    }
+    // Discharge first (removes at the running average), then this hour's charge
+    if (h.discharge > 0 && E > 0) {
+      const k = Math.min(h.discharge, E) / E;
+      V -= V * k; Eg -= Eg * k; Es -= Es * k; E -= E * k;
+    }
+    if (h.charge > 0) {
+      const m = _genergyAllocateIntervals([{ s: h.solar, c: h.charge, d: h.discharge, gi: h.gridI, ge: h.gridE, l: h.load }], roles);
+      const fromSolar = Math.min(h.charge, m.s?.c || 0);
+      const fromGrid = h.charge - fromSolar;   // grid share, plus anything the counters can't place
+      const pSolar = solarFree ? 0 : (h.pExp ?? 0);
+      V += fromGrid * h.pImp + fromSolar * Math.max(0, pSolar);
+      E += h.charge; Eg += fromGrid; Es += fromSolar;
+      used++;
+    }
+    // Never hold more than the battery actually stores
+    if (h.storedKwh != null && E > h.storedKwh && E > 0) {
+      const k = (E - h.storedKwh) / E;
+      V -= V * k; Eg -= Eg * k; Es -= Es * k; E = h.storedKwh;
+    }
+  }
+  if (E <= 1e-6) return null;
+  return { avg: V / E, gridShare: Eg / E, solarShare: Es / E, chargeHours: used };
+}
+
+async function _genergyFetchBatteryCost(hass, cfg) {
+  const ids = _genergyBvEntities(cfg);
+  if (!ids.charge || !ids.gridI.length || !ids.importPrice) return { error: 'Needs Battery Charge Today, Grid Import Today and an import price entity' };
+  const capKwh = _genergyBatteryKwh(hass, cfg.entities || {});
+  const energyIds = [ids.charge, ids.discharge, ...ids.solar, ...ids.load, ...ids.gridI, ...ids.gridE].filter(Boolean);
+  const meanIds = [ids.importPrice, ids.exportPrice, ids.soc].filter(Boolean);
+  const end = new Date(), start = new Date(end.getTime() - _GENERGY_BV_DAYS * 86400000);
+  const stats = await hass.connection.sendMessagePromise({
+    type: 'recorder/statistics_during_period', start_time: start.toISOString(), end_time: end.toISOString(),
+    statistic_ids: [...new Set([...energyIds, ...meanIds])], period: 'hour', types: ['change', 'mean'],
+  });
+  if (!stats || !Array.isArray(stats[ids.charge]) || !ids.gridI.every(id => Array.isArray(stats[id])) || !Array.isArray(stats[ids.importPrice])) {
+    return { error: 'No recorder statistics for the battery charge, grid import or import price entity' };
+  }
+  const byT = {};
+  const slot = (t) => (byT[t] = byT[t] || { t, solar: 0, charge: 0, discharge: 0, gridI: 0, gridE: 0, load: 0, pImp: null, pExp: null, storedKwh: null });
+  const addChange = (eid, field) => {
+    const f = _genergyKwhFactor(hass, eid);
+    (stats[eid] || []).forEach(p => { if (p.change != null) slot(p.start)[field] += Math.max(0, p.change * f); });
+  };
+  addChange(ids.charge, 'charge');
+  if (ids.discharge) addChange(ids.discharge, 'discharge');
+  ids.solar.forEach(id => addChange(id, 'solar'));
+  ids.load.forEach(id => addChange(id, 'load'));
+  ids.gridI.forEach(id => addChange(id, 'gridI'));
+  ids.gridE.forEach(id => addChange(id, 'gridE'));
+  const addMean = (eid, field, factor) => (stats[eid] || []).forEach(p => { if (p.mean != null) slot(p.start)[field] = p.mean * factor; });
+  addMean(ids.importPrice, 'pImp', _genergyPriceFactor(hass, ids.importPrice));
+  if (ids.exportPrice) addMean(ids.exportPrice, 'pExp', _genergyPriceFactor(hass, ids.exportPrice));
+  if (ids.soc && capKwh) addMean(ids.soc, 'storedKwh', capKwh / 100);
+  const hours = Object.values(byT).sort((a, b) => a.t - b.t);
+  // Carry the last known price over hours without a mean (price sensor briefly unavailable)
+  let li = null, le = null;
+  hours.forEach(h => { if (h.pImp == null) h.pImp = li; else li = h.pImp; if (h.pExp == null) h.pExp = le; else le = h.pExp; });
+  const res = _genergyBatteryCostReplay(hours, cfg.pricing?.battery_value_solar === 'free');
+  return res || { error: 'Not enough battery charge history yet' };
+}
+
+// Cached accessor: returns the last result (or null while loading); calls onReady after a fetch
+function _genergyBatteryCost(hass, cfg, onReady) {
+  const ids = _genergyBvEntities(cfg);
+  const key = JSON.stringify([ids, cfg.pricing?.battery_value_solar || 'export', cfg.entities?.battery_capacity_kwh || '', cfg.entities?.battery_capacity || '']);
+  let entry = _genergyBvCache[key];
+  if (!entry || (!entry.pending && Date.now() - entry.fetchedAt > _GENERGY_BV_TTL)) {
+    entry = _genergyBvCache[key] = { ...(entry || {}), pending: true, fetchedAt: Date.now(), listeners: new Set(entry?.listeners || []) };
+    _genergyFetchBatteryCost(hass, cfg)
+      .then(r => { entry.result = r; })
+      .catch(err => { console.warn('Genergy: battery value statistics unavailable', err); entry.result = { error: 'Statistics request failed' }; })
+      .finally(() => { entry.pending = false; entry.fetchedAt = Date.now(); entry.listeners.forEach(fn => { try { fn(); } catch (e) {} }); entry.listeners.clear(); });
+  }
+  if (onReady && entry.pending) entry.listeners.add(onReady);
+  return entry.result || null;
+}
+
+// Everything the card shows, for the current config + live states
+function _genergyBatteryValue(hass, cfg, onReady) {
+  const e = cfg.entities || {}, p = cfg.pricing || {};
+  const mode = p.battery_value_mode || 'auto';
+  const capKwh = _genergyBatteryKwh(hass, e);
+  const soc = _genergyBvNum(hass, e.battery_soc);
+  const reserveSet = p.battery_value_reserve !== '' && p.battery_value_reserve != null && isFinite(parseFloat(p.battery_value_reserve));
+  const reserve = reserveSet ? parseFloat(p.battery_value_reserve) : 0;
+  const out = { mode, capKwh, soc, reserve, kwh: null, price: null, value: null, note: '', shares: null, error: '' };
+  if (capKwh == null) { out.error = 'Set the battery capacity (kWh) in Settings → Entities'; return out; }
+  if (soc == null) { out.error = 'Battery SoC entity unavailable'; return out; }
+  out.kwh = Math.max(0, (soc - reserve) / 100) * capKwh;
+  const ids = _genergyBvEntities(cfg);
+  if (mode === 'manual') {
+    const v = parseFloat(p.battery_value_fixed);
+    if (isFinite(v)) { out.price = v; out.note = 'fixed price'; } else out.error = 'Enter a fixed price in Settings → Pricing';
+  } else if (mode === 'entity') {
+    out.price = _genergyPriceNow(hass, p.battery_value_entity);
+    out.note = 'price entity';
+    if (out.price == null) out.error = p.battery_value_entity ? 'Price entity unavailable' : 'Pick a price entity in Settings → Pricing';
+  } else if (mode === 'import') {
+    out.price = _genergyPriceNow(hass, ids.importPrice); out.note = 'at the current import price';
+    if (out.price == null) out.error = 'Import price entity unavailable';
+  } else if (mode === 'export') {
+    out.price = _genergyPriceNow(hass, ids.exportPrice); out.note = 'at the current export price';
+    if (out.price == null) out.error = 'Export price entity unavailable';
+  } else {
+    const r = hass?.connection ? _genergyBatteryCost(hass, cfg, onReady) : null;
+    if (!r) { out.note = 'calculating…'; return out; }
+    if (r.error) { out.error = r.error; return out; }
+    out.price = r.avg; out.shares = { grid: r.gridShare, solar: r.solarShare };
+    out.note = `average cost, last ${_GENERGY_BV_DAYS} days`;
+  }
+  if (out.price != null) out.value = out.kwh * out.price;
+  return out;
+}
+
+class SigenergyBatteryValueCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._hass = null;
+    this._config = {};
+    this._expanded = false;
+    this._lastSig = '';
+  }
+  setConfig(config) { this._config = config || {}; }
+  getCardSize() { return 1; }
+  static getStubConfig() { return {}; }
+  set hass(hass) { this._hass = hass; this._render(); }
+  connectedCallback() {
+    const store = window.SigenergyConfig;
+    if (store && !this._unsub) this._unsub = store.subscribe(() => { this._lastSig = ''; this._render(); });
+    this._render();
+  }
+  disconnectedCallback() { if (this._unsub) { this._unsub(); this._unsub = null; } }
+
+  _render() {
+    if (!this.shadowRoot || !this._hass) return;
+    const cfg = window.SigenergyConfig?.get?.() || {};
+    const cur = cfg.pricing?.currency || '€';
+    const d = _genergyBatteryValue(this._hass, cfg, () => { this._lastSig = ''; this._render(); });
+    const dark = (window._sigenergyResolveTheme ? window._sigenergyResolveTheme(this._hass) : 'dark') !== 'light';
+    const money = (v, dp) => (v < 0 ? '-' : '') + cur + Math.abs(v).toFixed(dp);
+    const main = d.value != null ? money(d.value, 2) : (d.error ? '—' : '…');
+    const sub = d.error ? d.error
+      : (d.kwh != null && d.price != null ? `${d.kwh.toFixed(1)} kWh × ${money(d.price, 3)}/kWh` : d.note);
+    const shares = d.shares ? `${Math.round(d.shares.solar * 100)}% solar · ${Math.round(d.shares.grid * 100)}% grid` : '';
+    const detail = d.error ? '' : [d.note, shares, d.reserve > 0 ? `above ${d.reserve}% reserve` : ''].filter(Boolean).join(' · ');
+    const sig = [main, sub, detail, dark, this._expanded].join('|');
+    if (sig === this._lastSig) return;
+    this._lastSig = sig;
+    const accent = dark ? '#7fb3ff' : '#3d7bd9';
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; min-width: 0; }
+        .card {
+          display: flex; align-items: center; gap: 12px; box-sizing: border-box; height: 100%;
+          padding: 12px; border-radius: 16px; cursor: pointer; overflow: hidden;
+          background: ${dark ? 'linear-gradient(135deg, rgba(127,179,255,0.12), rgba(45,52,81,0.5))' : 'linear-gradient(135deg, rgba(61,123,217,0.08), rgba(255,255,255,0.9))'};
+          border: 1px solid ${dark ? 'rgba(127,179,255,0.2)' : 'rgba(61,123,217,0.2)'};
+          box-shadow: ${dark ? '0 4px 16px rgba(127,179,255,0.1), inset 0 1px 0 rgba(127,179,255,0.1)' : '0 2px 12px rgba(61,123,217,0.1)'};
+          backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+          color: var(--primary-text-color, ${dark ? '#e0e4ec' : '#1a1f2e'});
+        }
+        .icon {
+          flex: 0 0 auto; width: 42px; height: 42px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          background: ${dark ? 'rgba(127,179,255,0.2)' : 'rgba(61,123,217,0.15)'};
+        }
+        ha-icon { color: ${accent}; --mdc-icon-size: 22px; }
+        .text { min-width: 0; flex: 1 1 auto; }
+        .primary { font-size: 14px; font-weight: 700; line-height: 1.3; }
+        .value { font-size: 18px; font-weight: 600; color: ${accent}; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sub { font-size: 11px; color: var(--secondary-text-color, #8892a4); line-height: 1.3; overflow-wrap: anywhere; }
+        .detail { display: ${this._expanded ? 'block' : 'none'}; margin-top: 2px; }
+      </style>
+      <div class="card" role="button" tabindex="0" title="${(sub + (detail ? ' · ' + detail : '')).replace(/"/g, '&quot;')}">
+        <div class="icon"><ha-icon icon="mdi:battery-heart-variant"></ha-icon></div>
+        <div class="text">
+          <div class="primary">Battery Value</div>
+          <div class="value">${main}</div>
+          <div class="sub">${sub}</div>
+          ${detail ? `<div class="sub detail">${detail}</div>` : ''}
+        </div>
+      </div>`;
+    const card = this.shadowRoot.querySelector('.card');
+    const toggle = () => { this._expanded = !this._expanded; this._lastSig = ''; this._render(); };
+    card.addEventListener('click', toggle);
+    card.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } });
+  }
+}
+
+window.__sigCardClasses = window.__sigCardClasses || {};
+window.__sigCardClasses['sigenergy-battery-value-card'] = SigenergyBatteryValueCard;
+if (!customElements.get('sigenergy-battery-value-card')) {
+  customElements.define('sigenergy-battery-value-card', SigenergyBatteryValueCard);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -6137,6 +6425,90 @@ class SigenergySettingsCard extends HTMLElement {
     } catch (e) { console.error('Sync SoC targets to dashboard failed:', e); }
   }
 
+  _batteryValueToggleHtml(on) {
+    return `
+      <div class="toggle-row">
+        <div class="toggle-text">
+          <div class="toggle-name">🔋 Battery Value</div>
+          <div class="toggle-desc">Show what the energy in the battery is worth, next to Self-Sufficiency and Solar Coverage (set it up in Settings → Pricing)</div>
+        </div>
+        <div class="switch bv-show-switch ${on ? 'on' : 'off'}"></div>
+      </div>`;
+  }
+
+  _bindBatteryValueToggle(el) {
+    el.querySelectorAll('.bv-show-switch').forEach(sw => {
+      sw.addEventListener('click', async () => {
+        const cfg2 = this._storeGet();
+        cfg2.display.show_battery_value = !cfg2.display.show_battery_value;
+        this._storeSave(cfg2);
+        if (this._hass) await this._buildDashboard();
+        if (window._sigenergyReinjectResponsive) window._sigenergyReinjectResponsive();
+        this._render();
+      });
+    });
+  }
+
+  _renderBatteryValueSettings(cfg) {
+    const p = cfg.pricing || {}, e = cfg.entities || {};
+    const hass = this._hass;
+    const cur = this._esc(p.currency || '€');
+    const mode = p.battery_value_mode || 'auto';
+    const ids = _genergyBvEntities(cfg);
+    const cap = hass ? _genergyBatteryKwh(hass, e) : null;
+    const name = (eid) => eid ? `<code>${this._esc(eid)}</code>` : '<span style="color:#e57373;">not set</span>';
+    const sel = (v) => mode === v ? 'selected' : '';
+    const selStyle = 'background:var(--card-background-color,#1a1f2e);color:var(--primary-text-color,#fff);border:1px solid var(--divider-color,#2d3451);border-radius:6px;padding:4px;max-width:240px;';
+    const preview = hass ? _genergyBatteryValue(hass, cfg, () => { if (this._activeTab === 2) this._render(); }) : null;
+    const prevTxt = !preview ? '' : preview.error ? `<span style="color:#e57373;">${this._esc(preview.error)}</span>`
+      : preview.value == null ? 'calculating…'
+      : `<b>${cur}${preview.value.toFixed(2)}</b> = ${preview.kwh.toFixed(1)} kWh × ${cur}${preview.price.toFixed(3)}/kWh${preview.shares ? ` (${Math.round(preview.shares.solar * 100)}% solar, ${Math.round(preview.shares.grid * 100)}% grid)` : ''}`;
+    const priceSensors = hass ? Object.keys(hass.states).filter(k => /\/\s*(k|m)wh$/i.test(String(hass.states[k].attributes?.unit_of_measurement || ''))).sort() : [];
+    const reservePh = (() => { const v = hass ? _genergyBvNum(hass, e.battery_min_soc) : null; return v != null ? `0 (min SoC is ${v}%)` : '0'; })();
+    return `
+      <div class="section">
+        <div class="section-title">🔋 Battery Value Card</div>
+        ${this._batteryValueToggleHtml(!!cfg.display?.show_battery_value)}
+        <div class="row">
+          <span class="row-label">Price per kWh</span>
+          <select class="row-input" data-key="battery_value_mode" style="${selStyle}">
+            <option value="auto" ${sel('auto')}>Automatic: average charge cost</option>
+            <option value="import" ${sel('import')}>Current import price</option>
+            <option value="export" ${sel('export')}>Current export price</option>
+            <option value="manual" ${sel('manual')}>Fixed price</option>
+            <option value="entity" ${sel('entity')}>Price entity</option>
+          </select>
+        </div>
+        ${mode === 'auto' ? `
+        <div class="row">
+          <span class="row-label">Solar energy counts as</span>
+          <select class="row-input" data-key="battery_value_solar" style="${selStyle}">
+            <option value="export" ${(p.battery_value_solar || 'export') === 'export' ? 'selected' : ''}>Lost export income</option>
+            <option value="free" ${p.battery_value_solar === 'free' ? 'selected' : ''}>Free</option>
+          </select>
+        </div>
+        <div style="font-size:10px;color:#666;margin:-2px 0 8px;line-height:1.5;">Replays the last ${_GENERGY_BV_DAYS} days of hourly statistics: battery charge from the grid costs that hour's import price, charge from solar costs that hour's export price (or nothing), and discharge takes energy out at the running average. Updates every 10 minutes.<br>Uses ${name(ids.charge)}, ${name(ids.discharge)}, ${ids.solar.length ? ids.solar.map(name).join(' + ') : name('')}, ${ids.load.length ? ids.load.map(name).join(' + ') : name('')}, ${ids.gridI.length ? ids.gridI.map(name).join(' + ') : name('')}, ${ids.gridE.length ? ids.gridE.map(name).join(' + ') : name('')}, import price ${name(ids.importPrice)}, export price ${name(ids.exportPrice)} (from Settings → Entities).</div>` : ''}
+        ${mode === 'manual' ? `
+        <div class="row">
+          <span class="row-label">Fixed price (${cur}/kWh)</span>
+          <input class="row-input" type="number" step="0.001" min="0" value="${p.battery_value_fixed ?? ''}" data-key="battery_value_fixed" style="width:90px;" />
+        </div>` : ''}
+        ${mode === 'entity' ? `
+        <div class="row">
+          <span class="row-label">Price entity (${cur}/kWh)</span>
+          <input class="row-input" type="text" list="bv-price-list" value="${this._esc(p.battery_value_entity || '')}" data-key="battery_value_entity" placeholder="sensor.…" style="width:190px;" />
+          <datalist id="bv-price-list">${priceSensors.map(k => `<option value="${this._esc(k)}"></option>`).join('')}</datalist>
+        </div>` : ''}
+        ${mode === 'import' || mode === 'export' ? `<div style="font-size:10px;color:#666;margin:-2px 0 8px;">Uses ${name(mode === 'import' ? ids.importPrice : ids.exportPrice)} (from Settings → Entities).</div>` : ''}
+        <div class="row">
+          <span class="row-label">Reserve SoC not counted (%)</span>
+          <input class="row-input" type="number" step="1" min="0" max="100" value="${p.battery_value_reserve ?? ''}" data-key="battery_value_reserve" placeholder="${this._esc(reservePh)}" style="width:70px;" />
+        </div>
+        <div style="font-size:10px;color:#666;margin:-2px 0 8px;">Stored energy = SoC ${name(e.battery_soc)} × capacity ${cap != null ? `<b>${cap.toFixed(2)} kWh</b>` : '<span style="color:#e57373;">unknown: set Battery Capacity (kWh) in Entities</span>'}.</div>
+        <div style="font-size:12px;padding:8px 10px;border-radius:8px;background:rgba(127,179,255,0.08);border:1px solid rgba(127,179,255,0.2);">Now: ${prevTxt}</div>
+      </div>`;
+  }
+
   _renderPricing(el, cfg) {
     const p = cfg.pricing || {};
     el.innerHTML = `
@@ -6170,6 +6542,7 @@ class SigenergySettingsCard extends HTMLElement {
         ${this._toggleHtml('Price Badge', 'Current price on house card', 'show_price_badge', p.show_price_badge)}
         ${this._toggleHtml('Color Coding', 'Green/yellow/red bands', 'show_color_coding', p.show_color_coding)}
       </div>
+      ${this._renderBatteryValueSettings(cfg)}
     `;
 
     // Source buttons
@@ -6203,15 +6576,20 @@ class SigenergySettingsCard extends HTMLElement {
       input.addEventListener('change', () => {
         const cfg2 = this._storeGet();
         const key = input.dataset.key;
-        const val = input.type === 'number' ? parseFloat(input.value) : input.value;
+        const val = input.type === 'number'
+          ? (input.value === '' && key.startsWith('battery_value_') ? '' : parseFloat(input.value))
+          : (key.startsWith('battery_value_') ? input.value.trim() : input.value);
         cfg2.pricing[key] = val;
         this._storeSave(cfg2);
-        if (key === 'currency') this._render();
+        if (key === 'currency' || key.startsWith('battery_value_')) this._render();
       });
     });
 
+    // Battery Value card on/off (a dashboard section: needs a rebuild)
+    this._bindBatteryValueToggle(el);
+
     // Pricing toggles
-    el.querySelectorAll('.switch').forEach(sw => {
+    el.querySelectorAll('.switch:not(.bv-show-switch)').forEach(sw => {
       sw.addEventListener('click', () => {
         const key = sw.dataset.key;
         const cfg2 = this._storeGet();
@@ -6472,7 +6850,6 @@ return [];`;
             entity: e.buy_price, name: 'Import Price', color: '#FFB300',
             type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
             unit: priceUnit, float_precision: 2,
-            group_by: { func: 'avg', duration: '15min' },
             show: { in_header: false, legend_value: true },
             yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
           });
@@ -6498,7 +6875,6 @@ return [];`;
             entity: e.sell_price, name: 'Export Price', color: '#43A047',
             type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
             unit: priceUnit, float_precision: 2,
-            group_by: { func: 'avg', duration: '15min' },
             show: { in_header: false, legend_value: true },
             yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
           });
@@ -6510,7 +6886,6 @@ return [];`;
           entity: e.current_import_price, name: 'Import Price', color: '#FFB300',
           type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
           unit: priceUnit, float_precision: 2,
-          group_by: { func: 'avg', duration: '15min' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
         });
@@ -6520,7 +6895,6 @@ return [];`;
           entity: e.current_export_price, name: 'Export Price', color: '#43A047',
           type: 'area', opacity: 0.08, stroke_width: 2, extend_to: false,
           unit: priceUnit, float_precision: 2,
-          group_by: { func: 'avg', duration: '15min' },
           show: { in_header: false, legend_value: true },
           yaxis_id: 'price', curve: 'stepline', stroke_dash: 3
         });
@@ -7811,13 +8185,44 @@ return __pts;`;
           : 'ha-card { background: transparent !important; border: none !important; box-shadow: none !important; padding: 6px 4px 4px 4px !important; margin-top: 0px !important; font-size: 11px !important; font-weight: 700 !important; letter-spacing: 2.5px !important; text-transform: uppercase !important; color: rgba(0,212,184,0.7) !important; border-bottom: 2px solid rgba(0,212,184,0.3) !important; } ha-markdown { padding: 0 !important; }' }
       });
 
+      // Battery Value card (optional): sits beside Self-Sufficiency / Solar Coverage. Wide
+      // screens: one row of up to 3; phones: the two ratio cards side by side and Battery
+      // Value full width below, so three cards never squeeze into one phone row.
+      const _batteryValueCard = cfg.display?.show_battery_value ? { type: 'custom:sigenergy-battery-value-card' } : null;
+      const _statRowWithBatteryValue = (others) => {
+        if (!others.length) return _batteryValueCard;
+        const names = others.map((_, i) => 'r' + i);
+        const cards = others.map((c, i) => ({ ...c, view_layout: { 'grid-area': names[i] } }));
+        cards.push({ ..._batteryValueCard, view_layout: { 'grid-area': 'bv' } });
+        const wide = [...names, 'bv'];
+        return {
+          type: 'custom:layout-card',
+          layout_type: 'custom:grid-layout',
+          layout: {
+            'grid-template-columns': `repeat(${wide.length}, minmax(0, 1fr))`,
+            'grid-template-areas': `"${wide.join(' ')}"`,
+            'grid-gap': '8px',
+            'padding': '0',
+            mediaquery: {
+              '(max-width: 600px)': {
+                'grid-template-columns': `repeat(${names.length}, minmax(0, 1fr))`,
+                'grid-template-areas': `"${names.join(' ')}" "${names.map(() => 'bv').join(' ')}"`,
+              },
+            },
+          },
+          cards,
+        };
+      };
+
       // Card 2: Apex chart + self-sufficiency (full width)
       if (cfg.display?.show_chart !== false) {
         newCards.push({ ..._sectionDivider('FORECAST', '📈'), view_layout: { 'grid-column': '1 / -1' } });
         const chartStack = [];
         if (f.expandable_forecast) chartStack.push({ type: 'custom:sigenergy-forecast-modal-button' });
         chartStack.push(apexChart);
-        if (selfSuffCard && solarCoverageCard) {
+        if (_batteryValueCard) {
+          chartStack.push(_statRowWithBatteryValue([selfSuffCard, solarCoverageCard].filter(Boolean)));
+        } else if (selfSuffCard && solarCoverageCard) {
           chartStack.push({ type: 'horizontal-stack', cards: [selfSuffCard, solarCoverageCard] });
         } else if (selfSuffCard) {
           chartStack.push(selfSuffCard);
@@ -7825,6 +8230,8 @@ return __pts;`;
           chartStack.push(solarCoverageCard);
         }
         newCards.push({ type: 'vertical-stack', cards: chartStack, view_layout: { 'grid-column': '1 / -1' } });
+      } else if (_batteryValueCard) {
+        newCards.push({ ..._batteryValueCard, view_layout: { 'grid-column': '1 / -1' } });
       }
 
       // Card 6+7: Smart Loads + System Insights side by side in a full-width container
@@ -7837,11 +8244,13 @@ return __pts;`;
           type: 'custom:layout-card',
           layout_type: 'custom:grid-layout',
           layout: {
-            'grid-template-columns': '1fr 1fr',
+            // minmax(0, …): a card's min-content (e.g. a long smart load name) must not widen
+            // the column past the screen (issue #55)
+            'grid-template-columns': 'minmax(0, 1fr) minmax(0, 1fr)',
             'grid-gap': '8px',
             'padding': '0',
             mediaquery: {
-              '(max-width: 1024px)': { 'grid-template-columns': '1fr' }
+              '(max-width: 1024px)': { 'grid-template-columns': 'minmax(0, 1fr)' }
             }
           },
           cards: [smartLoadsCard, insightsCard],
@@ -7959,6 +8368,7 @@ return __pts;`;
         ${this._toggleHtml('Energy Chart', 'Show the ApexCharts time-series power chart', 'show_chart', d.show_chart !== false, 'display')}
         ${this._toggleHtml('Smart Loads', 'Show the smart loads grid (requires Smart Loads enabled in Features)', 'show_smart_loads', d.show_smart_loads !== false, 'display')}
         ${this._toggleHtml('System Insights', 'Show the system insights cards (Battery Health, Capacity, etc.)', 'show_insights', d.show_insights !== false, 'display')}
+        ${this._batteryValueToggleHtml(!!d.show_battery_value)}
       </div>
       <div class="section">
         <div class="section-title">Formatting</div>
@@ -8191,6 +8601,8 @@ return __pts;`;
         this._render();
       });
     }
+
+    this._bindBatteryValueToggle(el);
 
     // Dashboard section visibility toggles
     const _sectionKeys = ['show_house_card', 'show_sankey', 'show_chart', 'show_smart_loads', 'show_insights'];
@@ -11828,7 +12240,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c GENERGY-DASHBOARD %c v2.29.2 ',
+  '%c GENERGY-DASHBOARD %c v2.30.0 ',
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );

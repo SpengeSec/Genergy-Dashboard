@@ -2,6 +2,20 @@
 
 All notable changes to the Genergy Dashboard are documented here.
 
+## [2.30.0] - 2026-11-18
+
+A new optional Battery Value card, a fix for Smart Loads being cut off on phones, and exact price steps on the energy chart. After updating, restart Home Assistant, then **fully reload every open dashboard** (hard refresh in the browser; in the Companion app force-close and reopen it, or use Settings > Companion app > Debugging > Reset frontend cache). Then click **Apply Settings to Dashboard** once (Settings). Clicking Apply in a tab that still runs the old version rebuilds the old dashboard.
+
+### Added
+- **Battery Value card** -- An optional card next to Self-Sufficiency and Solar Coverage that shows what the energy in the battery is worth: stored energy (SoC x capacity, optionally above a reserve SoC) times a price per kWh. Turn it on in Settings > Display > Dashboard Sections or in Settings > Pricing, where you also pick the price:
+  - **Automatic (default):** the average cost of the energy that went in, from the last 7 days of hourly statistics. Battery charge from the grid costs that hour's import price; charge from solar costs that hour's export price (the feed-in you gave up), or nothing if you choose "Free". Discharge takes energy out at the running average. Tap the card to see the solar/grid share.
+  - **Current import price**, **current export price**, a **fixed price**, or **any price sensor**.
+  It uses the entities already set in Settings > Entities (battery SoC and capacity, the daily battery/grid/solar/load energy counters, and the import/export price). Off by default. After turning it on, the dashboard is rebuilt automatically. On phones it gets its own row below the other two cards.
+
+### Fixed
+- **Smart Loads and System Insights cut off on the right on phones** ([#55](https://github.com/SpengeSec/Genergy-Dashboard/issues/55)) -- A smart load with a long name made its tile column wider than the screen, which pushed the whole card (and System Insights beside it) past the right edge. Tiles now always share the width equally, long names wrap to two lines and are then shortened, and the column count also follows the card's own width. The card fix works right after updating; the matching fix in the Smart Loads/Insights row needs **Apply Settings to Dashboard** once.
+- **Price steps drawn up to 15 minutes early on the energy chart** -- The actual import and export price lines were averaged in 15-minute buckets. Those buckets are counted back from "now", not from the quarter hour, so a price change could appear up to 15 minutes before it happened. The lines now follow the price sensor exactly. Needs **Apply Settings to Dashboard** once.
+
 ## [2.29.2] - 2026-10-15
 
 ### Fixed
